@@ -71,6 +71,108 @@ def all_tradable_assets(
     return df.sort_values("symbol").reset_index(drop=True)
 
 
+def build_universe(
+    min_price: float = 3.0,
+    min_dollar_volume: float = 1_000_000,
+    exchanges: tuple[str, ...] = ("NASDAQ", "NYSE"),
+    probe_days: int = 90,
+    batch_size: int = 400,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Baut das handelbare Universum in zwei Stufen.
+
+    Das Henne-Ei-Problem: Um nach Liquiditaet zu filtern, braucht man
+    Kursdaten - aber neun Jahre Historie fuer 8.000 Symbole zu laden, um
+    danach 70 % wegzuwerfen, waere Verschwendung.
+
+    Loesung:
+      Stufe 1: alle handelbaren Symbole (1 Request)
+      Stufe 2: nur ein kurzes Fenster fuer ALLE laden (~80 Requests),
+               daraus Kurs und Umsatz bestimmen und filtern
+      Stufe 3: die volle Historie dann nur noch fuer die Ueberlebenden
+
+    ARCA wird standardmaessig ausgeschlossen - dort liegen fast nur ETFs,
+    und ein ETF ist keine Einzelaktie mit firmenspezifischem Signal.
+    """
+    from .data import get_bars
+
+    assets = all_tradable_assets(exchanges=exchanges)
+    symbols = assets["symbol"].tolist()
+    if verbose:
+        print(f"      Stufe 1: {len(symbols):,} handelbare Symbole "
+              f"({', '.join(exchanges)})")
+
+    rows: list[dict] = []
+    n_batches = (len(symbols) + batch_size - 1) // batch_size
+    for i in range(0, len(symbols), batch_size):
+        chunk = symbols[i : i + batch_size]
+        try:
+            bars = get_bars(chunk, "1D", lookback_days=probe_days)
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"      Batch {i // batch_size + 1}: {type(e).__name__}")
+            continue
+        if bars.empty:
+            continue
+        for sym in bars.index.get_level_values("symbol").unique():
+            df = bars.xs(sym, level="symbol")
+            if len(df) < probe_days * 0.5:
+                continue  # zu viele fehlende Tage = illiquide oder neu
+            price = float(df["close"].median())
+            dvol = float((df["close"] * df["volume"]).median())
+            rows.append({"symbol": sym, "price": price, "dollar_volume": dvol,
+                         "bars": len(df)})
+        if verbose:
+            print(f"      Stufe 2: Batch {i // batch_size + 1}/{n_batches} "
+                  f"-> {len(rows):,} mit Daten")
+
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "price", "dollar_volume", "bars"])
+
+    df = pd.DataFrame(rows)
+    keep = df[(df["price"] >= min_price) & (df["dollar_volume"] >= min_dollar_volume)]
+    keep = keep.merge(assets[["symbol", "exchange", "shortable"]], on="symbol", how="left")
+
+    if verbose:
+        print(f"      Stufe 2 fertig: {len(df):,} mit Daten, "
+              f"{len(keep):,} nach Filter "
+              f"(Kurs >= ${min_price:g}, Umsatz >= ${min_dollar_volume:,.0f}/Tag)")
+    return keep.sort_values("dollar_volume", ascending=False).reset_index(drop=True)
+
+
+def fetch_history(
+    symbols: list[str], years: float = 5.0, batch_size: int = 300,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """Laedt die volle Historie fuer viele Symbole in Batches.
+
+    Ein einzelner Request ueber tausende Symbole laeuft in Zeitueberschreitungen.
+    Batches sind langsamer zu schreiben, aber die einzige Variante, die bei
+    dieser Groessenordnung durchlaeuft.
+    """
+    from .data import get_bars
+
+    frames = []
+    n_batches = (len(symbols) + batch_size - 1) // batch_size
+    for i in range(0, len(symbols), batch_size):
+        chunk = symbols[i : i + batch_size]
+        try:
+            b = get_bars(chunk, "1D", lookback_days=int(years * 365))
+            if not b.empty:
+                frames.append(b)
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"      Batch {i // batch_size + 1}: {type(e).__name__}: {e}")
+            continue
+        if verbose:
+            total = sum(len(f) for f in frames)
+            print(f"      Batch {i // batch_size + 1}/{n_batches} -> {total:,} Bars")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames).sort_index()
+
+
 def liquid_universe(
     bars: pd.DataFrame,
     min_price: float = 5.0,
