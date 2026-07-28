@@ -20,10 +20,13 @@ denen er klein genug fuer eine erste Validierung ist.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 from alpaca.trading.requests import GetAssetsRequest
 
 from .clients import trading_client
+from .config import PROJECT_ROOT
 from .ratelimit import RateLimiter
 
 _limit = RateLimiter("alpaca_trading")
@@ -69,6 +72,37 @@ def all_tradable_assets(
     if exchanges:
         df = df[df["exchange"].isin(exchanges)]
     return df.sort_values("symbol").reset_index(drop=True)
+
+
+UNIVERSE_FILE = PROJECT_ROOT / "results" / "factor_lab" / "universum.csv"
+
+
+def load_universe(
+    path: Path | str | None = None, max_symbols: int | None = None
+) -> list[str]:
+    """Laedt das gemessene Universum aus der Datei von `build_universe`.
+
+    WICHTIG fuer die Strategiewahl: Die Umkehr-Faktoren wurden auf 2.162
+    Symbolen als stabil nachgewiesen (100 % positive Jahre). Auf den 150
+    liquidesten Werten allein war derselbe Effekt NICHT nachweisbar
+    (rsi2: 29 % positive Jahre). Wer die Strategie auf einer kleinen
+    Liste von Standardwerten laufen laesst, handelt sie genau dort, wo
+    sie gemessen nicht funktioniert.
+
+    Die fest verdrahteten Listen in BENCHMARK_SETS sind fuer Tests und
+    Vergleiche gedacht - nicht fuer den Produktivbetrieb.
+    """
+    p = Path(path) if path else UNIVERSE_FILE
+    if not p.exists():
+        raise FileNotFoundError(
+            f"{p} fehlt. Universum zuerst aufbauen:\n"
+            "  python scripts/11_factor_lab.py --max-symbols 2500"
+        )
+    df = pd.read_csv(p)
+    if "dollar_volume" in df.columns:
+        df = df.sort_values("dollar_volume", ascending=False)
+    syms = df["symbol"].dropna().astype(str).tolist()
+    return syms[:max_symbols] if max_symbols else syms
 
 
 def build_universe(

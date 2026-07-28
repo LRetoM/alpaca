@@ -33,8 +33,12 @@ from alpaca_bot.state import Store
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--universe", default="broad_liquid",
-                   choices=list(universe.BENCHMARK_SETS))
+    p.add_argument("--universe", default="gemessen",
+                   help="'gemessen' = die 2.100+ Werte aus dem Faktor-Labor "
+                        "(dort wurde die Strategie validiert), sonst eine "
+                        f"feste Liste: {', '.join(universe.BENCHMARK_SETS)}")
+    p.add_argument("--max-symbols", type=int, default=1200,
+                   help="Obergrenze beim gemessenen Universum (Laufzeit je Durchgang)")
     p.add_argument("--symbols", nargs="*", default=None)
     p.add_argument("--live", action="store_true",
                    help="Orders wirklich senden (im Papierdepot)")
@@ -58,11 +62,16 @@ def main() -> int:
         print("  echtes Geld waere hier nicht vertretbar.")
         return 1
 
-    symbols = (
-        [x.upper() for x in args.symbols]
-        if args.symbols
-        else universe.BENCHMARK_SETS[args.universe]
-    )
+    if args.symbols:
+        symbols = [x.upper() for x in args.symbols]
+    elif args.universe == "gemessen":
+        try:
+            symbols = universe.load_universe(max_symbols=args.max_symbols)
+        except FileNotFoundError as e:
+            print(f"  {e}")
+            return 1
+    else:
+        symbols = universe.BENCHMARK_SETS[args.universe]
 
     engine = (
         EngineConfig.for_reversal(max_positions=args.positions)

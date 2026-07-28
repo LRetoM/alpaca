@@ -80,6 +80,7 @@ class Daemon:
         self.journal = Journal()
         self._stop = False
         self._errors = 0
+        self._last_evaluation: dt.date | None = None
 
         # Auf Beendigungssignale sauber reagieren, damit der Zustand
         # konsistent bleibt und der Dienst nicht in einer Schleife haengt.
@@ -157,6 +158,36 @@ class Daemon:
             "daytrades": int(acct.get("daytrade_count") or 0),
         }
 
+    def _maybe_evaluate_outcomes(self) -> None:
+        """Ordnet einmal taeglich jeder Entscheidung ihr Ergebnis zu.
+
+        Das ist der Schritt, der aus Protokoll Lernen macht: Ohne ihn
+        bleibt `journal.decision_quality()` leer, und die Frage "welche
+        Begruendung hat sich bewaehrt" ist nicht zu beantworten.
+
+        Nur einmal je Kalendertag, weil dafuer Kursdaten geladen werden.
+        """
+        today = dt.date.today()
+        if self._last_evaluation == today:
+            return
+        try:
+            from . import data
+            from .journal import make_price_lookup
+
+            decisions = self.journal.table("decisions")
+            if decisions.empty:
+                self._last_evaluation = today
+                return
+            symbols = sorted(decisions["symbol"].dropna().unique())[:200]
+            bars = data.get_bars(symbols, "1D", lookback_days=120)
+            n = self.journal.evaluate_outcomes(
+                make_price_lookup(bars), horizons=(1, 3, 5)
+            )
+            print(f"      {n} Ergebnis(se) zu Entscheidungen nachgetragen")
+            self._last_evaluation = today
+        except Exception as e:  # noqa: BLE001
+            print(f"      Ergebnisbewertung fehlgeschlagen: {type(e).__name__}: {e}")
+
     # --- Handelsfenster ----------------------------------------------------
     def trading_window(self) -> tuple[bool, str]:
         """Darf jetzt gehandelt werden?"""
@@ -188,6 +219,18 @@ class Daemon:
             print(f"  [{dt.datetime.now():%H:%M:%S}] kein Handel: {reason}")
             self.store.heartbeat(ok=True)
             return True
+
+        # Ausfuehrungspreise der letzten Orders nachtragen. Muss VOR dem
+        # Entscheiden passieren, damit die Slippage-Auswertung vollstaendig
+        # bleibt, auch wenn der Prozess zwischendurch neu gestartet wurde.
+        try:
+            filled = live.reconcile_fills()
+            if filled:
+                print(f"      {filled} Ausfuehrungspreis(e) nachgetragen")
+        except Exception as e:  # noqa: BLE001 - darf den Lauf nicht stoppen
+            print(f"      Fuellpreis-Abgleich fehlgeschlagen: {type(e).__name__}")
+
+        self._maybe_evaluate_outcomes()
 
         state = self.recover()
         print(f"  [{dt.datetime.now():%H:%M:%S}] Kapital "

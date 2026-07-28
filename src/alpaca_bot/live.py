@@ -67,7 +67,25 @@ def build_snapshot(
     waere als das geprueft wurde.
     """
     requested = list(dict.fromkeys([*symbols, MARKET_SYMBOL]))
-    bars = data.get_bars(requested, "1D", lookback_days=lookback_days)
+
+    # In Bloecken laden: ein einzelner Request ueber tausende Symbole
+    # sprengt die URL-Laenge. Die Drossel in data.get_bars zaehlt jeden
+    # Block einzeln, das Kontingent bleibt also gewahrt.
+    batch = 300
+    if len(requested) <= batch:
+        bars = data.get_bars(requested, "1D", lookback_days=lookback_days)
+    else:
+        frames = []
+        for i in range(0, len(requested), batch):
+            part = data.get_bars(
+                requested[i : i + batch], "1D", lookback_days=lookback_days
+            )
+            if not part.empty:
+                frames.append(part)
+            if verbose:
+                print(f"      Daten: {i + batch if i + batch < len(requested) else len(requested)}"
+                      f"/{len(requested)} Symbole")
+        bars = pd.concat(frames).sort_index() if frames else pd.DataFrame()
     if bars.empty:
         raise RuntimeError("Keine Marktdaten erhalten.")
 
@@ -109,28 +127,61 @@ def build_snapshot(
 
 
 def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
-    """Liest den echten Kontostand und die offenen Positionen.
+    """Liest Kontostand und Positionen - Broker plus gespeicherter Zustand.
 
-    Stop- und Zielmarken werden aus dem Einstiegskurs rekonstruiert, da
-    Alpaca sie nicht zur Position speichert. Solange Bracket-Orders nicht
-    aktiv sind, ist das die verlaesslichste Naeherung.
+    Aufgabenteilung:
+        Alpaca        welche Positionen es gibt, Stueckzahl, Einstand
+        state.sqlite  Stop, Ziel, Einstiegsdatum, Hoechststand
+
+    Beides ist noetig. Alpaca kennt Stop und Ziel nicht, und ohne sie
+    kaeme die Engine bei jedem Lauf zu anderen Ausstiegsentscheidungen
+    als in der Simulation.
+
+    `bars_held` wird aus dem Einstiegsdatum in Handelstagen berechnet.
+    Ohne diesen Wert wuerde der Zeitausstieg nach `max_hold_days` nie
+    ausloesen und Positionen liefen unbegrenzt weiter - der Backtest
+    haette dann eine Haltedauer simuliert, die es live nicht gibt.
     """
+    from .state import Store
+
     acct = account.account_summary()
     pos_df = account.positions()
+    stored = Store().load_positions()
+    today = pd.Timestamp.now(tz="UTC").normalize()
 
     positions: dict[str, Position] = {}
     for sym, row in pos_df.iterrows():
         if float(row["qty"]) <= 0:
             continue
         entry = float(row["avg_entry"])
+        current = float(row.get("current_price") or entry)
+        meta = stored.get(sym)
+
+        if meta:
+            entry_date = pd.Timestamp(meta["entry_date"])
+            if entry_date.tz is None:
+                entry_date = entry_date.tz_localize("UTC")
+            stop = float(meta["stop_price"])
+            target = float(meta["target_price"])
+            high_water = max(current, float(meta["high_water"]))
+        else:
+            # Position ohne gespeicherten Zustand (manuell gekauft oder
+            # Datenbank verloren): konservativ ergaenzen statt ignorieren.
+            entry_date = today
+            stop, target = entry * 0.93, entry * 1.10
+            high_water = max(entry, current)
+
+        held = int(len(pd.bdate_range(entry_date.normalize(), today)) - 1)
+
         positions[sym] = Position(
             symbol=sym,
             qty=float(row["qty"]),
             entry_price=entry,
-            entry_date=pd.Timestamp.now(tz="UTC").normalize(),
-            stop_price=entry * 0.90,
-            target_price=entry * 1.25,
-            high_water=max(entry, float(row.get("current_price") or entry)),
+            entry_date=entry_date,
+            stop_price=stop,
+            target_price=target,
+            bars_held=max(0, held),
+            high_water=high_water,
         )
 
     return PortfolioState(
@@ -139,6 +190,55 @@ def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
         positions=positions,
         day_trades_used=int(acct.get("daytrade_count") or 0),
     )
+
+
+def reconcile_fills(lookback_hours: int = 48) -> int:
+    """Traegt die tatsaechlichen Ausfuehrungspreise ins Protokoll nach.
+
+    Eine Market-Order ist beim Absenden noch nicht ausgefuehrt - der
+    Fuellpreis steht erst Sekunden bis Minuten spaeter fest. Deshalb wird
+    er nicht beim Senden, sondern beim naechsten Durchgang nachgetragen.
+
+    Ohne diesen Schritt bleibt `journal.slippage_report()` leer, und die
+    wichtigste Frage des Papierbetriebs waere nicht zu beantworten: Wie
+    weit weicht die echte Ausfuehrung von der im Backtest angenommenen ab?
+    """
+    import datetime as dt
+
+    from .journal import Journal
+
+    j = Journal()
+    open_orders = j.table("orders", "dry_run = 0 AND fill_price IS NULL")
+    if open_orders.empty:
+        return 0
+
+    since = dt.datetime.now(dt.UTC) - dt.timedelta(hours=lookback_hours)
+    broker = account.orders(status="closed", limit=500, after=since)
+    if broker.empty:
+        return 0
+
+    fills = {
+        str(r["id"]): float(r["filled_avg_price"])
+        for _, r in broker.iterrows()
+        if r.get("filled_avg_price")
+    }
+
+    updated = 0
+    with j._conn() as c:
+        for _, o in open_orders.iterrows():
+            price = fills.get(str(o["order_id"]))
+            if price is None or not o.get("expected_price"):
+                continue
+            expected = float(o["expected_price"])
+            slip = (price - expected) / expected * 10_000
+            if o["side"] == "sell":
+                slip = -slip
+            c.execute(
+                "UPDATE orders SET fill_price = ?, slippage_bps = ? WHERE order_id = ?",
+                (price, slip, o["order_id"]),
+            )
+            updated += 1
+    return updated
 
 
 def run_once(

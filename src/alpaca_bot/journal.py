@@ -247,46 +247,67 @@ class Journal:
                 written += 1
         return written
 
-    def decision_quality(self, horizon: int = 5) -> pd.DataFrame:
+    def decision_quality(self, horizon: int = 5,
+                         script: str | None = None) -> pd.DataFrame:
         """Welche Begruendung hat sich tatsaechlich bewaehrt?
 
         Die wichtigste Auswertung im ganzen System. Sie beantwortet nicht
         "hat der Bot Geld verdient", sondern "welcher Teil seiner Logik
         war richtig" - und nur das laesst sich gezielt verbessern.
         """
+        # `script` trennt Live-Betrieb von Simulation. Ohne diese Trennung
+        # mischt die Auswertung tausende Backtest-Entscheidungen mit den
+        # wenigen echten - und die Kennzahl beschreibt dann die Simulation,
+        # nicht das Depot.
+        sql = (
+            "SELECT d.decision_id, d.symbol, d.action, d.strategy, d.reasons,"
+            "       d.conviction, d.executed, o.fwd_return"
+            " FROM decisions d"
+            " JOIN outcomes o ON d.decision_id = o.decision_id"
+            " JOIN runs r ON d.run_id = r.run_id"
+            " WHERE o.horizon = ?"
+        )
+        params: tuple = (horizon,)
+        if script:
+            sql += " AND r.script = ?"
+            params = (horizon, script)
         with self._conn() as c:
-            df = pd.read_sql_query(
-                "SELECT d.decision_id, d.symbol, d.action, d.strategy, d.reasons,"
-                "       d.conviction, d.executed, o.fwd_return"
-                " FROM decisions d JOIN outcomes o ON d.decision_id = o.decision_id"
-                " WHERE o.horizon = ?",
-                c,
-                params=(horizon,),
-            )
+            df = pd.read_sql_query(sql, c, params=params)
         if df.empty:
             return pd.DataFrame()
 
-        # Jede einzelne Begruendung wird zu einer eigenen Zeile.
+        # Gruppiert wird nach Begruendung UND ihrem Wert.
+        #
+        # Nach dem blossen Namen zu gruppieren waere sinnlos: Jede
+        # Kaufentscheidung enthaelt jeden Schluessel, also bekaemen alle
+        # Begruendungen exakt dieselbe Kennzahl. Erst der Wert trennt -
+        # "ausstiegsgrund = stop_ausgeloest" gegen "= gewinnziel_erreicht",
+        # oder "score 0.9-1.0" gegen "score 0.3-0.5".
         rows = []
         for _, r in df.iterrows():
             try:
                 reasons = json.loads(r["reasons"] or "{}")
             except json.JSONDecodeError:
                 reasons = {}
-            keys = list(reasons) if isinstance(reasons, dict) else [str(reasons)]
-            for k in keys or ["(ohne Begruendung)"]:
-                rows.append({"grund": k, "action": r["action"],
+            if not isinstance(reasons, dict) or not reasons:
+                rows.append({"grund": "(ohne Begruendung)", "wert": "-",
                              "fwd_return": r["fwd_return"]})
+                continue
+            for key, value in reasons.items():
+                rows.append({"grund": key, "wert": _bucket(value),
+                             "fwd_return": r["fwd_return"]})
+
         long = pd.DataFrame(rows)
         if long.empty:
             return pd.DataFrame()
 
-        agg = long.groupby("grund")["fwd_return"].agg(
-            n="size", mittel="mean", median="median", trefferquote=lambda s: (s > 0).mean()
+        agg = long.groupby(["grund", "wert"])["fwd_return"].agg(
+            n="size", mittel="mean", median="median",
+            trefferquote=lambda s: (s > 0).mean(),
         )
-        agg["erwartungswert"] = agg["mittel"]
-        agg = agg.sort_values("n", ascending=False)
-        return agg.round(4)
+        # Gruppen mit sehr wenigen Faellen sind Rauschen.
+        agg = agg[agg["n"] >= 5]
+        return agg.sort_values(["grund", "mittel"], ascending=[True, False]).round(4)
 
     def slippage_report(self) -> pd.DataFrame:
         """Erwarteter gegen tatsaechlichen Ausfuehrungspreis.
@@ -526,6 +547,28 @@ class RunLogger:
             self._raw.flush()
         except (OSError, ValueError):
             pass
+
+
+def _bucket(value) -> str:
+    """Fasst einen Begruendungswert zu einer auswertbaren Gruppe zusammen.
+
+    Zahlen werden in Baender gelegt, weil jeder einzelne Messwert sonst
+    seine eigene Gruppe mit n=1 bilden wuerde - daraus laesst sich nichts
+    lernen. Wahrheitswerte und Text bleiben, wie sie sind.
+    """
+    if isinstance(value, bool):
+        return "ja" if value else "nein"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        v = float(value)
+        if not np.isfinite(v):
+            return "n/a"
+        if -1e-9 <= v <= 1 + 1e-9:
+            lo = int(v * 5) / 5  # Fuenftel-Baender fuer 0..1-Werte
+            return f"{min(lo, 0.8):.1f}-{min(lo + 0.2, 1.0):.1f}"
+        if abs(v) < 1:
+            return f"{'+' if v >= 0 else '-'}{abs(v):.0%}-Bereich"
+        return f"{'niedrig' if abs(v) < 10 else 'mittel' if abs(v) < 100 else 'hoch'}"
+    return str(value)[:30]
 
 
 def make_price_lookup(bars: pd.DataFrame):
