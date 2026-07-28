@@ -158,6 +158,132 @@ def build_signal_frame(
     return out
 
 
+@dataclass
+class ReversalWeights:
+    """Gewichte fuer die Kurzfrist-Umkehr - jeder Baustein ist gemessen.
+
+    Grundlage ist der Messlauf ueber 2.162 Symbole und 9 Jahre
+    (scripts/11_factor_lab.py). Aufgenommen wurde nur, was in JEDEM
+    einzelnen Jahr das gleiche Vorzeichen hatte - einschliesslich Q4 2018,
+    dem Corona-Einbruch 2020 und dem Baerenmarkt 2022:
+
+        reversal_3d   IC +0.018   100 % positive Jahre
+        reversal_2d   IC +0.017   100 %
+        rsi2          IC +0.016   100 %
+        ausverkauf    IC +0.010   100 %
+        bb_unten      IC +0.011    89 %
+
+    Die Bausteine messen im Kern dasselbe und sind entsprechend stark
+    korreliert. Die Gewichtung dient der Glaettung, nicht der Addition
+    unabhaengiger Information - fuenf Messungen desselben Effekts sind
+    nicht fuenfmal so viel Signal.
+    """
+
+    rueckgang: float = 0.35
+    """Kursrueckgang der letzten 2-3 Tage (reversal_2d/3d)."""
+    rsi2: float = 0.25
+    """RSI(2) - der schaerfste kurzfristige Ueberverkauft-Anzeiger."""
+    ausverkauf: float = 0.25
+    """Rueckgang MIT erhoehtem Volumen - Kapitulation statt Abbroeckeln."""
+    band_unten: float = 0.15
+    """Lage im unteren Bollinger-Band."""
+
+    market_regime_filter: bool = True
+    """Nur kaufen, wenn der Gesamtmarkt ueber seinem 200-Tage-Schnitt liegt.
+
+    Wichtig: MARKT-Regime, nicht Aktien-Regime. Der aktienbezogene Filter
+    hatte im Messlauf negativen IC - gefallene Aktien sind ja genau das
+    Ziel. Der Marktfilter verhindert dagegen, dass in einen Crash hinein
+    gekauft wird, wo Umkehrstrategien historisch am meisten verlieren."""
+
+    max_volatility: float = 1.50
+    min_price: float = 3.0
+
+
+def build_reversal_frame(
+    df: pd.DataFrame,
+    market: pd.Series | None = None,
+    weights: ReversalWeights | None = None,
+) -> pd.DataFrame:
+    """Kurzfrist-Umkehr-Signal aus nachweislich stabilen Bausteinen.
+
+    Args:
+        df: OHLCV eines Symbols.
+        market: Schlusskurse eines Marktindex (z. B. SPY) fuer den
+            Regime-Filter. Fehlt er, entfaellt der Filter.
+    """
+    w = weights or ReversalWeights()
+    c = df["close"].astype(float)
+    out = pd.DataFrame(index=df.index)
+
+    # --- Baustein 1: Rueckgang der letzten Tage (je staerker, desto besser) ---
+    ret2, ret3 = c.pct_change(2), c.pct_change(3)
+    out["ret_2d"], out["ret_3d"] = ret2, ret3
+    # -8 % oder tiefer = voller Wert, positive Rendite = 0
+    out["f_rueckgang"] = ((-0.5 * ret2 - 0.5 * ret3) / 0.08).clip(0, 1).fillna(0.0)
+
+    # --- Baustein 2: RSI(2) ---
+    r2 = ind.rsi(c, 2)
+    out["rsi_2"] = r2
+    out["f_rsi2"] = ((20 - r2) / 20).clip(0, 1).fillna(0.0)
+
+    # --- Baustein 3: Ausverkauf (Rueckgang MIT Volumen) ---
+    if "volume" in df.columns:
+        dv = df["volume"].astype(float) * c
+        vz = ind.zscore(dv, 20)
+        out["volumen_z"] = vz
+        out["f_ausverkauf"] = (
+            (-ret3).clip(lower=0) / 0.08 * (vz / 2).clip(0, 1)
+        ).clip(0, 1).fillna(0.0)
+        out["dollar_volume"] = dv.rolling(20).mean()
+    else:
+        out["f_ausverkauf"] = 0.0
+        out["dollar_volume"] = np.nan
+
+    # --- Baustein 4: unteres Bollinger-Band ---
+    bb = ind.bollinger(c, 20)
+    out["f_band_unten"] = (1 - bb["bb_pct"]).clip(0, 1).fillna(0.0)
+
+    # --- Filter ---
+    vol = ind.realized_volatility(c, 20)
+    out["volatility"] = vol
+    out["atr"] = ind.atr(df, 14) if {"high", "low"}.issubset(df.columns) else np.nan
+    out["atr_pct"] = out["atr"] / c
+
+    gate = ((vol < w.max_volatility) & (c >= w.min_price)).astype(float)
+
+    if w.market_regime_filter and market is not None:
+        mkt = market.reindex(df.index).ffill()
+        out["markt_ok"] = (mkt > ind.sma(mkt, 200)).astype(float)
+        gate = gate * out["markt_ok"].fillna(0.0)
+    else:
+        out["markt_ok"] = 1.0
+
+    out["score"] = (
+        w.rueckgang * out["f_rueckgang"]
+        + w.rsi2 * out["f_rsi2"]
+        + w.ausverkauf * out["f_ausverkauf"]
+        + w.band_unten * out["f_band_unten"]
+    ).mul(gate).fillna(0.0)
+
+    return out
+
+
+def explain_reversal(row: pd.Series) -> dict:
+    """Zerlegt einen Umkehr-Score fuer das Protokoll."""
+    return {
+        "score": round(float(row.get("score", 0)), 4),
+        "rueckgang_3d": round(float(row.get("ret_3d", 0) or 0), 4),
+        "rsi2": round(float(row.get("rsi_2", 0) or 0), 1),
+        "f_ausverkauf": round(float(row.get("f_ausverkauf", 0)), 3),
+        "f_band_unten": round(float(row.get("f_band_unten", 0)), 3),
+        "volumen_z": round(float(row.get("volumen_z", 0) or 0), 2),
+        "markt_ok": bool(row.get("markt_ok", 1)),
+        "volatilitaet": round(float(row.get("volatility", 0) or 0), 3),
+        "atr_pct": round(float(row.get("atr_pct", 0) or 0), 4),
+    }
+
+
 def explain(row: pd.Series, weights: SignalWeights | None = None) -> dict:
     """Zerlegt einen Score in seine Bestandteile - fuer das Protokoll.
 

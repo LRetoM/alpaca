@@ -49,6 +49,7 @@ CHARTER = {
         "Kein Zeitreihen-Split mit shuffle=True.",
         "Jede Strategie wird gegen Buy & Hold UND gegen die Basisrate gemessen.",
         "Jede RL-Politik wird gegen den Timing-Test gemessen, nicht gegen die Rendite.",
+        "Live-Handel und Simulation nutzen DIESELBE Engine.decide().",
         "Jede Entscheidung wird mit Begruendung protokolliert - auch die blockierten.",
         "Kosten werden immer mitgerechnet, nie nachtraeglich abgezogen.",
         "Keine Zugangsdaten im Code oder im Repository.",
@@ -169,6 +170,48 @@ def check_rate_limiting(report: CheckReport) -> None:
                 "Jeder API-Aufruf durch die Drossel",
                 f"{path.name} ruft eine externe API, ohne ratelimit einzubinden.",
                 str(path.relative_to(PROJECT_ROOT)),
+            )
+
+
+def check_single_decision_path(report: CheckReport) -> None:
+    """Der Live-Pfad MUSS dieselbe Engine benutzen wie die Simulation.
+
+    Diese Pruefung existiert, weil genau dieser Bruch schon einmal
+    unbemerkt entstanden ist: `simulate.py` wurde auf die Engine
+    umgestellt, `05_paper_trade.py` blieb auf dem alten Strategiepfad.
+    Damit haette im Depot eine andere Logik gehandelt als geprueft wurde -
+    der teuerste denkbare Fehler in diesem Projekt, und keine der
+    damaligen Pruefungen hat ihn bemerkt.
+    """
+    report.checks_run += 1
+
+    trading_modules = {
+        "live.py": SRC / "live.py",
+        "simulate.py": SRC / "simulate.py",
+    }
+    for name, path in trading_modules.items():
+        if not path.exists():
+            report.add("verstoss", "Ein Entscheidungspfad",
+                       f"{name} fehlt - Live und Simulation koennen nicht "
+                       "dieselbe Logik nutzen.", name)
+            continue
+        text = path.read_text()
+        if "Engine" not in text or "decide(" not in text:
+            report.add("verstoss", "Ein Entscheidungspfad",
+                       f"{name} ruft Engine.decide() nicht auf.", name)
+
+    # Kein Handelsskript darf noch am alten Strategiepfad haengen.
+    for path in SCRIPTS.glob("*.py"):
+        text = path.read_text()
+        places_orders = "trading.market_order" in text or "live.run_once" in text
+        uses_old = "strategies.get(" in text
+        if places_orders and uses_old:
+            report.add(
+                "verstoss",
+                "Ein Entscheidungspfad",
+                f"{path.name} platziert Orders, benutzt aber strategies.get() "
+                "statt der Engine. Simulation und Live wuerden auseinanderlaufen.",
+                path.name,
             )
 
 
@@ -343,6 +386,7 @@ def run_all() -> CheckReport:
     report = CheckReport()
     for check in (
         check_dry_run_defaults,
+        check_single_decision_path,
         check_rate_limiting,
         check_no_shuffle_split,
         check_no_secrets,

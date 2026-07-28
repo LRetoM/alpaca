@@ -34,7 +34,14 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .signals import SignalWeights, build_signal_frame, explain
+from .signals import (
+    ReversalWeights,
+    SignalWeights,
+    build_reversal_frame,
+    build_signal_frame,
+    explain,
+    explain_reversal,
+)
 
 
 @dataclass
@@ -66,6 +73,8 @@ class MarketSnapshot:
     bars: dict[str, pd.DataFrame]
     """Symbol -> OHLCV bis einschliesslich as_of."""
     insider: dict[str, pd.DataFrame] = field(default_factory=dict)
+    market: pd.Series | None = None
+    """Schlusskurse eines Marktindex (SPY) bis as_of - fuer den Regime-Filter."""
     signals: dict[str, pd.DataFrame] = field(default_factory=dict)
     """Optional vorberechnete Signale, ebenfalls bis as_of geschnitten.
 
@@ -149,6 +158,16 @@ class EngineConfig:
     """Unter diesem Betrag frisst der Spread den Vorsprung. Bei kleinem
     Konto lieber wenige, groessere Positionen als viele Miniaturen."""
 
+    max_order_notional: float | None = None
+    """Harte Obergrenze je Order in USD. None = Wert aus der .env
+    (MAX_ORDER_NOTIONAL) uebernehmen.
+
+    Diese Grenze MUSS in die Groessenberechnung einfliessen, nicht erst in
+    die Risikopruefung danach. Sonst schlaegt die Engine Betraege vor, die
+    `trading._check_risk` zwangslaeufig ablehnt - jede Entscheidung
+    scheitert, das Protokoll fuellt sich mit Fehlschlaegen, und im
+    Backtest (wo die Schranke fehlte) sah alles anders aus als live."""
+
     min_score: float = 0.55
     """Ab wann gilt ein Wert als Kandidat."""
 
@@ -176,7 +195,39 @@ class EngineConfig:
     """Untergrenze. Darunter fressen Spreads den Vorsprung
     (siehe costs.breakeven_move_pct)."""
 
+    strategy: str = "reversal"
+    """'reversal' = Kurzfrist-Umkehr (gemessen stabil, siehe signals.ReversalWeights)
+    'momentum'  = der urspruengliche Mehrfaktor-Score (im Test unterlegen)"""
+
     weights: SignalWeights = field(default_factory=SignalWeights)
+    reversal_weights: ReversalWeights = field(default_factory=ReversalWeights)
+
+    @classmethod
+    def for_reversal(cls, **overrides) -> EngineConfig:
+        """Voreinstellungen fuer die Kurzfrist-Umkehr.
+
+        Die Haltedauer MUSS zum Horizont passen, auf dem der Effekt
+        gemessen wurde (3-5 Tage). Genau dieser Fehler hat den ersten
+        Anlauf ruiniert: Momentum-Faktoren mit 3-12-Monats-Wirkung wurden
+        mit 17 Tagen Haltedauer gehandelt.
+
+        Enge Ziele und Stops, kurze Haltedauer, hoher Umschlag - dafuer
+        muss der Vorsprung je Trade die Kosten deutlich uebersteigen.
+        Ob er das tut, entscheidet die Simulation, nicht die Hoffnung.
+        """
+        defaults = dict(
+            strategy="reversal",
+            min_score=0.35,
+            exit_score=0.10,
+            stop_atr=2.0,
+            target_atr=2.0,
+            trail_after_atr=99.0,   # kein Trailing bei so kurzer Haltedauer
+            max_hold_days=5,        # der Effekt lebt auf 3-5 Tagen
+            max_positions=15,
+            min_dollar_volume=1_000_000,
+        )
+        defaults.update(overrides)
+        return cls(**defaults)
 
 
 class Engine:
@@ -196,6 +247,10 @@ class Engine:
         pre = snapshot.signals.get(symbol)
         if pre is not None and not pre.empty:
             return pre
+        if self.cfg.strategy == "reversal":
+            return build_reversal_frame(
+                snapshot.bars[symbol], snapshot.market, self.cfg.reversal_weights
+            )
         return build_signal_frame(
             snapshot.bars[symbol], snapshot.insider.get(symbol), self.cfg.weights
         )
@@ -318,7 +373,21 @@ class Engine:
         )
         free = max(0.0, min(investable - already, portfolio.cash))
         per_slot = free / max(1, len(chosen))
+
+        # Bindende Obergrenze ist die STRENGERE aus Portfolioanteil und
+        # harter Order-Schranke. Beide muessen hier greifen, damit die
+        # Simulation dieselben Groessen rechnet, die live durchkommen.
         cap = portfolio.equity * cfg.max_position_pct
+        hard_cap = cfg.max_order_notional
+        if hard_cap is None:
+            try:
+                from .config import get_settings
+
+                hard_cap = get_settings().max_order_notional
+            except Exception:  # noqa: BLE001 - ohne .env laeuft die Simulation weiter
+                hard_cap = None
+        if hard_cap:
+            cap = min(cap, float(hard_cap))
 
         out: list[Decision] = []
         for sym, score, row, price in chosen:
@@ -337,7 +406,8 @@ class Engine:
             stop = price - cfg.stop_atr * atr if atr > 0 else price * 0.90
             target = price + cfg.target_atr * atr if atr > 0 else price * 1.25
 
-            reasons = explain(row, cfg.weights)
+            reasons = (explain_reversal(row) if cfg.strategy == "reversal"
+                       else explain(row, cfg.weights))
             reasons["rang"] = len(out) + 1
             reasons["stop_abstand_pct"] = round(1 - stop / price, 4)
             reasons["ziel_abstand_pct"] = round(target / price - 1, 4)

@@ -150,6 +150,7 @@ def run(
     engine_config: EngineConfig | None = None,
     sim_config: SimConfig | None = None,
     insider: dict[str, pd.DataFrame] | None = None,
+    market: pd.Series | None = None,
     start: str | None = None,
     end: str | None = None,
     verbose: bool = True,
@@ -179,15 +180,22 @@ def run(
     # als kausal nachgewiesen ist: build(voll).loc[:T] == build(bis_T). Die
     # Momentaufnahme bekommt jeden Tag nur den Schnitt bis heute, und
     # snapshot.validate() prueft das bei jedem einzelnen Aufruf nach.
-    from .signals import build_signal_frame
+    from .signals import build_reversal_frame, build_signal_frame
 
     ecfg = engine.cfg
     if verbose:
-        print(f"    Berechne Signale fuer {len(per_symbol)} Symbole ...")
-    signal_frames = {
-        sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
-        for sym, df in per_symbol.items()
-    }
+        print(f"    Berechne Signale ({ecfg.strategy}) fuer "
+              f"{len(per_symbol)} Symbole ...")
+    if ecfg.strategy == "reversal":
+        signal_frames = {
+            sym: build_reversal_frame(df, market, ecfg.reversal_weights)
+            for sym, df in per_symbol.items()
+        }
+    else:
+        signal_frames = {
+            sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
+            for sym, df in per_symbol.items()
+        }
 
     # Gemeinsamer Handelskalender.
     calendar = sorted(set().union(*[set(df.index) for df in per_symbol.values()]))
@@ -279,6 +287,7 @@ def run(
             snapshot = MarketSnapshot(
                 as_of=today,
                 bars=active,
+                market=market.loc[:today] if market is not None else None,
                 signals={
                     sym: signal_frames[sym].loc[:today] for sym in active
                 },
