@@ -175,6 +175,12 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"    Kontoabruf fehlgeschlagen: {type(e).__name__}: {e}")
 
+    # --- 6. Lief er nach Plan? ---
+    print()
+    from alpaca_bot import audit
+
+    print(audit.run_audit(days=args.tage))
+
     # --- Fazit ---
     print("\n" + "=" * 74)
     problems = j.integrity_check()

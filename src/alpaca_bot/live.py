@@ -256,12 +256,30 @@ def run_once(
     ausloesen darf. Schutz gegen den Fall, dass ein Fehler in der Logik das
     Depot in einem Durchgang umbaut.
     """
-    engine = Engine(engine_config or EngineConfig())
+    cfg = engine_config or EngineConfig()
+    engine = Engine(cfg)
     journal = Journal()
 
+    # Die vollstaendigen Regeln des Laufs mitschreiben, nicht nur ein paar
+    # Eckwerte. Ohne sie laesst sich spaeter nicht pruefen, ob eine
+    # Entscheidung den DAMALS geltenden Regeln entsprach - Parameter
+    # aendern sich, und ein Abgleich gegen die heutige Konfiguration
+    # wuerde alte Entscheidungen faelschlich als Regelbruch ausweisen.
     with journal.run("live_trade", config={
         "symbole": len(symbols), "dry_run": dry_run,
         "max_neue_positionen": max_new_positions,
+        "strategie": cfg.strategy,
+        "min_score": cfg.min_score,
+        "exit_score": cfg.exit_score,
+        "max_positions": cfg.max_positions,
+        "max_position_pct": cfg.max_position_pct,
+        "target_invested": cfg.target_invested,
+        "min_position_pct": cfg.min_position_pct,
+        "stop_atr": cfg.stop_atr,
+        "target_atr": cfg.target_atr,
+        "max_hold_days": cfg.max_hold_days,
+        "min_dollar_volume": cfg.min_dollar_volume,
+        "min_price": cfg.min_price,
     }) as run:
         # --- 1. Broker-Regeln zuerst ---
         status = compliance.check_account()
