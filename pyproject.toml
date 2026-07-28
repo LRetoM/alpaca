@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alpaca-bot"
+version = "0.1.0"
+description = "Paper-Trading, Marktdaten-Analyse und ML-Prognosen mit der Alpaca API"
+requires-python = ">=3.11"
+dependencies = [
+    "alpaca-py>=0.33",
+    "pandas>=2.2",
+    "numpy>=2.0",
+    "python-dotenv>=1.0",
+    "requests>=2.32",
+    "matplotlib>=3.9",
+    "scikit-learn>=1.5",
+    "torch>=2.5",
+    "yfinance>=0.2.40",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

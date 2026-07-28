@@ -1,0 +1,28 @@
+# Zugangsdaten - NIEMALS committen
+.env
+*.key
+secrets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+
+# Projektausgaben
+data/
+results/
+*.png
+*.csv
+*.sqlite
+*.pt
+!requirements.txt
+
+# macOS / Editor
+.DS_Store
+.vscode/
+.idea/

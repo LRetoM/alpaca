@@ -1,0 +1,18 @@
+# --- Alpaca ---
+alpaca-py>=0.33          # offizielles SDK: Trading, Market Data, Streaming
+
+# --- Daten & Analyse ---
+pandas>=2.2
+numpy>=2.0
+python-dotenv>=1.0       # Keys aus .env laden
+requests>=2.32
+
+# --- Visualisierung ---
+matplotlib>=3.9
+
+# --- Machine Learning (Phase 3) ---
+scikit-learn>=1.5
+torch>=2.5                # DQN (rl/) - laeuft auf Apple Silicon per MPS
+
+# --- Zusaetzliche kostenlose Datenquellen ---
+yfinance>=0.2.40         # Fundamentaldaten, Index-Historie, Dividenden
