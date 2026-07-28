@@ -154,19 +154,19 @@ class EngineConfig:
     max_position_pct: float = 0.12
     """Obergrenze je Einzelposition."""
 
-    min_position_usd: float = 100.0
-    """Unter diesem Betrag frisst der Spread den Vorsprung. Bei kleinem
-    Konto lieber wenige, groessere Positionen als viele Miniaturen."""
+    min_position_pct: float = 0.001
+    """Mindestgroesse als Anteil des Kapitals (0.1 %). Darunter frisst der
+    Spread den Vorsprung. Bewusst relativ, nicht in USD - ein fixer
+    Dollarbetrag waere bei einem 1.000-$-Konto eine faktische Handelssperre
+    und bei einem 1.000.000-$-Konto bedeutungslos klein.
 
-    max_order_notional: float | None = None
-    """Harte Obergrenze je Order in USD. None = Wert aus der .env
-    (MAX_ORDER_NOTIONAL) uebernehmen.
-
-    Diese Grenze MUSS in die Groessenberechnung einfliessen, nicht erst in
-    die Risikopruefung danach. Sonst schlaegt die Engine Betraege vor, die
-    `trading._check_risk` zwangslaeufig ablehnt - jede Entscheidung
-    scheitert, das Protokoll fuellt sich mit Fehlschlaegen, und im
-    Backtest (wo die Schranke fehlte) sah alles anders aus als live."""
+    Ein harter USD-Deckel je Order existiert bewusst NICHT mehr in der
+    Engine (frueher `max_order_notional`) - er hat bei wachsendem Kapital
+    still die MAX_POSITION_PCT-Regel unterlaufen und 25.000 $ von
+    100.000 $ ungenutzt gelassen. Der einzige verbleibende Deckel ist
+    `trading._check_risk()` mit MAX_ORDER_NOTIONAL aus der .env - ein
+    reines Sicherheitsnetz gegen Rechenfehler, das bewusst so hoch steht,
+    dass es unter normalem Betrieb nie bindet."""
 
     min_score: float = 0.55
     """Ab wann gilt ein Wert als Kandidat."""
@@ -362,9 +362,18 @@ class Engine:
             return []
 
         # --- Positionsgroesse ---
-        # Moeglichst viel Kapital arbeiten lassen, aber je Position gedeckelt
-        # und nach Volatilitaet skaliert: ruhige Werte groesser, hektische
-        # kleiner. Das ist der staerkste einzelne Hebel auf die Sharpe Ratio.
+        # AUSSCHLIESSLICH prozentual vom aktuellen Kapital - kein fester
+        # Dollarwert fliesst hier ein. Das ist bewusst so: Ein fixer
+        # Dollar-Deckel wird bei wachsendem Kapital zur stillen Bremse
+        # (genau das hat zuvor 25.000 $ von 100.000 $ brachliegen lassen,
+        # weil MAX_ORDER_NOTIONAL=5000 unter dem 10-%-Anteil lag). Die
+        # einzige Grenze ist der Portfolioanteil - die skaliert automatisch
+        # mit, egal ob das Konto 1.000 $ oder 1.000.000 $ haelt.
+        #
+        # `MAX_ORDER_NOTIONAL` aus der .env bleibt als reines Sicherheitsnetz
+        # gegen Rechenfehler in trading._check_risk erhalten (dort wird JEDE
+        # Order nochmal geprueft) - hier in der Groessenberechnung wirkt es
+        # bewusst NICHT mit, damit es die Skalierung nie unterlaeuft.
         investable = portfolio.equity * cfg.target_invested
         already = sum(
             p.qty * (snapshot.last_price(s) or p.entry_price)
@@ -373,21 +382,7 @@ class Engine:
         )
         free = max(0.0, min(investable - already, portfolio.cash))
         per_slot = free / max(1, len(chosen))
-
-        # Bindende Obergrenze ist die STRENGERE aus Portfolioanteil und
-        # harter Order-Schranke. Beide muessen hier greifen, damit die
-        # Simulation dieselben Groessen rechnet, die live durchkommen.
         cap = portfolio.equity * cfg.max_position_pct
-        hard_cap = cfg.max_order_notional
-        if hard_cap is None:
-            try:
-                from .config import get_settings
-
-                hard_cap = get_settings().max_order_notional
-            except Exception:  # noqa: BLE001 - ohne .env laeuft die Simulation weiter
-                hard_cap = None
-        if hard_cap:
-            cap = min(cap, float(hard_cap))
 
         out: list[Decision] = []
         for sym, score, row, price in chosen:
@@ -400,7 +395,11 @@ class Engine:
                 size *= min(1.5, 0.03 / max(atr_pct, 0.005))
             size = min(size, cap)
 
-            if size < cfg.min_position_usd:
+            # Auch die Mindestgroesse ist relativ zum Kapital, nicht ein
+            # fixer Dollarbetrag - sonst driftet sie bei wachsendem Konto
+            # in die Bedeutungslosigkeit oder wird bei kleinem Konto zur
+            # faktischen Handelssperre.
+            if size < portfolio.equity * cfg.min_position_pct:
                 continue
 
             stop = price - cfg.stop_atr * atr if atr > 0 else price * 0.90
