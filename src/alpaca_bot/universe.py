@@ -175,4 +175,36 @@ BENCHMARK_SETS: dict[str, list[str]] = {
     "known_movers_demo": [
         "NVDA", "SMCI", "TSLA", "AMD", "PLTR", "COIN", "MSTR", "ENPH", "CELH",
     ],
+    # Breites, liquides Universum ueber alle Sektoren. Genug Breite, damit
+    # der sqrt(BR)-Effekt aus dem Fundamentalgesetz ueberhaupt greifen kann,
+    # und liquide genug, dass Spread und Slippage kalkulierbar bleiben.
+    #
+    # ACHTUNG - Survivorship: Diese Liste besteht aus HEUTE gelisteten
+    # Werten. Firmen, die im Testzeitraum verschwanden, fehlen. Das macht
+    # jedes Ergebnis zu einer Obergrenze (siehe survivorship_warning).
+    "broad_liquid": [
+        # Technologie
+        "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "ADBE", "AMD", "INTC",
+        "QCOM", "TXN", "MU", "AMAT", "LRCX", "NOW", "PANW", "SNPS", "CDNS",
+        # Kommunikation / Internet
+        "GOOGL", "META", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS",
+        # Konsum zyklisch
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "TJX", "BKNG",
+        # Konsum defensiv
+        "PG", "KO", "PEP", "COST", "WMT", "MDLZ", "CL", "MO",
+        # Gesundheit
+        "UNH", "JNJ", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY",
+        "AMGN", "GILD", "CVS", "ISRG", "VRTX", "REGN",
+        # Finanzen
+        "BRK.B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "BLK",
+        "SCHW", "C", "SPGI", "CB", "PGR",
+        # Industrie
+        "CAT", "HON", "UNP", "BA", "GE", "RTX", "LMT", "DE", "UPS", "MMM",
+        "ETN", "EMR", "ITW", "CSX",
+        # Energie / Rohstoffe
+        "XOM", "CVX", "COP", "SLB", "EOG", "PSX", "MPC", "OXY", "LIN", "SHW",
+        "FCX", "NEM",
+        # Versorger / Immobilien
+        "NEE", "DUK", "SO", "D", "AEP", "AMT", "PLD", "EQIX", "CCI", "SPG",
+    ],
 }
