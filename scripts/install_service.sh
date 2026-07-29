@@ -5,35 +5,78 @@
 # er stirbt, und startet ihn beim Anmelden erneut. Damit laeuft der Bot
 # auch nach einem Absturz oder Neustart des Rechners weiter.
 #
-#   ./scripts/install_service.sh            # einrichten (Vorschaumodus)
-#   ./scripts/install_service.sh --live     # mit Orders im Papierdepot
-#   ./scripts/install_service.sh --remove   # wieder entfernen
+# Es gibt ZWEI unabhaengige Dienste. Sie laufen bewusst getrennt, damit ein
+# Fehler im Forschungspfad den Handelspfad nicht mitreisst:
+#
+#   handel   scripts/12_daemon.py         entscheidet und handelt im Papierdepot
+#   schatten scripts/16_shadow_daemon.py  zeichnet Kandidaten auf, sendet NICHTS
+#
+#   ./scripts/install_service.sh                      # Handel, Vorschaumodus
+#   ./scripts/install_service.sh --live               # Handel mit Orders
+#   ./scripts/install_service.sh --dienst schatten    # Schattenbetrieb
+#   ./scripts/install_service.sh --remove             # Handelsdienst entfernen
+#   ./scripts/install_service.sh --dienst schatten --remove
 #
 # Danach:
-#   launchctl list | grep alpacabot         # laeuft er?
-#   tail -f logs/daemon.log                 # was tut er?
-#   python scripts/12_daemon.py --status    # Zustand
+#   launchctl list | grep alpaca                  # laeuft er?
+#   tail -f logs/daemon.log                       # was tut der Handelsbot?
+#   tail -f logs/shadow.log                       # was tut der Schattenbot?
+#   python scripts/12_daemon.py --status          # Zustand Handel
+#   python scripts/16_shadow_daemon.py --status   # Zustand Schatten
 
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LABEL="de.local.alpacabot"
-PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 PYTHON="$PROJECT_DIR/.venv/bin/python"
 LOGDIR="$PROJECT_DIR/logs"
 
-if [[ "${1:-}" == "--remove" ]]; then
+# --- Argumente einlesen (Reihenfolge egal) ---
+DIENST="handel"
+WANT_LIVE=0
+WANT_REMOVE=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dienst) DIENST="${2:-}"; shift 2 ;;
+        --live)   WANT_LIVE=1; shift ;;
+        --remove) WANT_REMOVE=1; shift ;;
+        *) echo "Unbekanntes Argument: $1"; exit 1 ;;
+    esac
+done
+
+case "$DIENST" in
+    handel)
+        LABEL="de.local.alpacabot"
+        SCRIPT="scripts/12_daemon.py"
+        LOGBASE="daemon"
+        ;;
+    schatten)
+        LABEL="de.local.alpacashadow"
+        SCRIPT="scripts/16_shadow_daemon.py"
+        LOGBASE="shadow"
+        # Der Schattenbetrieb kennt kein --live: Er importiert `trading.py`
+        # nicht und KANN deshalb keine Order senden - nicht nur "darf nicht".
+        WANT_LIVE=0
+        ;;
+    *) echo "FEHLER: --dienst muss 'handel' oder 'schatten' sein."; exit 1 ;;
+esac
+
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+if [[ $WANT_REMOVE -eq 1 ]]; then
     launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
     rm -f "$PLIST"
-    echo "Dienst entfernt."
+    echo "Dienst '${DIENST}' (${LABEL}) entfernt."
     exit 0
 fi
 
 MODE_ARG=""
 MODE_TEXT="VORSCHAU (keine Orders)"
-if [[ "${1:-}" == "--live" ]]; then
+if [[ $WANT_LIVE -eq 1 ]]; then
     MODE_ARG="<string>--live</string>"
     MODE_TEXT="ORDERS AKTIV (Papierdepot)"
+fi
+if [[ "$DIENST" == "schatten" ]]; then
+    MODE_TEXT="SCHATTENBETRIEB (kann keine Orders senden)"
 fi
 
 if [[ ! -x "$PYTHON" ]]; then
@@ -59,7 +102,7 @@ cat > "$PLIST" <<PLIST_END
     <key>ProgramArguments</key>
     <array>
         <string>${PYTHON}</string>
-        <string>${PROJECT_DIR}/scripts/12_daemon.py</string>
+        <string>${PROJECT_DIR}/${SCRIPT}</string>
         ${MODE_ARG}
     </array>
 
@@ -79,9 +122,9 @@ cat > "$PLIST" <<PLIST_END
     <integer>60</integer>
 
     <key>StandardOutPath</key>
-    <string>${LOGDIR}/daemon.log</string>
+    <string>${LOGDIR}/${LOGBASE}.log</string>
     <key>StandardErrorPath</key>
-    <string>${LOGDIR}/daemon.error.log</string>
+    <string>${LOGDIR}/${LOGBASE}.error.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -98,11 +141,12 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "======================================================================"
 echo "  DIENST EINGERICHTET: ${LABEL}"
 echo "======================================================================"
+echo "  Dienst      : ${DIENST}  (${SCRIPT})"
 echo "  Modus       : ${MODE_TEXT}"
 echo "  Neustart    : automatisch bei Absturz (KeepAlive)"
 echo "  Nach Reboot : automatisch beim Anmelden (RunAtLoad)"
-echo "  Protokoll   : ${LOGDIR}/daemon.log"
+echo "  Protokoll   : ${LOGDIR}/${LOGBASE}.log"
 echo
-echo "  Status ansehen : python scripts/12_daemon.py --status"
-echo "  Live verfolgen : tail -f ${LOGDIR}/daemon.log"
-echo "  Entfernen      : ./scripts/install_service.sh --remove"
+echo "  Status ansehen : python ${SCRIPT} --status"
+echo "  Live verfolgen : tail -f ${LOGDIR}/${LOGBASE}.log"
+echo "  Entfernen      : ./scripts/install_service.sh --dienst ${DIENST} --remove"

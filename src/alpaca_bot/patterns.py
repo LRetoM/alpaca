@@ -1,0 +1,244 @@
+"""Musterspeicher: was sich wiederholt bewaehrt hat - und was aufgehoert hat.
+
+Das ist die Antwort auf "mit der Zeit sollen immer klarere Muster entstehen".
+Ein Muster ist hier keine vage Beobachtung, sondern eine **bedingte Aussage
+mit Beleg und Lebenszyklus**:
+
+    "Der Umkehr-Effekt traegt nur bei ruhiger Marktvolatilitaet"
+    bedingung: regime_vola in ('niedrig','mittel')
+    Beleg    : IC +0.031, t=2.8, ueber 74 Handelstage
+
+**Der wichtigste Teil ist der Verfall.** Muster sind nicht dauerhaft. Ein
+2026 bestaetigter Effekt kann 2027 verschwinden - durch Arbitrage,
+Regimewechsel oder Strukturbruch. Wer einen einmal gefundenen Zusammenhang
+dauerhaft glaubt, handelt irgendwann eine Regel, die seit Monaten nicht mehr
+gilt.
+
+Deshalb wird jedes bestaetigte Muster monatlich **auf den seither NEU
+hinzugekommenen Daten** erneut geprueft - nur auf diesen, nicht auf den
+alten, die es ja bereits bestaetigt haben. Faellt es zweimal in Folge durch,
+wird es als 'zerfallen' markiert und alle Bots gemeldet, die es nutzen.
+
+Genau das ist das "immer klarer": nicht ein wachsender Stapel von
+Behauptungen, sondern eine kleine Menge wiederholt bestaetigter Bedingungen -
+und die Gewissheit, es zu merken, wenn eine aufhoert zu funktionieren.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import uuid
+
+import numpy as np
+import pandas as pd
+
+from .shadow import ShadowStore
+
+MIN_TAGE_BESTAETIGUNG = 60
+"""Unter dieser Zahl unabhaengiger Handelstage wird kein Muster bestaetigt."""
+
+FEHLSCHLAEGE_BIS_ZERFALL = 2
+"""Ein einzelner schlechter Monat ist Rauschen. Zwei in Folge sind ein Signal."""
+
+
+def erfassen(beschreibung: str, bedingung: str, *, wirkung: str = "ic_5d",
+             entdeckt_aus: str = "schatten", store: ShadowStore | None = None
+             ) -> str:
+    """Legt ein Muster als KANDIDAT an - noch nicht als bestaetigt.
+
+    `bedingung` ist ein pandas-`query`-Ausdruck auf dem Auswertungsdatensatz,
+    z. B. ``"regime_vola == 'niedrig'"`` oder ``"score > 0.6"``. Er muss
+    maschinenlesbar sein, damit die Verfallspruefung ihn spaeter ohne
+    menschliches Zutun wiederholen kann.
+    """
+    s = store or ShadowStore()
+    mid = f"M-{uuid.uuid4().hex[:8]}"
+    with s._conn() as c:
+        c.execute(
+            "INSERT INTO muster (muster_id, beschreibung, bedingung, wirkung,"
+            " entdeckt_am, entdeckt_aus, status, fehlschlaege)"
+            " VALUES (?,?,?,?,?,?,'kandidat',0)",
+            (mid, beschreibung, bedingung, wirkung,
+             dt.datetime.now(dt.UTC).isoformat(), entdeckt_aus),
+        )
+    return mid
+
+
+def _messen(df: pd.DataFrame, bedingung: str, wirkung: str = "ic_5d") -> dict:
+    """Misst die Wirkung eines Musters auf einem Datensatz.
+
+    Gerechnet wird ueber die Zeitreihe der Tageswerte, nicht ueber den Topf
+    aller Zeilen - alle Vorhersagen eines Tages sind vom selben Marktfaktor
+    getrieben und zaehlen statistisch naeher an einer Beobachtung als an 200.
+    """
+    from .shadow_eval import ic
+
+    if df.empty:
+        return {"n_tage": 0, "effekt": np.nan, "t": np.nan}
+    try:
+        teil = df.query(bedingung)
+    except Exception as e:  # noqa: BLE001
+        return {"n_tage": 0, "effekt": np.nan, "t": np.nan,
+                "fehler": f"{type(e).__name__}: {e}"}
+    if teil.empty:
+        return {"n_tage": 0, "effekt": np.nan, "t": np.nan}
+
+    if wirkung == "ic_5d":
+        k = ic(teil)
+        return {"n_tage": k["n_tage"], "effekt": k["ic"], "t": k["t"]}
+
+    # Sonst: Tagesmittel der Zielgroesse gegen null testen
+    spalte = {"ueberschuss": "ueberschuss_5d", "rendite": "fwd_5d"}.get(wirkung, wirkung)
+    if spalte not in teil:
+        return {"n_tage": 0, "effekt": np.nan, "t": np.nan}
+    je_tag = teil.groupby("tag")[spalte].mean().dropna()
+    if len(je_tag) < 3:
+        return {"n_tage": len(je_tag), "effekt": np.nan, "t": np.nan}
+    t = je_tag.mean() / (je_tag.std(ddof=1) / np.sqrt(len(je_tag)))
+    return {"n_tage": int(len(je_tag)), "effekt": round(float(je_tag.mean()), 5),
+            "t": round(float(t), 2)}
+
+
+def pruefen(store: ShadowStore | None = None, *, nur_neue_daten: bool = True,
+            verbose: bool = True) -> pd.DataFrame:
+    """Prueft alle Muster - bestaetigte auf NEUEN Daten, Kandidaten auf allen.
+
+    `nur_neue_daten=True` ist der Kern der Verfallspruefung: Ein bestaetigtes
+    Muster wird ausschliesslich an dem gemessen, was seit seiner letzten
+    Bestaetigung hinzugekommen ist. Wuerde man die alten Daten mitrechnen,
+    truege der urspruengliche Fund das Ergebnis noch jahrelang mit und der
+    Zerfall fiele nie auf.
+    """
+    from . import fleet
+    from .shadow_eval import datensatz
+
+    s = store or ShadowStore()
+    df = datensatz(s, buch="rangliste", sperrzone_oeffnen=False)
+    alle = s.table("muster")
+    if alle.empty:
+        return pd.DataFrame()
+
+    schwelle = fleet.schwelle_sigma(s)
+    jetzt = dt.datetime.now(dt.UTC).isoformat()
+    zeilen = []
+
+    for _, m in alle.iterrows():
+        basis = df
+        if nur_neue_daten and m["status"] == "bestaetigt" and m["zuletzt_bestaetigt"]:
+            grenze = pd.Timestamp(m["zuletzt_bestaetigt"]).date()
+            basis = df[df["tag"] > grenze] if not df.empty else df
+
+        r = _messen(basis, m["bedingung"], m["wirkung"])
+        haelt = (np.isfinite(r.get("t", np.nan))
+                 and abs(r["t"]) > schwelle
+                 and r["n_tage"] >= MIN_TAGE_BESTAETIGUNG)
+
+        neuer_status, fehl = m["status"], int(m["fehlschlaege"] or 0)
+        zerfallen_seit = m["zerfallen_seit"]
+
+        if r["n_tage"] == 0:
+            hinweis = "keine neuen Daten"
+        elif haelt:
+            neuer_status, fehl = "bestaetigt", 0
+            hinweis = "haelt"
+        else:
+            if m["status"] == "bestaetigt":
+                fehl += 1
+                if fehl >= FEHLSCHLAEGE_BIS_ZERFALL:
+                    neuer_status = "zerfallen"
+                    zerfallen_seit = zerfallen_seit or jetzt
+                    hinweis = f"ZERFALLEN nach {fehl} Fehlschlaegen"
+                else:
+                    hinweis = f"Fehlschlag {fehl}/{FEHLSCHLAEGE_BIS_ZERFALL}"
+            else:
+                hinweis = (f"noch zu duenn ({r['n_tage']} von "
+                           f"{MIN_TAGE_BESTAETIGUNG} Tagen)")
+
+        with s._conn() as c:
+            c.execute(
+                "UPDATE muster SET n_tage=?, effekt=?, t_wert=?, schwelle=?,"
+                " status=?, fehlschlaege=?, zuletzt_geprueft=?,"
+                " zuletzt_bestaetigt=?, zerfallen_seit=? WHERE muster_id=?",
+                (r["n_tage"], r.get("effekt"), r.get("t"), schwelle,
+                 neuer_status, fehl, jetzt,
+                 jetzt if haelt else m["zuletzt_bestaetigt"],
+                 zerfallen_seit, m["muster_id"]),
+            )
+        zeilen.append({"muster_id": m["muster_id"],
+                       "beschreibung": m["beschreibung"][:44],
+                       "n_tage": r["n_tage"], "effekt": r.get("effekt"),
+                       "t": r.get("t"), "schwelle": schwelle,
+                       "status": neuer_status, "hinweis": hinweis})
+        if verbose:
+            print(f"  {m['muster_id']}  {m['beschreibung'][:40]:<42} "
+                  f"t={r.get('t')}  -> {neuer_status} ({hinweis})")
+    return pd.DataFrame(zeilen)
+
+
+def kandidaten_suchen(store: ShadowStore | None = None, *,
+                      anlegen: bool = False, verbose: bool = True) -> pd.DataFrame:
+    """Durchsucht die Regime-Dimensionen nach auffaelligen Bedingungen.
+
+    **Warnung, die mitgefuehrt werden muss:** Regimeschnitte vervielfachen
+    die Zahl der Vergleiche. Drei Trenddimensionen mal drei Volabaender
+    ergeben neun Zellen - und in mindestens einer davon sieht der Effekt
+    grossartig aus, garantiert. Gefundene Kandidaten sind deshalb
+    ausdruecklich KEINE Befunde, sondern Hypothesen, die sich erst ueber
+    `pruefen()` auf spaeteren Daten bewaehren muessen.
+
+    Geschnitten werden nur die drei im Plan festgelegten Achsen, nicht
+    beliebig viele.
+    """
+    from .shadow_eval import datensatz
+
+    s = store or ShadowStore()
+    df = datensatz(s, buch="rangliste", sperrzone_oeffnen=False)
+    if df.empty:
+        return pd.DataFrame()
+
+    achsen = {
+        "regime_markt": sorted(df["regime_markt"].dropna().unique()),
+        "regime_vola": sorted(df["regime_vola"].dropna().unique()),
+    }
+    zeilen = []
+    for achse, werte in achsen.items():
+        for w in werte:
+            bed = f"{achse} == '{w}'"
+            r = _messen(df, bed, "ic_5d")
+            zeilen.append({"bedingung": bed, "n_tage": r["n_tage"],
+                           "ic": r.get("effekt"), "t": r.get("t")})
+            if anlegen and r["n_tage"] >= 20:
+                erfassen(f"Umkehr-Effekt bei {achse}={w}", bed,
+                         entdeckt_aus="schatten", store=s)
+    out = pd.DataFrame(zeilen).sort_values("t", ascending=False, na_position="last")
+    if verbose and not out.empty:
+        print(out.to_string(index=False))
+        print("\n  Das sind KANDIDATEN, keine Befunde. Sie muessen sich auf")
+        print("  spaeteren, hier noch nicht gesehenen Daten bewaehren.")
+    return out
+
+
+def bericht(store: ShadowStore | None = None) -> str:
+    s = store or ShadowStore()
+    df = s.table("muster")
+    L = ["=" * 78, "  MUSTERSPEICHER", "=" * 78]
+    if df.empty:
+        L += ["  Noch keine Muster erfasst.", "",
+              "  Kandidaten suchen:",
+              "    python scripts/17_shadow_report.py --muster-suchen"]
+        return "\n".join(L)
+
+    for status in ("bestaetigt", "kandidat", "zerfallen", "widerlegt"):
+        teil = df[df["status"] == status]
+        if teil.empty:
+            continue
+        L.append(f"\n  {status.upper()} ({len(teil)})")
+        for _, m in teil.iterrows():
+            L.append(f"    {m['muster_id']}  {m['beschreibung']}")
+            L.append(f"        Bedingung: {m['bedingung']}")
+            L.append(f"        Effekt {m['effekt']}  t={m['t_wert']}  "
+                     f"ueber {m['n_tage']} Tage  (Schwelle {m['schwelle']})")
+            if status == "zerfallen":
+                L.append(f"        ZERFALLEN seit {str(m['zerfallen_seit'])[:10]} - "
+                         "nicht mehr verwenden.")
+    return "\n".join(L)

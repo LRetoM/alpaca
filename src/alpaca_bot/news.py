@@ -212,7 +212,10 @@ def news_features(
         np.where(had_news, np.arange(len(had_news)), np.nan), index=had_news.index
     ).ffill()
     roll["days_since_news"] = np.arange(len(had_news)) - last_news
-    roll["first_coverage"] = (had_news.cumsum() == 1).astype(float) & had_news
+    # Erst die beiden Wahrheitswerte verknuepfen, DANN in float wandeln.
+    # Andersherum (float & bool) wirft TypeError - der Fehler blieb liegen,
+    # weil dieses Modul bis 2026-07-29 von keiner Stelle aufgerufen wurde.
+    roll["first_coverage"] = ((had_news.cumsum() == 1) & had_news).astype(float)
 
     aligned = roll.reindex(idx, method="ffill")
     aligned.index = price_index
