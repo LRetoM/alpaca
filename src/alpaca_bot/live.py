@@ -192,6 +192,37 @@ def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
     )
 
 
+def _reference_price(symbol: str, side: str, fallback: float) -> float:
+    """Der Kurs, den man im Moment der Order realistisch bekommen konnte.
+
+    DAS ist die richtige Bezugsgroesse fuer Slippage - nicht der Kurs, auf
+    dem die Entscheidung beruhte. Entschieden wird auf dem Schlusskurs des
+    Vortages; bis zur Ausfuehrung koennen Stunden und mehrere Prozent
+    liegen. Wer den Entscheidungskurs als Referenz nimmt, misst die
+    Marktbewegung ueber Nacht und nennt sie Slippage.
+
+    Genau dieser Fehler hat zuvor Werte wie -2452 Basispunkte erzeugt und
+    die gesamte Ausfuehrungsauswertung unbrauchbar gemacht.
+
+    Kauf laeuft ueber den Briefkurs, Verkauf ueber den Geldkurs - was
+    darueber hinaus verloren geht, ist echte Slippage.
+    """
+    try:
+        q = data.latest_quotes(symbol)
+        ask = float(q.loc[symbol, "ask"] or 0)
+        bid = float(q.loc[symbol, "bid"] or 0)
+        if side == "buy" and ask > 0:
+            return ask
+        if side == "sell" and bid > 0:
+            return bid
+        mid = (ask + bid) / 2
+        if mid > 0:
+            return mid
+    except Exception:  # noqa: BLE001 - Quote-Ausfall darf keine Order verhindern
+        pass
+    return float(fallback)
+
+
 def reconcile_fills(lookback_hours: int = 48) -> int:
     """Traegt die tatsaechlichen Ausfuehrungspreise ins Protokoll nach.
 
@@ -227,15 +258,26 @@ def reconcile_fills(lookback_hours: int = 48) -> int:
     with j._conn() as c:
         for _, o in open_orders.iterrows():
             price = fills.get(str(o["order_id"]))
-            if price is None or not o.get("expected_price"):
+            if price is None:
                 continue
-            expected = float(o["expected_price"])
-            slip = (price - expected) / expected * 10_000
-            if o["side"] == "sell":
-                slip = -slip
+            sign = -1.0 if o["side"] == "sell" else 1.0
+
+            slip = None
+            if o.get("expected_price"):
+                expected = float(o["expected_price"])
+                if expected > 0:
+                    slip = sign * (price - expected) / expected * 10_000
+
+            drift = None
+            if o.get("decision_price"):
+                dp = float(o["decision_price"])
+                if dp > 0:
+                    drift = sign * (price - dp) / dp * 10_000
+
             c.execute(
-                "UPDATE orders SET fill_price = ?, slippage_bps = ? WHERE order_id = ?",
-                (price, slip, o["order_id"]),
+                "UPDATE orders SET fill_price = ?, slippage_bps = ?,"
+                " decision_drift_bps = ? WHERE order_id = ?",
+                (price, slip, drift, o["order_id"]),
             )
             updated += 1
     return updated
@@ -268,18 +310,11 @@ def run_once(
     with journal.run("live_trade", config={
         "symbole": len(symbols), "dry_run": dry_run,
         "max_neue_positionen": max_new_positions,
-        "strategie": cfg.strategy,
-        "min_score": cfg.min_score,
-        "exit_score": cfg.exit_score,
-        "max_positions": cfg.max_positions,
-        "max_position_pct": cfg.max_position_pct,
-        "target_invested": cfg.target_invested,
-        "min_position_pct": cfg.min_position_pct,
-        "stop_atr": cfg.stop_atr,
-        "target_atr": cfg.target_atr,
-        "max_hold_days": cfg.max_hold_days,
-        "min_dollar_volume": cfg.min_dollar_volume,
-        "min_price": cfg.min_price,
+        # Ueber as_dict(), damit neu hinzukommende Regeln automatisch
+        # mitprotokolliert werden. Eine handgepflegte Liste haette sonst
+        # still Luecken - und genau die Regel, die nicht mitgeschrieben
+        # wird, kann der Regelabgleich spaeter nicht pruefen.
+        **cfg.as_dict(),
     }) as run:
         # --- 1. Broker-Regeln zuerst ---
         status = compliance.check_account()
@@ -325,9 +360,11 @@ def run_once(
                       f"({d.reasons.get('ausstiegsgrund', '?')}, "
                       f"{d.reasons.get('gewinn_pct', 0):+.1%})")
             try:
+                ref = _reference_price(d.symbol, "sell", fallback=d.price)
                 msg = trading.close_position(d.symbol, dry_run=dry_run)
                 run.order(did, symbol=d.symbol, side="sell", status=str(msg),
-                          dry_run=dry_run, expected_price=d.price)
+                          dry_run=dry_run, expected_price=ref,
+                          decision_price=d.price)
                 done.append(d)
                 executed += 0 if dry_run else 1
             except Exception as e:  # noqa: BLE001
@@ -344,6 +381,7 @@ def run_once(
                       f"Stop {d.stop_price:.2f} Ziel {d.target_price:.2f}")
             try:
                 compliance.assert_can_trade(d.symbol, "buy")
+                ref = _reference_price(d.symbol, "buy", fallback=d.price)
                 res = trading.market_order(
                     d.symbol, notional=round(d.target_notional, 2),
                     side="buy", dry_run=dry_run,
@@ -351,7 +389,7 @@ def run_once(
                 run.order(did, symbol=d.symbol, side="buy",
                           status=res.status, order_id=res.id,
                           notional=d.target_notional, dry_run=dry_run,
-                          expected_price=d.price)
+                          expected_price=ref, decision_price=d.price)
                 done.append(d)
                 executed += 0 if dry_run else 1
             except (trading.RiskError, compliance.ComplianceError) as e:

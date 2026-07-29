@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS day_trades (
     symbol     TEXT NOT NULL,
     PRIMARY KEY (trade_date, symbol)
 );
+CREATE TABLE IF NOT EXISTS exits (
+    symbol      TEXT NOT NULL,
+    exit_date   TEXT NOT NULL,
+    exit_price  REAL,
+    exit_reason TEXT,
+    entry_price REAL,
+    return_pct  REAL,
+    bars_held   INTEGER,
+    PRIMARY KEY (symbol, exit_date)
+);
+CREATE INDEX IF NOT EXISTS idx_exits_date ON exits(exit_date);
 """
 
 
@@ -120,6 +131,54 @@ class Store:
         for sym in orphans:
             self.drop_position(sym)
         return sorted(orphans)
+
+    # --- Ausstiege und Sperrfrist ------------------------------------------
+    def record_exit(
+        self, symbol: str, *, exit_price: float | None = None,
+        exit_reason: str = "", entry_price: float | None = None,
+        return_pct: float | None = None, bars_held: int | None = None,
+        when=None,
+    ) -> None:
+        """Haelt fest, dass eine Position geschlossen wurde.
+
+        Zwei Zwecke: Sperrfrist gegen sofortigen Rueckkauf, und Rohdaten
+        fuer die spaetere Auswertung, welche Ausstiegsgruende sich
+        bewaehrt haben.
+        """
+        ts = pd.Timestamp(when or pd.Timestamp.now(tz="UTC"))
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO exits VALUES (?,?,?,?,?,?,?)",
+                (symbol, ts.isoformat(), exit_price, exit_reason,
+                 entry_price, return_pct, bars_held),
+            )
+
+    def symbols_in_cooldown(self, days: int, as_of=None) -> set[str]:
+        """Symbole, die innerhalb der letzten `days` Handelstage verkauft wurden.
+
+        Gerechnet wird in Handelstagen, nicht Kalendertagen - sonst waere
+        eine Sperre ueber ein Wochenende faktisch aufgehoben.
+        """
+        if days <= 0:
+            return set()
+        now = pd.Timestamp(as_of or pd.Timestamp.now(tz="UTC"))
+        if now.tz is None:
+            now = now.tz_localize("UTC")
+        cutoff = (now.normalize() - pd.tseries.offsets.BDay(days)).isoformat()
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT symbol FROM exits WHERE exit_date >= ?", (cutoff,)
+            ).fetchall()
+        return {r["symbol"] for r in rows}
+
+    def recent_exits(self, days: int = 30) -> pd.DataFrame:
+        cutoff = (pd.Timestamp.now(tz="UTC").normalize()
+                  - pd.Timedelta(days=days)).isoformat()
+        with self._conn() as c:
+            return pd.read_sql_query(
+                "SELECT * FROM exits WHERE exit_date >= ? ORDER BY exit_date DESC",
+                c, params=(cutoff,),
+            )
 
     # --- Daytrade-Zaehler (PDT) -------------------------------------------
     def record_day_trade(self, symbol: str, when=None) -> None:
@@ -186,10 +245,21 @@ class Store:
         if pos:
             lines.append("")
             lines.append("  Offene Positionen mit Zustand:")
+            today = pd.Timestamp.now(tz="UTC").normalize()
             for sym, m in sorted(pos.items()):
+                # Haltedauer aus dem Einstiegsdatum rechnen, nicht aus dem
+                # gespeicherten Zaehler: Der Zaehler ist der Stand vom
+                # Zeitpunkt des Schreibens und altert nicht mit. Angezeigt
+                # werden muss derselbe Wert, den die Engine fuer den
+                # Zeitausstieg verwendet - sonst zeigt der Status "0 Tage",
+                # waehrend die Position tatsaechlich vor dem Ausstieg steht.
+                entry = pd.Timestamp(m["entry_date"])
+                if entry.tz is None:
+                    entry = entry.tz_localize("UTC")
+                held = max(0, len(pd.bdate_range(entry.normalize(), today)) - 1)
                 lines.append(
                     f"    {sym:<6} Einstieg {m['entry_price']:>9.2f} | "
                     f"Stop {m['stop_price']:>9.2f} | Ziel {m['target_price']:>9.2f} | "
-                    f"{m['bars_held']:>2} Tage"
+                    f"{held:>2} Tage"
                 )
         return "\n".join(lines)

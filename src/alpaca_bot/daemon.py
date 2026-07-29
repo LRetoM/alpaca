@@ -158,6 +158,86 @@ class Daemon:
             "daytrades": int(acct.get("daytrade_count") or 0),
         }
 
+    def _record_lifecycle(self, decision, meta: dict) -> None:
+        """Legt den Lebenslauf eines geschlossenen Trades an.
+
+        MAE, MFE und der Nachlauf werden hier noch nicht gefuellt - der
+        Kursverlauf NACH dem Ausstieg existiert schlicht noch nicht.
+        Das ergaenzt `_analyse_closed_trades()` in den Folgetagen.
+        """
+        try:
+            import uuid
+
+            from .lifecycle import Lifecycle
+
+            entry = meta.get("entry_price")
+            Lifecycle().record({
+                "trade_id": uuid.uuid4().hex,
+                "symbol": decision.symbol,
+                "entry_date": str(meta.get("entry_date") or ""),
+                "entry_price": entry,
+                "entry_score": meta.get("entry_score"),
+                "entry_reasons": meta.get("reasons"),
+                "planned_stop": meta.get("stop_price"),
+                "planned_target": meta.get("target_price"),
+                "exit_date": pd.Timestamp.now(tz="UTC").isoformat(),
+                "exit_price": decision.price,
+                "exit_reason": str(decision.reasons.get("ausstiegsgrund", "")),
+                "return_pct": decision.reasons.get("gewinn_pct"),
+                "bars_held": meta.get("bars_held"),
+            })
+        except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
+            print(f"      Lebenslauf nicht erfasst: {type(e).__name__}: {e}")
+
+    def _analyse_closed_trades(self) -> None:
+        """Ergaenzt MAE, MFE und Nachlauf fuer bereits geschlossene Trades.
+
+        Laeuft einmal taeglich mit der Ergebnisbewertung mit. Der Nachlauf
+        braucht Zeit: Ob ein Ausstieg richtig war, zeigt sich erst Tage
+        spaeter - deshalb wird jeder Trade mehrfach nachbearbeitet, bis
+        alle Zeitfenster gefuellt sind.
+        """
+        try:
+            from . import data
+            from .lifecycle import Lifecycle, analyse_path
+
+            lc = Lifecycle()
+            offen = lc.pending_analysis()
+            if not offen:
+                return
+
+            df = lc.table()
+            todo = df[df["trade_id"].isin(offen) & df["exit_date"].notna()]
+            if todo.empty:
+                return
+
+            symbols = sorted(todo["symbol"].unique())[:100]
+            bars = data.get_bars(symbols, "1D", lookback_days=90)
+            if bars.empty:
+                return
+
+            ergaenzt = 0
+            for _, t in todo.iterrows():
+                try:
+                    sym_bars = bars.xs(t["symbol"], level="symbol")
+                except KeyError:
+                    continue
+                extra = analyse_path(
+                    sym_bars, t["entry_date"], t["exit_date"],
+                    float(t["entry_price"] or 0),
+                )
+                if not extra:
+                    continue
+                row = t.to_dict()
+                row.update(extra)
+                row["analysed_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+                lc.record(row)
+                ergaenzt += 1
+            if ergaenzt:
+                print(f"      {ergaenzt} Trade-Lebenslauf/-laeufe ergaenzt")
+        except Exception as e:  # noqa: BLE001
+            print(f"      Lebenslauf-Analyse fehlgeschlagen: {type(e).__name__}: {e}")
+
     def _maybe_evaluate_outcomes(self) -> None:
         """Ordnet einmal taeglich jeder Entscheidung ihr Ergebnis zu.
 
@@ -184,6 +264,7 @@ class Daemon:
                 make_price_lookup(bars), horizons=(1, 3, 5)
             )
             print(f"      {n} Ergebnis(se) zu Entscheidungen nachgetragen")
+            self._analyse_closed_trades()
             self._last_evaluation = today
         except Exception as e:  # noqa: BLE001
             print(f"      Ergebnisbewertung fehlgeschlagen: {type(e).__name__}: {e}")
@@ -263,6 +344,18 @@ class Daemon:
                         reasons=d.reasons,
                     )
                 elif d.action == "sell":
+                    # Ausstieg festhalten, BEVOR die Metadaten geloescht werden -
+                    # danach ist der Einstiegskurs nicht mehr verfuegbar.
+                    meta = self.store.load_positions().get(d.symbol, {})
+                    self.store.record_exit(
+                        d.symbol,
+                        exit_price=d.price,
+                        exit_reason=str(d.reasons.get("ausstiegsgrund", "")),
+                        entry_price=meta.get("entry_price"),
+                        return_pct=d.reasons.get("gewinn_pct"),
+                        bars_held=meta.get("bars_held"),
+                    )
+                    self._record_lifecycle(d, meta)
                     self.store.drop_position(d.symbol)
 
         self.store.heartbeat(

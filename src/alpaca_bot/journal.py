@@ -122,7 +122,9 @@ CREATE TABLE IF NOT EXISTS orders (
     dry_run     INTEGER,
     fill_price  REAL,
     expected_price REAL,
+    decision_price REAL,
     slippage_bps REAL,
+    decision_drift_bps REAL,
     raw         TEXT
 );
 CREATE TABLE IF NOT EXISTS outcomes (
@@ -146,6 +148,28 @@ class Journal:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Ergaenzt fehlende Spalten in bereits bestehenden Datenbanken.
+
+        CREATE TABLE IF NOT EXISTS legt eine vorhandene Tabelle nicht neu an -
+        neue Spalten muessen also nachtraeglich hinzugefuegt werden. Ohne
+        das laeuft jeder Schreibzugriff mit den neuen Feldern auf einen
+        Fehler, und zwar erst im Live-Betrieb.
+        """
+        wanted = {
+            "orders": {
+                "decision_price": "REAL",
+                "decision_drift_bps": "REAL",
+            },
+        }
+        with self._conn() as c:
+            for table, columns in wanted.items():
+                have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+                for name, typ in columns.items():
+                    if name not in have:
+                        c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -502,24 +526,47 @@ class RunLogger:
         notional: float | None = None,
         dry_run: bool = True,
         expected_price: float | None = None,
+        decision_price: float | None = None,
         fill_price: float | None = None,
         raw: Any = None,
     ) -> None:
-        """Protokolliert eine Order und verknuepft sie mit ihrer Entscheidung."""
+        """Protokolliert eine Order und verknuepft sie mit ihrer Entscheidung.
+
+        Zwei getrennte Bezugspreise, weil sie zwei verschiedene Dinge messen:
+
+            expected_price   Marktkurs im Moment der Order  -> Slippage,
+                             also die AUSFUEHRUNGSqualitaet
+            decision_price   Kurs, auf dem die Entscheidung beruhte (meist
+                             der Schlusskurs des Vortages) -> Kursdrift
+                             zwischen Entscheidung und Ausfuehrung
+
+        Beides zu vermischen war ein Fehler: Die Drift ueber Nacht wurde als
+        Slippage ausgewiesen und ergab Werte wie -2452 Basispunkte.
+        """
         oid = order_id or f"local_{uuid.uuid4().hex[:10]}"
+
         slip = None
         if expected_price and fill_price and expected_price > 0:
             slip = (fill_price - expected_price) / expected_price * 10_000
             if side == "sell":
                 slip = -slip
+
+        drift = None
+        if decision_price and fill_price and decision_price > 0:
+            drift = (fill_price - decision_price) / decision_price * 10_000
+            if side == "sell":
+                drift = -drift
+
         ts = dt.datetime.now(dt.UTC).isoformat()
         with self.journal._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO orders (order_id, decision_id, run_id, ts,"
                 " symbol, side, qty, notional, status, dry_run, fill_price,"
-                " expected_price, slippage_bps, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " expected_price, decision_price, slippage_bps, decision_drift_bps,"
+                " raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (oid, decision_id, self.run_id, ts, symbol, side, qty, notional,
-                 status, int(dry_run), fill_price, expected_price, slip, _dumps(raw)),
+                 status, int(dry_run), fill_price, expected_price, decision_price,
+                 slip, drift, _dumps(raw)),
             )
             if decision_id:
                 c.execute(

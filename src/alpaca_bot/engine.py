@@ -151,8 +151,15 @@ class EngineConfig:
     """Anteil des Kapitals, der maximal im Markt steht. Nicht 1.0 - etwas
     Puffer verhindert Zwangsverkaeufe bei Kursluecken."""
 
-    max_position_pct: float = 0.12
-    """Obergrenze je Einzelposition."""
+    max_position_pct: float | None = None
+    """Obergrenze je Einzelposition. None = Wert aus der .env (MAX_POSITION_PCT).
+
+    Bewusst KEIN eigener Zahlenwert als Standard: Die Engine berechnet die
+    Groesse damit, und `trading._check_risk()` prueft jede Order gegen
+    denselben Wert aus der .env. Standen hier zwei verschiedene Zahlen
+    (Engine 12 %, .env 10 %), schlug die Engine dauerhaft Groessen vor,
+    die die Risikopruefung zwangslaeufig ablehnte - derselbe Kandidat
+    wurde stundenlang in jeder Runde neu vorgeschlagen und blockiert."""
 
     min_position_pct: float = 0.001
     """Mindestgroesse als Anteil des Kapitals (0.1 %). Darunter frisst der
@@ -199,8 +206,50 @@ class EngineConfig:
     """'reversal' = Kurzfrist-Umkehr (gemessen stabil, siehe signals.ReversalWeights)
     'momentum'  = der urspruengliche Mehrfaktor-Score (im Test unterlegen)"""
 
+    reenter_cooldown_days: int = 3
+    """Sperrfrist, bevor ein gerade verkauftes Symbol neu gekauft werden darf.
+
+    Ohne diese Sperre verkauft die Engine eine Position am Ziel und kauft
+    sie im SELBEN Durchgang sofort zurueck, weil ihr Score unveraendert
+    hoch ist - beobachtet bei AMKR: drei Runden hintereinander verkauft und
+    neu gekauft, mit identischem Stop und Ziel. Es entsteht keine neue
+    These, nur doppelte Spread- und Gebuehrenkosten."""
+
     weights: SignalWeights = field(default_factory=SignalWeights)
     reversal_weights: ReversalWeights = field(default_factory=ReversalWeights)
+
+    def __post_init__(self) -> None:
+        if self.max_position_pct is None:
+            try:
+                from .config import get_settings
+
+                self.max_position_pct = get_settings().max_position_pct
+            except Exception:  # noqa: BLE001 - ohne .env laeuft die Simulation weiter
+                self.max_position_pct = 0.10
+
+    def as_dict(self) -> dict:
+        """Die geltenden Regeln als flaches Dictionary - fuer das Protokoll.
+
+        `audit.py` prueft spaetere Entscheidungen gegen genau diese Werte.
+        Ohne sie kann der Regelabgleich nicht arbeiten und meldet stumm
+        nichts, auch wenn eine Regel gar nicht greift.
+        """
+        return {
+            "strategy": self.strategy,
+            "max_positions": self.max_positions,
+            "target_invested": self.target_invested,
+            "max_position_pct": self.max_position_pct,
+            "min_position_pct": self.min_position_pct,
+            "min_score": self.min_score,
+            "exit_score": self.exit_score,
+            "stop_atr": self.stop_atr,
+            "target_atr": self.target_atr,
+            "trail_after_atr": self.trail_after_atr,
+            "max_hold_days": self.max_hold_days,
+            "min_dollar_volume": self.min_dollar_volume,
+            "min_price": self.min_price,
+            "reenter_cooldown_days": self.reenter_cooldown_days,
+        }
 
     @classmethod
     def for_reversal(cls, **overrides) -> EngineConfig:
@@ -271,9 +320,32 @@ class Engine:
         exits = self._check_exits(snapshot, portfolio)
         decisions.extend(exits)
 
+        # Verkaufte Symbole geben ihren PLATZ frei, sind aber selbst gesperrt.
+        # Beides zu vermischen war ein teurer Fehler: Die Position wurde am
+        # Ziel verkauft und im selben Durchgang zurueckgekauft, weil ihr Score
+        # unveraendert hoch war - dreimal hintereinander bei AMKR, jedes Mal
+        # mit identischem Stop und Ziel. Nur die Kosten waren neu.
         freed = {d.symbol for d in exits if d.action == "sell"}
-        decisions.extend(self._find_entries(snapshot, portfolio, freed))
+        blocked = freed | self._cooldown_symbols(snapshot.as_of)
+        decisions.extend(self._find_entries(snapshot, portfolio, freed, blocked))
         return decisions
+
+    def _cooldown_symbols(self, as_of: pd.Timestamp) -> set[str]:
+        """Symbole, die noch in der Sperrfrist nach einem Verkauf stehen.
+
+        Der Zustand liegt in der Datenbank, damit die Sperre auch einen
+        Neustart des Prozesses ueberlebt - sonst waere sie nach jedem
+        Absturz wirkungslos, und genau dann wird sie gebraucht.
+        """
+        days = self.cfg.reenter_cooldown_days
+        if days <= 0:
+            return set()
+        try:
+            from .state import Store
+
+            return Store().symbols_in_cooldown(days, as_of=as_of)
+        except Exception:  # noqa: BLE001 - in der Simulation ohne Store
+            return set()
 
     # -- Ausstiege ----------------------------------------------------------
     def _check_exits(
@@ -330,8 +402,17 @@ class Engine:
         snapshot: MarketSnapshot,
         portfolio: PortfolioState,
         being_sold: set[str],
+        blocked: set[str] | None = None,
     ) -> list[Decision]:
+        """
+        Args:
+            being_sold: gibt Depotplaetze frei (die Position verschwindet gleich).
+            blocked: darf NICHT gekauft werden - gerade verkauft oder in der
+                Sperrfrist. Bewusst getrennt von `being_sold`: das eine ist
+                eine Kapazitaets-, das andere eine Zulassungsfrage.
+        """
         cfg = self.cfg
+        blocked = blocked or set()
         held = set(portfolio.positions) - being_sold
         slots = cfg.max_positions - len(held)
         if slots <= 0:
@@ -340,7 +421,7 @@ class Engine:
         # Alle Kandidaten bewerten und in eine Rangliste bringen.
         candidates: list[tuple[str, float, pd.Series, float]] = []
         for sym, df in snapshot.bars.items():
-            if sym in held or len(df) < 260:
+            if sym in held or sym in blocked or len(df) < 260:
                 continue
             price = snapshot.last_price(sym)
             if price is None or price < cfg.min_price:
