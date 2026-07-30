@@ -23,12 +23,34 @@
 #   tail -f logs/shadow.log                       # was tut der Schattenbot?
 #   python scripts/12_daemon.py --status          # Zustand Handel
 #   python scripts/16_shadow_daemon.py --status   # Zustand Schatten
+#
+# logs/*.log sind Symlinks nach ~/Library/Logs/alpaca-bot/ - launchd oeffnet
+# StandardOutPath/StandardErrorPath SELBST, und macOS' TCC-Dateischutz fuer
+# den "Dokumente"-Ordner verweigert das dort (bestaetigt 2026-07-30: der
+# Dienst blieb bei "last exit code 78: EX_CONFIG" haengen, bis die Log-Pfade
+# nach ~/Library/Logs umzogen).
 
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="$PROJECT_DIR/.venv/bin/python"
-LOGDIR="$PROJECT_DIR/logs"
+
+# WICHTIG: launchd oeffnet StandardOutPath/StandardErrorPath SELBST, bevor es
+# an den Kindprozess uebergibt - und dafuer greift macOS' TCC-Dateischutz fuer
+# den "Dokumente"-Ordner. Ein Terminal, das interaktiv in ~/Documents
+# schreiben darf, gibt diese Erlaubnis NICHT automatisch an einen von launchd
+# gestarteten Hintergrunddienst weiter. Ergebnis, bestaetigt am 2026-07-30
+# durch systematisches Ausschliessen (Label, Resource-Limits, ThrottleInterval,
+# einzeln UND meine eigenen Wilde-Vermutungen einzeln getestet): der Dienst
+# blieb IMMER bei "last exit code 78: EX_CONFIG" haengen, sobald die Log-Pfade
+# unter ~/Documents/... lagen - und startete auf Anhieb sauber, sobald sie
+# stattdessen unter ~/Library/Logs/ lagen.
+#
+# Die eigentlichen Log-Dateien liegen deshalb dort; im Projekt liegen nur
+# noch Symlinks darauf, damit `tail -f logs/shadow.log` weiter funktioniert.
+LOGDIR="$HOME/Library/Logs/alpaca-bot"
+PROJEKT_LOGDIR="$PROJECT_DIR/logs"
+mkdir -p "$LOGDIR" "$PROJEKT_LOGDIR"
 
 # --- Argumente einlesen (Reihenfolge egal) ---
 DIENST="handel"
@@ -50,7 +72,7 @@ case "$DIENST" in
         LOGBASE="daemon"
         ;;
     schatten)
-        LABEL="de.local.alpacashadow"
+        LABEL="de.local.alpacaschatten"
         SCRIPT="scripts/16_shadow_daemon.py"
         LOGBASE="shadow"
         # Der Schattenbetrieb kennt kein --live: Er importiert `trading.py`
@@ -59,6 +81,22 @@ case "$DIENST" in
         ;;
     *) echo "FEHLER: --dienst muss 'handel' oder 'schatten' sein."; exit 1 ;;
 esac
+
+# Bequemlichkeits-Symlinks im Projekt, damit `tail -f logs/${LOGBASE}.log`
+# weiter funktioniert, obwohl die echten Dateien jetzt unter ~/Library/Logs
+# liegen (siehe Begruendung oben bei LOGDIR). Eine bereits vorhandene
+# regulaere Datei (aus der Zeit vor diesem Fix) wird einmalig archiviert,
+# nicht stillschweigend ueberschrieben.
+for suffix in "" ".error"; do
+    ziel="$LOGDIR/${LOGBASE}${suffix}.log"
+    link="$PROJEKT_LOGDIR/${LOGBASE}${suffix}.log"
+    touch "$ziel"
+    if [[ -e "$link" && ! -L "$link" ]]; then
+        mkdir -p "$PROJEKT_LOGDIR/archiv"
+        mv "$link" "$PROJEKT_LOGDIR/archiv/${LOGBASE}${suffix}.log.$(date +%Y%m%d_%H%M%S)"
+    fi
+    ln -sf "$ziel" "$link"
+done
 
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 
@@ -126,18 +164,17 @@ cat > "$PLIST" <<PLIST_END
          SQLite-Verbindung fuer seinen Zeitzonen-Cache, ohne sie zuverlaessig
          zu schliessen - im Dauerbetrieb riss dieses Limit nach einigen
          Stunden (beobachtet 2026-07-29, alle Schritte fielen fuer den Rest
-         der Nacht aus). Das Skript hebt das Limit zusaetzlich selbst an
-         (_limit_anheben) - diese Angabe ist die zweite Verteidigungslinie. -->
-    <key>SoftResourceLimits</key>
-    <dict>
-        <key>NumberOfFiles</key>
-        <integer>8192</integer>
-    </dict>
-    <key>HardResourceLimits</key>
-    <dict>
-        <key>NumberOfFiles</key>
-        <integer>8192</integer>
-    </dict>
+         der Nacht aus).
+
+         Die Anhebung passiert NUR im Skript selbst (_limit_anheben via
+         resource.setrlimit), nicht hier im Plist. Ein Versuch, es zusaetzlich
+         ueber SoftResourceLimits/HardResourceLimits im Plist zu setzen,
+         liess den Dienst am 2026-07-30 zuverlaessig mit "last exit code 78:
+         EX_CONFIG" scheitern (bestaetigt per Minimaltest: exakt dieselbe
+         Konfiguration OHNE diese beiden Schluessel startete sofort sauber,
+         MIT ihnen nie). Vermutlich eine Einschraenkung von launchd fuer
+         User-LaunchAgents auf dieser macOS-Version. Der Python-seitige Weg
+         reicht allein aus und ist deshalb die einzige Verteidigungslinie. -->
 
     <key>StandardOutPath</key>
     <string>${LOGDIR}/${LOGBASE}.log</string>
@@ -163,8 +200,8 @@ echo "  Dienst      : ${DIENST}  (${SCRIPT})"
 echo "  Modus       : ${MODE_TEXT}"
 echo "  Neustart    : automatisch bei Absturz (KeepAlive)"
 echo "  Nach Reboot : automatisch beim Anmelden (RunAtLoad)"
-echo "  Protokoll   : ${LOGDIR}/${LOGBASE}.log"
+echo "  Protokoll   : logs/${LOGBASE}.log  (Symlink -> ${LOGDIR})"
 echo
 echo "  Status ansehen : python ${SCRIPT} --status"
-echo "  Live verfolgen : tail -f ${LOGDIR}/${LOGBASE}.log"
+echo "  Live verfolgen : tail -f logs/${LOGBASE}.log"
 echo "  Entfernen      : ./scripts/install_service.sh --dienst ${DIENST} --remove"
