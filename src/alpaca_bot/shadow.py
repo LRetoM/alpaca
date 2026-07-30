@@ -1114,6 +1114,15 @@ def _spiegel(bot, snap: MarketSnapshot, per_symbol: dict[str, pd.DataFrame],
                 # Stop, Ziel und bars_held bleiben unveraendert - der Nachkauf
                 # verstaerkt eine These, er stellt keine neue auf.
                 pos = positionen[p["symbol"]]
+
+                # Sicherheitscheck ZUM AUSFUEHRUNGSZEITPUNKT (heutige
+                # Eroeffnung), nicht nur bei der Entscheidung (gestriger
+                # Schluss). Dazwischen kann eine Kursluecke einen gestrigen
+                # Gewinner in einen heutigen Verlierer verwandeln - siehe
+                # live.py fuer den Fund (CHRW: +2,1% -> -5,4%).
+                if pos.entry_price > 0 and (fill / pos.entry_price - 1) < bot.config.topup_min_gain_pct:
+                    continue
+
                 qty = int((p["notional"] or 0) / fill)
                 if qty <= 0:
                     continue

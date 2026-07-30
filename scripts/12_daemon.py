@@ -49,17 +49,25 @@ def main() -> int:
     p.add_argument("--positions", type=int, default=15)
     p.add_argument("--max-new", type=int, default=3)
     p.add_argument("--strategy", default="reversal", choices=["reversal", "momentum"])
-    p.add_argument("--voll-investiert", action="store_true",
-                   help="Verteilt das freie Kapital so, dass der Zielanteil "
-                        "(target_invested, 90 %%) tatsaechlich erreicht wird. "
-                        "Ohne diesen Schalter wirkt die Volatilitaets-"
-                        "Skalierung absolut und laesst bei volatilen "
-                        "Umkehr-Kandidaten Kapital ungenutzt (gemessen: "
-                        "53,9 %% statt 90 %% bei vollen 15 Positionen). "
-                        "ACHTUNG: verstaerkt Gewinne UND Verluste.")
-    p.add_argument("--nachkauf", action="store_true",
-                   help="Stockt bestehende Positionen auf, wenn die Plaetze "
-                        "voll sind und Kapital ungenutzt liegt. Nur in "
+    # Standardverhalten des Bots: das freie Kapital wird bis zum Zielanteil
+    # eingesetzt, und ueberschuessiges Kapital fliesst in Nachkaeufe von
+    # Gewinnern, statt bei vollen Plaetzen ungenutzt liegenzubleiben
+    # (gemessen 2026-07-30: 53,9 %% statt 90 %% bei 15 von 15 Positionen).
+    # Beides ist deshalb AN, nicht ein Extra-Schalter - genau wie es die
+    # Bots B08/B09 im Schattenbetrieb fest eingebaut haben. Die Flags dienen
+    # nur zum ABSCHALTEN, falls das je fuer einen Test noetig ist.
+    p.add_argument("--kein-voll-investiert", dest="voll_investiert",
+                   action="store_false", default=True,
+                   help="Schaltet die Vollinvestition ab (Standard: an). "
+                        "Ohne sie wirkt die Volatilitaets-Skalierung absolut "
+                        "und laesst bei volatilen Umkehr-Kandidaten Kapital "
+                        "ungenutzt. ACHTUNG: mehr Investitionsgrad verstaerkt "
+                        "Gewinne UND Verluste gleichermassen.")
+    p.add_argument("--kein-nachkauf", dest="nachkauf",
+                   action="store_false", default=True,
+                   help="Schaltet den Nachkauf ab (Standard: an). Ohne ihn "
+                        "bleibt bei vollen Plaetzen Kapital liegen, bis eine "
+                        "Position schliesst. Nachgekauft wird nur in "
                         "Gewinner und nur solange der Score ueber der "
                         "Kaufschwelle liegt - in Verlierer nachzukaufen waere "
                         "Average-Down. Stop und Ziel bleiben unveraendert.")

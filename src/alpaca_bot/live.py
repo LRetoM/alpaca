@@ -472,10 +472,35 @@ def run_once(
                 print(f"      NACHKAUF {d.symbol:<5} ${d.target_notional:>9,.2f}  "
                       f"Score {d.conviction:.3f}  "
                       f"(Bestand ${d.reasons.get('bestand_vorher', 0):,.0f}, "
-                      f"Gewinn {d.reasons.get('gewinn_pct', 0):+.1%})")
+                      f"Gewinn gestern {d.reasons.get('gewinn_pct', 0):+.1%})")
             try:
-                compliance.assert_can_trade(d.symbol, "buy")
+                # Sicherheitscheck ZUM AUSFUEHRUNGSZEITPUNKT, nicht nur bei
+                # der Entscheidung: Entschieden wird auf dem Schlusskurs von
+                # gestern, ausgefuehrt zur heutigen Eroeffnung. Dazwischen
+                # kann eine Kursluecke einen gestrigen Gewinner in einen
+                # heutigen Verlierer verwandeln - beobachtet bei CHRW: +2,1 %
+                # beim Schlusskurs, aber -5,4 % nach einer Eroeffnungsluecke
+                # von -6,8 %. Reversal-Kandidaten sind per Definition volatil,
+                # dieses Risiko ist hier groesser als bei ruhigen Werten. Die
+                # Kernzusage "nie in einen Verlierer nachkaufen" muss deshalb
+                # auch HIER gelten, nicht nur gestern Abend.
                 ref = _reference_price(d.symbol, "buy", fallback=d.price)
+                pos = portfolio.positions.get(d.symbol)
+                if pos is not None and pos.entry_price > 0:
+                    gewinn_jetzt = ref / pos.entry_price - 1
+                    if gewinn_jetzt < cfg.topup_min_gain_pct:
+                        if verbose:
+                            print(f"              -> abgebrochen: "
+                                  f"Gewinn jetzt {gewinn_jetzt:+.1%} "
+                                  f"(Luecke seit der Entscheidung)")
+                        run.decision(d.symbol, "topup", reasons=d.reasons,
+                                     conviction=d.conviction, price=d.price,
+                                     strategy="engine",
+                                     blocked_by="KurssluckeSeitEntscheidung")
+                        blocked += 1
+                        continue
+
+                compliance.assert_can_trade(d.symbol, "buy")
                 res = trading.market_order(
                     d.symbol, notional=round(d.target_notional, 2),
                     side="buy", dry_run=dry_run,

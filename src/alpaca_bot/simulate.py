@@ -238,7 +238,8 @@ def run(
                 if d.action == "buy":
                     _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked)
                 elif d.action == "topup":
-                    _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked)
+                    _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked,
+                                   min_gewinn=ecfg.topup_min_gain_pct)
                 elif d.action == "sell":
                     _execute_sell(
                         d, bar, today, portfolio, open_meta, cfg, trades,
@@ -375,7 +376,8 @@ def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked):
     }
 
 
-def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked):
+def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
+                   min_gewinn: float = 0.0):
     """Nachkauf in eine bestehende Position.
 
     Die Stueckzahl waechst, der Einstand wird zum Mischkurs. Stop, Ziel,
@@ -383,9 +385,19 @@ def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked):
     verstaerkt eine bestehende These, er stellt keine neue auf. Wuerde
     `bars_held` zuruecksetzen, liesse sich die Haltefrist durch
     wiederholtes Nachkaufen beliebig verlaengern.
+
+    Sicherheitscheck ZUM AUSFUEHRUNGSZEITPUNKT (heutige Eroeffnung `fill`),
+    nicht nur bei der Entscheidung (gestriger Schluss): Dazwischen kann eine
+    Kursluecke einen gestrigen Gewinner in einen heutigen Verlierer
+    verwandeln - beobachtet am 2026-07-30 bei CHRW (+2,1% Entscheidung,
+    -5,4% Ausfuehrung nach -6,8% Eroeffnungsluecke).
     """
     pos = portfolio.positions.get(d.symbol)
     if pos is None or fill <= 0:
+        return
+    if pos.entry_price > 0 and (fill / pos.entry_price - 1) < min_gewinn:
+        blocked["kursluecke_seit_entscheidung"] = (
+            blocked.get("kursluecke_seit_entscheidung", 0) + 1)
         return
     qty = int(d.target_notional / fill)
     if qty <= 0:
