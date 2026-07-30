@@ -49,6 +49,14 @@ def main() -> int:
     p.add_argument("--positions", type=int, default=15)
     p.add_argument("--max-new", type=int, default=3)
     p.add_argument("--strategy", default="reversal", choices=["reversal", "momentum"])
+    p.add_argument("--voll-investiert", action="store_true",
+                   help="Verteilt das freie Kapital so, dass der Zielanteil "
+                        "(target_invested, 90 %%) tatsaechlich erreicht wird. "
+                        "Ohne diesen Schalter wirkt die Volatilitaets-"
+                        "Skalierung absolut und laesst bei volatilen "
+                        "Umkehr-Kandidaten Kapital ungenutzt (gemessen: "
+                        "53,9 %% statt 90 %% bei vollen 15 Positionen). "
+                        "ACHTUNG: verstaerkt Gewinne UND Verluste.")
     args = p.parse_args()
 
     if args.status:
@@ -74,9 +82,11 @@ def main() -> int:
         symbols = universe.BENCHMARK_SETS[args.universe]
 
     engine = (
-        EngineConfig.for_reversal(max_positions=args.positions)
+        EngineConfig.for_reversal(max_positions=args.positions,
+                                  deploy_to_target=args.voll_investiert)
         if args.strategy == "reversal"
-        else EngineConfig(max_positions=args.positions)
+        else EngineConfig(max_positions=args.positions,
+                          deploy_to_target=args.voll_investiert)
     )
 
     cfg = DaemonConfig(

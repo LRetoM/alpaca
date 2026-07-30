@@ -151,6 +151,30 @@ class EngineConfig:
     """Anteil des Kapitals, der maximal im Markt steht. Nicht 1.0 - etwas
     Puffer verhindert Zwangsverkaeufe bei Kursluecken."""
 
+    deploy_to_target: bool = False
+    """Soll `target_invested` tatsaechlich ERREICHT werden?
+
+    Standard `False` = bisheriges Verhalten: Die Volatilitaets-Skalierung
+    wirkt als absoluter Multiplikator, der eine Position nur verkleinern
+    kann. Weil Umkehr-Kandidaten definitionsgemaess gerade stark gefallen
+    sind und damit fast immer ueber dem 3-%-ATR-Referenzwert liegen, wird
+    dadurch systematisch WENIGER als `target_invested` eingesetzt -
+    gemessen am 2026-07-30: 53,9 % statt 90 %, bei vollen 15 von 15
+    Positionen. Das ist implizites Volatilitaets-Targeting: In unruhigen
+    Phasen steht weniger Kapital im Markt.
+
+    `True` = die Volatilitaets-Gewichtung bestimmt nur noch die RELATIVE
+    Verteilung (Risikoparitaet: volatile Werte bekommen weniger Gewicht),
+    wird aber so normiert, dass das freie Kapital bis `target_invested`
+    eingesetzt wird. `max_position_pct` bleibt dabei hart - was durch den
+    Deckel abgeschnitten wird, verteilt sich auf die uebrigen Kandidaten
+    (Wasserfuellung).
+
+    Bewusst KEIN neuer Standardwert: Beides sind unterschiedliche
+    Risikohaltungen, keine richtig/falsch-Frage. Welche traegt, entscheidet
+    der Vorwaertstest der Flotte (Bot B08_voll_investiert), nicht die
+    Vermutung."""
+
     max_position_pct: float | None = None
     """Obergrenze je Einzelposition. None = Wert aus der .env (MAX_POSITION_PCT).
 
@@ -238,6 +262,7 @@ class EngineConfig:
             "strategy": self.strategy,
             "max_positions": self.max_positions,
             "target_invested": self.target_invested,
+            "deploy_to_target": self.deploy_to_target,
             "max_position_pct": self.max_position_pct,
             "min_position_pct": self.min_position_pct,
             "min_score": self.min_score,
@@ -277,6 +302,89 @@ class EngineConfig:
         )
         defaults.update(overrides)
         return cls(**defaults)
+
+
+def _vola_gewicht(atr_pct: float) -> float:
+    """Relatives Gewicht eines Kandidaten aus seiner Volatilitaet.
+
+    Identisch zum bisherigen Skalierungsfaktor (3 % ATR als Referenz,
+    hoechstens 1.5-fach) - nur wird er hier als GEWICHT verwendet und
+    anschliessend normiert, statt als absoluter Multiplikator zu wirken.
+    Dadurch bleibt die Risikoparitaet erhalten (volatile Werte bekommen
+    weniger), ohne dass Kapital ungenutzt liegen bleibt.
+    """
+    if atr_pct <= 0:
+        return 1.0
+    return min(1.5, 0.03 / max(atr_pct, 0.005))
+
+
+def verteile_kapital(
+    gewichte: dict[str, float], frei: float, deckel: float, mindest: float
+) -> dict[str, float]:
+    """Verteilt `frei` auf die Kandidaten - Wasserfuellung mit Deckel.
+
+    Drei Bedingungen gleichzeitig zu erfuellen ist nicht trivial:
+      * die Summe soll `frei` moeglichst ausschoepfen,
+      * keine Einzelposition darf `deckel` ueberschreiten,
+      * Positionen unter `mindest` lohnen sich nicht (Spread frisst sie auf).
+
+    Wer einfach proportional verteilt und danach deckelt, laesst das
+    abgeschnittene Kapital liegen. Deshalb wird in Runden gefuellt: Wer den
+    Deckel reisst, bekommt genau den Deckel und scheidet aus; sein Rest
+    wird unter den Uebrigen neu aufgeteilt. Das wiederholt sich, bis
+    niemand mehr anschlaegt.
+
+    Zu kleine Positionen fliegen anschliessend raus, und ihr Anteil geht
+    zurueck in den Topf - ebenfalls in Runden, weil dadurch andere
+    Positionen wachsen und ihrerseits den Deckel reissen koennen.
+    """
+    if not gewichte or frei <= 0 or deckel <= 0:
+        return {}
+
+    # Mehr Kandidaten, als sich mit `mindest` ueberhaupt finanzieren lassen?
+    # Dann die hinteren weglassen. `gewichte` kommt nach Score sortiert
+    # herein, es fliegen also die schwaechsten Kandidaten zuerst. Wuerde man
+    # stattdessen erst verteilen und danach alle zu kleinen streichen, bliebe
+    # am Ende NICHTS uebrig - bei 50 Kandidaten und 3.000 $ Mindestgroesse
+    # bekaeme jeder 1.800 $, alle faenden sich unter der Grenze wieder.
+    max_n = int(frei // mindest) if mindest > 0 else len(gewichte)
+    if max_n <= 0:
+        return {}
+    offen = {s: max(g, 1e-9) for s, g in list(gewichte.items())[:max_n]}
+
+    def _fuellen(kandidaten: dict[str, float]) -> dict[str, float]:
+        """Wasserfuellung: wer den Deckel reisst, bekommt genau den Deckel
+        und scheidet aus; sein Rest wird unter den Uebrigen neu aufgeteilt."""
+        groessen: dict[str, float] = {}
+        rest, pool = frei, dict(kandidaten)
+        while pool and rest > 1e-9:
+            summe = sum(pool.values())
+            if summe <= 0:
+                break
+            reisst = [s for s, g in pool.items() if rest * g / summe > deckel]
+            if not reisst:
+                for s, g in pool.items():
+                    groessen[s] = rest * g / summe
+                break
+            for s in reisst:
+                groessen[s] = deckel
+                rest -= deckel
+                del pool[s]
+        return groessen
+
+    groessen: dict[str, float] = {}
+    for _ in range(len(offen) + 2):           # terminiert garantiert
+        groessen = _fuellen(offen)
+        zu_klein = [s for s, v in groessen.items() if v < mindest]
+        if not zu_klein:
+            return {s: v for s, v in groessen.items() if v > 0}
+        # Nur den KLEINSTEN entfernen: Sein Anteil verteilt sich auf die
+        # uebrigen, wodurch diese ueber die Mindestgroesse wachsen koennen.
+        offen.pop(min(zu_klein, key=lambda s: groessen[s]), None)
+        if not offen:
+            return {}
+
+    return {s: v for s, v in groessen.items() if v >= mindest}
 
 
 class Engine:
@@ -464,24 +572,42 @@ class Engine:
         free = max(0.0, min(investable - already, portfolio.cash))
         per_slot = free / max(1, len(chosen))
         cap = portfolio.equity * cfg.max_position_pct
+        mindest = portfolio.equity * cfg.min_position_pct
+
+        # Bei `deploy_to_target` wird das freie Kapital vorab auf alle
+        # Kandidaten verteilt (Wasserfuellung), damit `target_invested`
+        # tatsaechlich erreicht wird. Sonst gilt der bisherige Weg, bei dem
+        # die Volatilitaets-Skalierung absolut wirkt und nur verkleinern kann.
+        verteilt: dict[str, float] = {}
+        if cfg.deploy_to_target:
+            verteilt = verteile_kapital(
+                {sym: _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+                 for sym, _score, row, _price in chosen},
+                frei=free, deckel=cap, mindest=mindest,
+            )
 
         out: list[Decision] = []
         for sym, score, row, price in chosen:
             atr = float(row.get("atr", 0) or 0)
             atr_pct = float(row.get("atr_pct", 0) or 0)
 
-            size = min(per_slot, cap)
-            # Volatilitaets-Skalierung: 3 % ATR ist der Referenzwert.
-            if atr_pct > 0:
-                size *= min(1.5, 0.03 / max(atr_pct, 0.005))
-            size = min(size, cap)
+            if cfg.deploy_to_target:
+                size = verteilt.get(sym, 0.0)
+                if size <= 0:
+                    continue
+            else:
+                size = min(per_slot, cap)
+                # Volatilitaets-Skalierung: 3 % ATR ist der Referenzwert.
+                if atr_pct > 0:
+                    size *= min(1.5, 0.03 / max(atr_pct, 0.005))
+                size = min(size, cap)
 
-            # Auch die Mindestgroesse ist relativ zum Kapital, nicht ein
-            # fixer Dollarbetrag - sonst driftet sie bei wachsendem Konto
-            # in die Bedeutungslosigkeit oder wird bei kleinem Konto zur
-            # faktischen Handelssperre.
-            if size < portfolio.equity * cfg.min_position_pct:
-                continue
+                # Auch die Mindestgroesse ist relativ zum Kapital, nicht ein
+                # fixer Dollarbetrag - sonst driftet sie bei wachsendem Konto
+                # in die Bedeutungslosigkeit oder wird bei kleinem Konto zur
+                # faktischen Handelssperre.
+                if size < mindest:
+                    continue
 
             stop = price - cfg.stop_atr * atr if atr > 0 else price * 0.90
             target = price + cfg.target_atr * atr if atr > 0 else price * 1.25

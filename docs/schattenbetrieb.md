@@ -683,6 +683,64 @@ python scripts/18_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos bei h
 Das ist genau die Vorabprüfung, die §12.2 verlangt — hier vorwärts auf den
 echten Büchern statt auf der Historie.
 
+#### ERWEITERUNG 2026-07-30 — zwei Bots zum Investitionsgrad
+
+**Beobachtung:** Bei vollen 15 von 15 Positionen standen nur **53,9 %** des
+Kapitals im Markt, obwohl `target_invested = 0,90`. Ursache ist die
+Volatilitäts-Skalierung in `engine.py`:
+
+```python
+size *= min(1.5, 0.03 / atr_pct)   # wirkt ABSOLUT, kann nur verkleinern
+```
+
+Umkehr-Kandidaten sind per Definition Werte, die gerade stark gefallen
+sind — also fast immer über dem 3-%-ATR-Referenzwert. Die Skalierung
+schrumpft sie deshalb systematisch. Auf echten Daten gemessen: **35,3 %
+statt 90 %** bei 15 Positionen.
+
+Das ist **kein Fehler**, sondern implizites Volatilitäts-Targeting: In
+unruhigen Phasen steht weniger Kapital im Markt. Es ist aber eine
+Risikohaltung, die nie bewusst gewählt wurde — und es gibt zwei Auswege,
+die sich gegenseitig ausschließen. Deshalb werden sie **getrennt**
+gemessen statt vermischt:
+
+| Bot | Achse | Weg |
+|---|---|---|
+| `B07_mehr_positionen` | `max_positions` = 25 | mehr Plätze, gleiche Größe |
+| `B08_voll_investiert` | `deploy_to_target` = True | gleiche Plätze, größere Positionen |
+
+`deploy_to_target` (neu in `EngineConfig`, Standard **False**) macht die
+Volatilitäts-Gewichtung *relativ* statt absolut: Sie bestimmt weiterhin,
+wer mehr und wer weniger bekommt (Risikoparität), wird aber so normiert,
+dass `target_invested` erreicht wird. `max_position_pct` bleibt hart —
+was der Deckel abschneidet, verteilt sich per Wasserfüllung auf die
+übrigen Kandidaten.
+
+Gemessen nach der Änderung: **35,3 % → 90,0 %** bei gleicher
+Positionsanzahl, Deckel eingehalten.
+
+**Wichtig — kein Auffüllen um jeden Preis:** Gibt es zu wenige Kandidaten,
+bleibt das Kapital liegen. Bei nur 3 Kandidaten werden 33 % investiert,
+nicht künstlich mehr. „Kein passender Wert" bleibt ein gültiges Ergebnis.
+
+**Ehrliche Einordnung:** Ein höherer Investitionsgrad ist nicht per se
+besser. Er verstärkt Gewinne **und** Verluste. Da §0.2 für diese Strategie
+über 5 Jahre *keinen* Netto-Vorsprung gegen Buy & Hold nachweisen konnte,
+ist die Erwartung neutral bis negativ — genau deshalb steht `False` als
+Standard, und genau deshalb entscheidet der Vorwärtstest, nicht die
+Vermutung.
+
+**Nicht umgesetzt: Gewichtung nach Score.** Naheliegend wäre, den
+bestbewerteten Kandidaten mehr Kapital zu geben. §0.2 hat aber gemessen,
+dass die Trefferquote mit steigendem Score *sinkt* (52,0 % → 49,2 %) — der
+Score sortiert am oberen Ende nicht zuverlässig. Kapital dorthin zu
+konzentrieren wäre auf heutiger Datenlage eher schädlich. Sobald der
+Schattenbetrieb genug Daten für eine belastbare Kalibrierung hat, ist das
+erneut zu prüfen.
+
+Die Flotte umfasst damit **9 Bots**, die Zufallsschwelle steigt auf
+**t > 2,60**.
+
 ### 5.4 Voranmeldung — der Schutz gegen nachträgliche Erzählungen
 
 Jeder Bot muss **vor seinem ersten Lauf** mit Hypothese und Quelle

@@ -79,6 +79,28 @@ STARTAUFSTELLUNG = [
          hypothese="Prueft, ob der SPY-Regimefilter ueberhaupt etwas "
                    "beitraegt - er sperrt Kaeufe im Baerenmarkt, aber "
                    "gemessen wurde sein Beitrag nie."),
+    # --- Die beiden Wege zu hoeherem Investitionsgrad, GETRENNT getestet ---
+    # Gemessen am 2026-07-30: Bei vollen 15 von 15 Positionen standen nur
+    # 53,9 % des Kapitals im Markt. Ursache ist die Volatilitaets-Skalierung,
+    # die als absoluter Multiplikator wirkt und Umkehr-Kandidaten (per
+    # Definition stark gefallen, also volatil) systematisch verkleinert.
+    # Es gibt zwei Auswege - welcher traegt, entscheidet die Messung.
+    dict(bot_id="B07_mehr_positionen", name="Mehr Positionen",
+         familie="investitionsgrad", achse="max_positions", wert="25",
+         aenderung={"max_positions": 25},
+         hypothese="Weg A zu hoeherem Investitionsgrad: mehr Plaetze statt "
+                   "groesserer Positionen. Mehr Breite senkt das Einzelrisiko, "
+                   "erhoeht aber den Umschlag - und Kosten fressen laut "
+                   "Messung 0.2 bereits 72-109 % des Bruttogewinns."),
+    dict(bot_id="B08_voll_investiert", name="Voll investiert",
+         familie="investitionsgrad", achse="deploy_to_target", wert="True",
+         aenderung={"deploy_to_target": True},
+         hypothese="Weg B: gleiche Positionszahl, aber das freie Kapital wird "
+                   "bis target_invested verteilt (Volatilitaet bestimmt nur "
+                   "noch die relative Gewichtung). Kein zusaetzlicher "
+                   "Umschlag, dafuer groessere Einzelpositionen. ACHTUNG: "
+                   "Hoeherer Investitionsgrad verstaerkt Gewinne UND Verluste "
+                   "- ohne nachgewiesenen Vorsprung ist das nicht per se gut."),
 ]
 
 
