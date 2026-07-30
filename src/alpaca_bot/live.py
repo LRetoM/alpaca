@@ -223,6 +223,60 @@ def _reference_price(symbol: str, side: str, fallback: float) -> float:
     return float(fallback)
 
 
+def _nachkauf_im_zustand(d: Decision, fill_schaetzung: float) -> None:
+    """Schreibt den gespeicherten Zustand nach einem Nachkauf fort.
+
+    Zwei Dinge muessen hier zusammenpassen, sonst verfaelscht der Nachkauf
+    die Ausstiegsregeln:
+
+    1. **Der gespeicherte Einstand wird auf den neuen Mischkurs gesetzt.**
+       Nicht aus Buchhaltungsliebe, sondern weil `daemon.recover()` bei einer
+       Abweichung von ueber 0,5 % zwischen gespeichertem und Broker-Einstand
+       Stop UND Ziel proportional neu skaliert. Nach einem Nachkauf aendert
+       sich der Broker-Einstand zwangslaeufig - ohne diese Zeile wuerde
+       `recover()` die Marken beim naechsten Start verschieben, obwohl sich
+       an der These nichts geaendert hat.
+
+    2. **Stop, Ziel, Einstiegsdatum und `bars_held` bleiben unveraendert.**
+       Der Nachkauf verstaerkt eine bestehende These, er stellt keine neue
+       auf. Wuerde `bars_held` zuruecksetzen, liesse sich die Haltefrist
+       durch wiederholtes Nachkaufen beliebig verlaengern.
+    """
+    from .state import Store
+
+    store = Store()
+    meta = store.load_positions().get(d.symbol)
+    if not meta:
+        return
+
+    alt_wert = float(d.reasons.get("bestand_vorher", 0) or 0)
+    neu_wert = float(d.target_notional)
+    alt_einstand = float(meta["entry_price"])
+    if alt_wert <= 0 or alt_einstand <= 0 or fill_schaetzung <= 0:
+        return
+
+    # Mischkurs ueber die STUECKZAHLEN, nicht ueber die Betraege.
+    alt_stueck = alt_wert / float(d.price) if d.price else 0.0
+    neu_stueck = neu_wert / fill_schaetzung
+    if alt_stueck + neu_stueck <= 0:
+        return
+    misch = ((alt_stueck * alt_einstand + neu_stueck * fill_schaetzung)
+             / (alt_stueck + neu_stueck))
+
+    store.save_position(
+        d.symbol,
+        entry_price=misch,
+        entry_date=meta["entry_date"],          # unveraendert
+        stop_price=float(meta["stop_price"]),   # unveraendert
+        target_price=float(meta["target_price"]),
+        high_water=max(float(meta["high_water"]), float(d.price)),
+        bars_held=int(meta["bars_held"] or 0),  # NICHT zuruecksetzen
+        entry_score=meta["entry_score"],
+        reasons={"nachkauf": f"+${neu_wert:,.0f}, Einstand "
+                             f"{alt_einstand:.2f} -> {misch:.2f}"},
+    )
+
+
 def reconcile_fills(lookback_hours: int = 48) -> int:
     """Traegt die tatsaechlichen Ausfuehrungspreise ins Protokoll nach.
 
@@ -342,10 +396,16 @@ def run_once(
         decisions = engine.decide(snapshot, portfolio)
         sells = [d for d in decisions if d.action == "sell"]
         buys = [d for d in decisions if d.action == "buy"][:max_new_positions]
+        # Nachkaeufe zaehlen NICHT gegen `max_new_positions`: Diese Grenze
+        # begrenzt, wie viele neue Thesen ein Lauf aufmacht. Ein Nachkauf
+        # eroeffnet keine neue These, er verstaerkt eine bestehende - und
+        # jede einzelne bleibt durch `max_position_pct` gedeckelt.
+        topups = [d for d in decisions if d.action == "topup"]
 
         if verbose:
             print(f"\n      {len(sells)} Verkaeufe, {len(buys)} Kaeufe "
-                  f"(von {len([d for d in decisions if d.action == 'buy'])} moeglichen)")
+                  f"(von {len([d for d in decisions if d.action == 'buy'])} moeglichen)"
+                  + (f", {len(topups)} Nachkaeufe" if topups else ""))
 
         executed = blocked = 0
         done: list[Decision] = []
@@ -401,6 +461,42 @@ def run_once(
                 blocked += 1
             except Exception as e:  # noqa: BLE001
                 run.error(f"Kauf {d.symbol} fehlgeschlagen: {e}")
+                blocked += 1
+
+        # --- 5. Nachkaeufe in bestehende Positionen ---
+        for d in topups:
+            did = run.decision(d.symbol, "topup", reasons=d.reasons,
+                               conviction=d.conviction, price=d.price,
+                               strategy="engine")
+            if verbose:
+                print(f"      NACHKAUF {d.symbol:<5} ${d.target_notional:>9,.2f}  "
+                      f"Score {d.conviction:.3f}  "
+                      f"(Bestand ${d.reasons.get('bestand_vorher', 0):,.0f}, "
+                      f"Gewinn {d.reasons.get('gewinn_pct', 0):+.1%})")
+            try:
+                compliance.assert_can_trade(d.symbol, "buy")
+                ref = _reference_price(d.symbol, "buy", fallback=d.price)
+                res = trading.market_order(
+                    d.symbol, notional=round(d.target_notional, 2),
+                    side="buy", dry_run=dry_run,
+                )
+                run.order(did, symbol=d.symbol, side="buy",
+                          status=res.status, order_id=res.id,
+                          notional=d.target_notional, dry_run=dry_run,
+                          expected_price=ref, decision_price=d.price)
+                if not dry_run:
+                    _nachkauf_im_zustand(d, ref)
+                done.append(d)
+                executed += 0 if dry_run else 1
+            except (trading.RiskError, compliance.ComplianceError) as e:
+                if verbose:
+                    print(f"              -> blockiert: {e}")
+                run.decision(d.symbol, "topup", reasons=d.reasons,
+                             conviction=d.conviction, price=d.price,
+                             strategy="engine", blocked_by=type(e).__name__)
+                blocked += 1
+            except Exception as e:  # noqa: BLE001
+                run.error(f"Nachkauf {d.symbol} fehlgeschlagen: {e}")
                 blocked += 1
 
         run.log("abschluss", ausgefuehrt=executed, blockiert=blocked,

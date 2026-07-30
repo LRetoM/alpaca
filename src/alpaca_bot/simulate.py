@@ -237,6 +237,8 @@ def run(
 
                 if d.action == "buy":
                     _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked)
+                elif d.action == "topup":
+                    _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked)
                 elif d.action == "sell":
                     _execute_sell(
                         d, bar, today, portfolio, open_meta, cfg, trades,
@@ -371,6 +373,46 @@ def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked):
         "entry_date": today, "entry_cost": cost.total_cost,
         "score": d.conviction, "entry_price": cost.effective_price,
     }
+
+
+def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked):
+    """Nachkauf in eine bestehende Position.
+
+    Die Stueckzahl waechst, der Einstand wird zum Mischkurs. Stop, Ziel,
+    Einstiegsdatum und `bars_held` bleiben unveraendert - der Nachkauf
+    verstaerkt eine bestehende These, er stellt keine neue auf. Wuerde
+    `bars_held` zuruecksetzen, liesse sich die Haltefrist durch
+    wiederholtes Nachkaufen beliebig verlaengern.
+    """
+    pos = portfolio.positions.get(d.symbol)
+    if pos is None or fill <= 0:
+        return
+    qty = int(d.target_notional / fill)
+    if qty <= 0:
+        blocked["betrag_zu_klein"] = blocked.get("betrag_zu_klein", 0) + 1
+        return
+
+    cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
+                          slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+    if cost.net_proceeds > portfolio.cash:
+        qty = int(portfolio.cash * 0.98 / (fill * 1.01))
+        if qty <= 0:
+            blocked["kapital_erschoepft"] = blocked.get("kapital_erschoepft", 0) + 1
+            return
+        cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
+                              slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+
+    portfolio.cash -= cost.net_proceeds
+    neu_qty = pos.qty + qty
+    pos.entry_price = (
+        (pos.qty * pos.entry_price + qty * cost.effective_price) / neu_qty
+    )
+    pos.qty = neu_qty
+    pos.high_water = max(pos.high_water or pos.entry_price, cost.effective_price)
+
+    meta = open_meta.setdefault(d.symbol, {})
+    meta["entry_cost"] = meta.get("entry_cost", 0.0) + cost.total_cost
+    meta["entry_price"] = pos.entry_price
 
 
 def _execute_sell(d, bar, today, portfolio, open_meta, cfg, trades,

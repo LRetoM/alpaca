@@ -357,6 +357,12 @@ class Daemon:
                     )
                     self._record_lifecycle(d, meta)
                     self.store.drop_position(d.symbol)
+                # `topup` wird hier BEWUSST nicht behandelt: `live.py` hat den
+                # Zustand ueber `_nachkauf_im_zustand()` bereits fortgeschrieben
+                # (Mischkurs beim Einstand, Stop/Ziel/bars_held unveraendert).
+                # Ein zweiter save_position() hier wuerde genau diese sorgsam
+                # erhaltenen Marken mit den Werten der Nachkauf-Entscheidung
+                # ueberschreiben und die Haltefrist zuruecksetzen.
 
         self.store.heartbeat(
             ok=True, equity=result.equity,

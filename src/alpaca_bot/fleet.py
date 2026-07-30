@@ -101,6 +101,19 @@ STARTAUFSTELLUNG = [
                    "Umschlag, dafuer groessere Einzelpositionen. ACHTUNG: "
                    "Hoeherer Investitionsgrad verstaerkt Gewinne UND Verluste "
                    "- ohne nachgewiesenen Vorsprung ist das nicht per se gut."),
+    dict(bot_id="B09_nachkauf", name="Nachkauf in Gewinner",
+         familie="investitionsgrad", achse="allow_topup", wert="True",
+         aenderung={"allow_topup": True, "deploy_to_target": True},
+         # Gemessen wird gegen B08, nicht gegen B00: Beide sind voll
+         # investiert, der EINZIGE Unterschied ist der Nachkauf.
+         basis_bot="B08_voll_investiert",
+         hypothese="Weg C: Bestehende Positionen aufstocken, statt auf freie "
+                   "Plaetze zu warten. Nur in Gewinner und nur solange der "
+                   "Score ueber der Kaufschwelle liegt - in Verlierer "
+                   "nachzukaufen waere Average-Down. Offene Frage: Verstaerkt "
+                   "das die Gewinner oder konzentriert es Kapital in Werten, "
+                   "die ohnehin gleich ihr Ziel erreichen und verkauft "
+                   "werden?"),
 ]
 
 
@@ -276,7 +289,7 @@ def schwelle_sigma(store: ShadowStore | None = None) -> float:
 
 def startaufstellung_anmelden(store: ShadowStore | None = None,
                               verbose: bool = True) -> int:
-    """Meldet die sieben Bots aus §5.3 an. Mehrfach aufrufbar."""
+    """Meldet die Bots aus §5.3 an. Mehrfach aufrufbar."""
     s = _store(store)
     n = 0
     for b in STARTAUFSTELLUNG:
@@ -284,6 +297,11 @@ def startaufstellung_anmelden(store: ShadowStore | None = None,
             b["bot_id"], name=b["name"], familie=b["familie"],
             hypothese=b["hypothese"], achse=b["achse"], wert=b["wert"],
             aenderung=b["aenderung"], quelle="docs/schattenbetrieb.md §5.3",
+            # Manche Bots werden sinnvoll gegen einen ANDEREN Bot als die
+            # Basis gemessen: B09 unterscheidet sich von B08 in genau einer
+            # Achse (allow_topup), von B00 dagegen in zweien. Gegen B00
+            # verglichen liesse sich ein Unterschied nicht zuordnen.
+            basis_bot=b.get("basis_bot", "B00_basis"),
             store=s,
         )
         if verbose:

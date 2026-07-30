@@ -1109,6 +1109,53 @@ def _spiegel(bot, snap: MarketSnapshot, per_symbol: dict[str, pd.DataFrame],
                 })
                 stat["kaeufe"] += 1
 
+            elif p["aktion"] == "topup" and p["symbol"] in positionen:
+                # Nachkauf: Stueckzahl waechst, Einstand wird zum Mischkurs.
+                # Stop, Ziel und bars_held bleiben unveraendert - der Nachkauf
+                # verstaerkt eine These, er stellt keine neue auf.
+                pos = positionen[p["symbol"]]
+                qty = int((p["notional"] or 0) / fill)
+                if qty <= 0:
+                    continue
+                k = estimate_costs("buy", qty, last=fill,
+                                   spread_bps=cfg.spread_bps,
+                                   slippage_bps=cfg.slippage_bps, fees=DEFAULT_FEES)
+                if k.net_proceeds > cash:
+                    qty = int(cash * 0.98 / (fill * 1.01))
+                    if qty <= 0:
+                        continue
+                    k = estimate_costs("buy", qty, last=fill,
+                                       spread_bps=cfg.spread_bps,
+                                       slippage_bps=cfg.slippage_bps,
+                                       fees=DEFAULT_FEES)
+                cash -= k.net_proceeds
+                neu_qty = pos.qty + qty
+                pos.entry_price = (
+                    (pos.qty * pos.entry_price + qty * float(k.effective_price))
+                    / neu_qty
+                )
+                pos.qty = neu_qty
+                pos.high_water = max(pos.high_water, float(k.effective_price))
+                store.depot_speichern(bot.bot_id, pos,
+                                      entry_score=p["score"],
+                                      reasons=json.loads(p["reasons"] or "{}"))
+                store.save_prediction({
+                    "pred_id": uuid.uuid4().hex, "run_id": run_id,
+                    "bot_id": bot.bot_id, "buch": "spiegel",
+                    "as_of": p["as_of"], "decided_at": jetzt,
+                    "symbol": p["symbol"], "aktion": "topup", "score": p["score"],
+                    "decision_price": fill, "entry_date": tag.isoformat(),
+                    "entry_price_open": fill, "entry_price": fill,
+                    "entry_price_eff": float(k.effective_price),
+                    "entry_timing": "open",
+                    "planned_stop": p["stop_price"], "planned_target": p["target_price"],
+                    "planned_hold_days": bot.config.max_hold_days,
+                    "notional": qty * fill, "reasons": p["reasons"],
+                    "wuerde_gehandelt": 1, "code_version": cv,
+                    "nachgetragen": 0, **regime,
+                })
+                stat["nachkaeufe"] = stat.get("nachkaeufe", 0) + 1
+
             elif p["aktion"] == "sell" and p["symbol"] in positionen:
                 pos = positionen.pop(p["symbol"])
                 k = estimate_costs("sell", pos.qty, last=fill,
@@ -1187,14 +1234,21 @@ def _spiegel(bot, snap: MarketSnapshot, per_symbol: dict[str, pd.DataFrame],
         neue = engine.decide(tages_snap, pf)
         verkaeufe = [d for d in neue if d.action == "sell"]
         kaeufe = [d for d in neue if d.action == "buy"][:cfg.max_new_positions]
-        store.pending_setzen(bot.bot_id, [*verkaeufe, *kaeufe], as_of=tag)
+        # Nachkaeufe zaehlen NICHT gegen max_new_positions - sie eroeffnen
+        # keine neue These, sondern verstaerken eine bestehende. Jede bleibt
+        # einzeln durch max_position_pct gedeckelt.
+        nachkaeufe = [d for d in neue if d.action == "topup"]
+        store.pending_setzen(bot.bot_id, [*verkaeufe, *kaeufe, *nachkaeufe],
+                             as_of=tag)
 
         store.depot_cash(bot.bot_id, cash, equity, letzter_tag=tag.isoformat())
 
     if verbose:
+        extra = (f", {stat['nachkaeufe']} Nachkauf/-kaeufe"
+                 if stat.get("nachkaeufe") else "")
         print(f"      {bot.bot_id:<18} Spiegel: {stat['tage']} Tag(e), "
-              f"{stat['kaeufe']} Kauf/Kaeufe, {stat['verkaeufe']} Verkauf/Verkaeufe, "
-              f"{len(positionen)} Positionen")
+              f"{stat['kaeufe']} Kauf/Kaeufe, {stat['verkaeufe']} Verkauf/Verkaeufe"
+              f"{extra}, {len(positionen)} Positionen")
     return stat
 
 

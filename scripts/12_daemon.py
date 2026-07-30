@@ -57,6 +57,12 @@ def main() -> int:
                         "Umkehr-Kandidaten Kapital ungenutzt (gemessen: "
                         "53,9 %% statt 90 %% bei vollen 15 Positionen). "
                         "ACHTUNG: verstaerkt Gewinne UND Verluste.")
+    p.add_argument("--nachkauf", action="store_true",
+                   help="Stockt bestehende Positionen auf, wenn die Plaetze "
+                        "voll sind und Kapital ungenutzt liegt. Nur in "
+                        "Gewinner und nur solange der Score ueber der "
+                        "Kaufschwelle liegt - in Verlierer nachzukaufen waere "
+                        "Average-Down. Stop und Ziel bleiben unveraendert.")
     args = p.parse_args()
 
     if args.status:
@@ -83,10 +89,12 @@ def main() -> int:
 
     engine = (
         EngineConfig.for_reversal(max_positions=args.positions,
-                                  deploy_to_target=args.voll_investiert)
+                                  deploy_to_target=args.voll_investiert,
+                                  allow_topup=args.nachkauf)
         if args.strategy == "reversal"
         else EngineConfig(max_positions=args.positions,
-                          deploy_to_target=args.voll_investiert)
+                          deploy_to_target=args.voll_investiert,
+                          allow_topup=args.nachkauf)
     )
 
     cfg = DaemonConfig(
