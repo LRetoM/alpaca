@@ -500,6 +500,39 @@ def run_once(
                         blocked += 1
                         continue
 
+                # Groesse ZUM AUSFUEHRUNGSZEITPUNKT gegen den Deckel pruefen,
+                # nicht nur zum Entscheidungszeitpunkt: `d.target_notional`
+                # wurde mit dem gestrigen Schlusskurs bemessen. Fuer einen
+                # Wert, der seitdem gefallen ist, UNTERSCHAETZT dieser Kurs
+                # den heutigen Positionswert und wuerde eine Position ueber
+                # den Deckel hinaus vergroessern; fuer einen gestiegenen Wert
+                # UEBERSCHAETZT er ihn und blockiert einen eigentlich noch
+                # zulaessigen Nachkauf faelschlich (beobachtet bei CHRW:
+                # Deckel nach gestrigem Kurs bereits gerissen, nach dem
+                # heutigen noch 458 $ Luft). Deshalb hier mit dem echten
+                # Kurs neu ausrechnen und kappen statt blind zu uebernehmen.
+                if pos is not None:
+                    cap = portfolio.equity * cfg.max_position_pct
+                    ist_wert = pos.qty * ref
+                    erlaubt = max(0.0, cap - ist_wert)
+                    if erlaubt < portfolio.equity * cfg.min_position_pct:
+                        if verbose:
+                            print(f"              -> abgebrochen: Position "
+                                  f"waere bereits bei ${ist_wert:,.0f} "
+                                  f"(Deckel ${cap:,.0f} zum aktuellen Kurs)")
+                        run.decision(d.symbol, "topup", reasons=d.reasons,
+                                     conviction=d.conviction, price=d.price,
+                                     strategy="engine",
+                                     blocked_by="DeckelZumAktuellenKurs")
+                        blocked += 1
+                        continue
+                    if d.target_notional > erlaubt:
+                        if verbose:
+                            print(f"              Groesse gekappt: "
+                                  f"${d.target_notional:,.0f} -> ${erlaubt:,.0f} "
+                                  f"(Deckel zum aktuellen Kurs)")
+                        d.target_notional = round(erlaubt, 2)
+
                 compliance.assert_can_trade(d.symbol, "buy")
                 res = trading.market_order(
                     d.symbol, notional=round(d.target_notional, 2),

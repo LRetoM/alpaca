@@ -239,7 +239,8 @@ def run(
                     _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked)
                 elif d.action == "topup":
                     _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked,
-                                   min_gewinn=ecfg.topup_min_gain_pct)
+                                   min_gewinn=ecfg.topup_min_gain_pct,
+                                   max_position_pct=ecfg.max_position_pct)
                 elif d.action == "sell":
                     _execute_sell(
                         d, bar, today, portfolio, open_meta, cfg, trades,
@@ -377,7 +378,7 @@ def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked):
 
 
 def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
-                   min_gewinn: float = 0.0):
+                   min_gewinn: float = 0.0, max_position_pct: float = 0.10):
     """Nachkauf in eine bestehende Position.
 
     Die Stueckzahl waechst, der Einstand wird zum Mischkurs. Stop, Ziel,
@@ -391,6 +392,12 @@ def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
     Kursluecke einen gestrigen Gewinner in einen heutigen Verlierer
     verwandeln - beobachtet am 2026-07-30 bei CHRW (+2,1% Entscheidung,
     -5,4% Ausfuehrung nach -6,8% Eroeffnungsluecke).
+
+    Die geplante Groesse (`d.target_notional`) wurde mit dem gestrigen
+    Schlusskurs bemessen und wird hier gegen den Deckel zum ECHTEN
+    Ausfuehrungskurs `fill` gekappt - sonst wuerde ein seitdem gefallener
+    Wert die Position ueber den Deckel hinaus vergroessern, ein gestiegener
+    einen eigentlich noch zulaessigen Nachkauf faelschlich blockieren.
     """
     pos = portfolio.positions.get(d.symbol)
     if pos is None or fill <= 0:
@@ -399,7 +406,11 @@ def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
         blocked["kursluecke_seit_entscheidung"] = (
             blocked.get("kursluecke_seit_entscheidung", 0) + 1)
         return
-    qty = int(d.target_notional / fill)
+
+    deckel = portfolio.equity * max_position_pct
+    ist_wert = pos.qty * fill
+    notional = min(d.target_notional, max(0.0, deckel - ist_wert))
+    qty = int(notional / fill)
     if qty <= 0:
         blocked["betrag_zu_klein"] = blocked.get("betrag_zu_klein", 0) + 1
         return

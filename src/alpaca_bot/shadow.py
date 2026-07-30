@@ -1123,7 +1123,19 @@ def _spiegel(bot, snap: MarketSnapshot, per_symbol: dict[str, pd.DataFrame],
                 if pos.entry_price > 0 and (fill / pos.entry_price - 1) < bot.config.topup_min_gain_pct:
                     continue
 
-                qty = int((p["notional"] or 0) / fill)
+                # Groesse ZUM AUSFUEHRUNGSKURS gegen den Deckel pruefen,
+                # nicht die am Vortag beschlossene Notional blind uebernehmen
+                # - siehe live.py fuer die ausfuehrliche Begruendung (CHRW-
+                # Fund: derselbe Fehler kann eine Position je nach
+                # Kursrichtung faelschlich blockieren oder ueber den Deckel
+                # hinaus vergroessern).
+                eq_schaetzung = float(stand.get("equity", cash) or cash)
+                deckel = eq_schaetzung * bot.config.max_position_pct
+                ist_wert = pos.qty * fill
+                erlaubt = max(0.0, deckel - ist_wert)
+                notional = min(float(p["notional"] or 0), erlaubt)
+
+                qty = int(notional / fill)
                 if qty <= 0:
                     continue
                 k = estimate_costs("buy", qty, last=fill,
