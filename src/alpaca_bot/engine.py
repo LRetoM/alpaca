@@ -239,6 +239,37 @@ class EngineConfig:
     neu gekauft, mit identischem Stop und Ziel. Es entsteht keine neue
     These, nur doppelte Spread- und Gebuehrenkosten."""
 
+    allow_topup: bool = False
+    """Duerfen bereits gehaltene Positionen zusaetzliches Kapital bekommen,
+    BEVOR ein Platz frei wird?
+
+    Standard False - unveraendertes Verhalten. `_find_entries` schliesst
+    gehaltene Symbole grundsaetzlich aus; ohne diesen Schalter bleibt freies
+    Kapital bei vollen Positionsplaetzen ungenutzt liegen, bis eine Position
+    ausgestoppt wird, ihr Ziel erreicht oder die Haltefrist ablaeuft.
+
+    Bewusst SEPARAT von `deploy_to_target`: Jenes bestimmt, wie stark NEUE
+    Positionen gefuellt werden. Dieses hier erlaubt zusaetzlich, GEHALTENE
+    Positionen nachzukaufen. Beides zusammen sonst zu vermengen macht es
+    unmoeglich zu sagen, woran ein Effekt lag.
+
+    Nur fuer Gewinner (siehe `topup_min_gain_pct`) und nur, wenn die These
+    heute noch genauso stark ist wie bei einem Neukauf (`min_score`) - eine
+    angeschlagene Position bekommt kein zusaetzliches Kapital
+    ("nachkaufen in eine wackelnde These" ist Average-Down, nicht
+    Ueberzeugung). Stop und Ziel bleiben bei den urspruenglichen Werten -
+    sie chasen der Position nicht hinterher. `bars_held` und `high_water`
+    werden NICHT zurueckgesetzt, sonst wuerde wiederholtes Nachkaufen die
+    Haltefrist-Regel faktisch aushebeln.
+
+    ERST im Schattenbetrieb messen (Bot B09_nachkauf), bevor der Live-Bot
+    das je tut - siehe docs/schattenbetrieb.md."""
+
+    topup_min_gain_pct: float = 0.0
+    """Nur Positionen mindestens auf diesem Gewinnniveau werden aufgestockt.
+    0.0 = ab Break-even. Verhindert, in eine bereits verlustreiche Position
+    nachzukaufen."""
+
     weights: SignalWeights = field(default_factory=SignalWeights)
     reversal_weights: ReversalWeights = field(default_factory=ReversalWeights)
 
@@ -263,6 +294,8 @@ class EngineConfig:
             "max_positions": self.max_positions,
             "target_invested": self.target_invested,
             "deploy_to_target": self.deploy_to_target,
+            "allow_topup": self.allow_topup,
+            "topup_min_gain_pct": self.topup_min_gain_pct,
             "max_position_pct": self.max_position_pct,
             "min_position_pct": self.min_position_pct,
             "min_score": self.min_score,
@@ -319,13 +352,16 @@ def _vola_gewicht(atr_pct: float) -> float:
 
 
 def verteile_kapital(
-    gewichte: dict[str, float], frei: float, deckel: float, mindest: float
+    gewichte: dict[str, float],
+    frei: float,
+    deckel: float | dict[str, float],
+    mindest: float,
 ) -> dict[str, float]:
     """Verteilt `frei` auf die Kandidaten - Wasserfuellung mit Deckel.
 
     Drei Bedingungen gleichzeitig zu erfuellen ist nicht trivial:
       * die Summe soll `frei` moeglichst ausschoepfen,
-      * keine Einzelposition darf `deckel` ueberschreiten,
+      * keine Einzelposition darf ihren Deckel ueberschreiten,
       * Positionen unter `mindest` lohnen sich nicht (Spread frisst sie auf).
 
     Wer einfach proportional verteilt und danach deckelt, laesst das
@@ -337,8 +373,19 @@ def verteile_kapital(
     Zu kleine Positionen fliegen anschliessend raus, und ihr Anteil geht
     zurueck in den Topf - ebenfalls in Runden, weil dadurch andere
     Positionen wachsen und ihrerseits den Deckel reissen koennen.
+
+    `deckel` darf eine Zahl sein (gleiche Obergrenze fuer alle, der Fall
+    beim Neukauf) oder ein Dictionary je Symbol. Letzteres braucht der
+    Nachkauf: Dort ist die Obergrenze die RESTLUFT bis `max_position_pct`,
+    und die ist fuer jede gehaltene Position eine andere.
     """
-    if not gewichte or frei <= 0 or deckel <= 0:
+    if not gewichte or frei <= 0:
+        return {}
+
+    deckel_je = (deckel if isinstance(deckel, dict)
+                 else {s: float(deckel) for s in gewichte})
+    gewichte = {s: g for s, g in gewichte.items() if deckel_je.get(s, 0) > 0}
+    if not gewichte:
         return {}
 
     # Mehr Kandidaten, als sich mit `mindest` ueberhaupt finanzieren lassen?
@@ -353,7 +400,7 @@ def verteile_kapital(
     offen = {s: max(g, 1e-9) for s, g in list(gewichte.items())[:max_n]}
 
     def _fuellen(kandidaten: dict[str, float]) -> dict[str, float]:
-        """Wasserfuellung: wer den Deckel reisst, bekommt genau den Deckel
+        """Wasserfuellung: wer seinen Deckel reisst, bekommt genau den Deckel
         und scheidet aus; sein Rest wird unter den Uebrigen neu aufgeteilt."""
         groessen: dict[str, float] = {}
         rest, pool = frei, dict(kandidaten)
@@ -361,14 +408,15 @@ def verteile_kapital(
             summe = sum(pool.values())
             if summe <= 0:
                 break
-            reisst = [s for s, g in pool.items() if rest * g / summe > deckel]
+            reisst = [s for s, g in pool.items()
+                      if rest * g / summe > deckel_je[s]]
             if not reisst:
                 for s, g in pool.items():
                     groessen[s] = rest * g / summe
                 break
             for s in reisst:
-                groessen[s] = deckel
-                rest -= deckel
+                groessen[s] = deckel_je[s]
+                rest -= deckel_je[s]
                 del pool[s]
         return groessen
 
@@ -435,8 +483,126 @@ class Engine:
         # mit identischem Stop und Ziel. Nur die Kosten waren neu.
         freed = {d.symbol for d in exits if d.action == "sell"}
         blocked = freed | self._cooldown_symbols(snapshot.as_of)
-        decisions.extend(self._find_entries(snapshot, portfolio, freed, blocked))
+        entries = self._find_entries(snapshot, portfolio, freed, blocked)
+        decisions.extend(entries)
+
+        # Nachkauf ZULETZT: Neue Positionen haben Vorrang vor dem Aufstocken
+        # bestehender. Breite schlaegt Tiefe - erst wenn keine neuen
+        # Kandidaten mehr aufgenommen werden koennen (Plaetze voll oder
+        # nichts ueber der Schwelle), wandert freies Kapital in vorhandene
+        # Positionen. Was die Einstiege bereits verplant haben, ist fuer den
+        # Nachkauf nicht mehr verfuegbar.
+        if self.cfg.allow_topup:
+            verplant = sum(d.target_notional for d in entries)
+            decisions.extend(
+                self._find_topups(snapshot, portfolio, freed, verplant)
+            )
         return decisions
+
+    # -- Nachkauf ------------------------------------------------------------
+    def _find_topups(
+        self,
+        snapshot: MarketSnapshot,
+        portfolio: PortfolioState,
+        being_sold: set[str],
+        verplant: float = 0.0,
+    ) -> list[Decision]:
+        """Stockt bestehende Positionen auf, wenn Kapital ungenutzt liegt.
+
+        Ohne diesen Schritt bleibt bei vollen Positionsplaetzen Kapital
+        liegen, bis eine Position ausgestoppt wird, ihr Ziel erreicht oder
+        die Haltefrist ablaeuft - gemessen am 2026-07-30 waren das 46 % des
+        Depots bei 15 von 15 belegten Plaetzen.
+
+        Aufgestockt wird nur, was BEIDE Bedingungen erfuellt:
+
+          * Die These traegt heute noch wie bei einem Neukauf
+            (`score >= min_score`) - nicht nur "faellt nicht mehr".
+          * Die Position liegt im Gewinn (`topup_min_gain_pct`).
+
+        Der zweite Punkt ist der wichtige: In eine verlustreiche Position
+        nachzukaufen ist Average-Down und macht aus einem begrenzten Verlust
+        einen groesseren. Wer die These fuer intakt haelt, darf aufstocken;
+        wer den Einstandskurs verbilligen will, betreibt Selbsttaeuschung.
+
+        Stop und Ziel bleiben unveraendert - sie laufen der Position nicht
+        hinterher. `bars_held` bleibt ebenfalls stehen, sonst wuerde
+        wiederholtes Nachkaufen die Haltefrist aushebeln.
+        """
+        cfg = self.cfg
+        investable = portfolio.equity * cfg.target_invested
+        already = sum(
+            p.qty * (snapshot.last_price(s) or p.entry_price)
+            for s, p in portfolio.positions.items()
+            if s not in being_sold
+        )
+        frei = max(0.0, min(investable - already - verplant,
+                            portfolio.cash - verplant))
+        mindest = portfolio.equity * cfg.min_position_pct
+        if frei < mindest:
+            return []
+
+        cap = portfolio.equity * cfg.max_position_pct
+        gewichte: dict[str, float] = {}
+        restluft: dict[str, float] = {}
+        info: dict[str, tuple] = {}
+
+        for sym, pos in portfolio.positions.items():
+            if sym in being_sold:
+                continue
+            price = snapshot.last_price(sym)
+            if price is None or price <= 0:
+                continue
+            if pos.unrealized_pct(price) < cfg.topup_min_gain_pct:
+                continue
+
+            frame = self._signals(sym, snapshot)
+            row = frame.iloc[-1]
+            score = float(row.get("score", 0.0))
+            if not np.isfinite(score) or score < cfg.min_score:
+                continue
+
+            luft = cap - pos.qty * price
+            if luft < mindest:
+                continue
+
+            gewichte[sym] = _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+            restluft[sym] = luft
+            info[sym] = (score, row, price, pos)
+
+        if not gewichte:
+            return []
+
+        # Nach Score sortieren: Bei knappem Kapital bekommt die staerkste
+        # These zuerst etwas ab (verteile_kapital schneidet von hinten ab).
+        reihenfolge = sorted(gewichte, key=lambda s: -info[s][0])
+        gewichte = {s: gewichte[s] for s in reihenfolge}
+
+        groessen = verteile_kapital(gewichte, frei, restluft, mindest)
+
+        out: list[Decision] = []
+        for sym, betrag in groessen.items():
+            score, row, price, pos = info[sym]
+            gruende = (explain_reversal(row) if cfg.strategy == "reversal"
+                       else explain(row, cfg.weights))
+            gruende["nachkauf"] = True
+            gruende["bestand_vorher"] = round(pos.qty * price, 2)
+            gruende["gewinn_pct"] = round(pos.unrealized_pct(price), 4)
+            out.append(
+                Decision(
+                    symbol=sym,
+                    action="topup",
+                    conviction=score,
+                    price=price,
+                    target_notional=round(betrag, 2),
+                    # Stop und Ziel bleiben, wie sie beim Einstieg gesetzt
+                    # wurden - der Nachkauf aendert die These nicht.
+                    stop_price=pos.stop_price,
+                    target_price=pos.target_price,
+                    reasons=gruende,
+                )
+            )
+        return out
 
     def _cooldown_symbols(self, as_of: pd.Timestamp) -> set[str]:
         """Symbole, die noch in der Sperrfrist nach einem Verkauf stehen.
