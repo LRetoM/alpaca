@@ -1642,25 +1642,35 @@ def pruefungen(store: ShadowStore | None = None, *,
         out.append(Befund(6, "Replay gegen simulate.py", True,
                           "uebersprungen (--replay zum Ausfuehren)"))
 
-    # --- 7. Flottenkonsistenz: alle Bots derselbe Stichtag ---
+    # --- 7. Flottenkonsistenz: kein Bot darf einen Tag UEBERSPRINGEN ---
     if p.empty:
         out.append(Befund(7, "Flottenkonsistenz", True, "Noch keine Vorhersagen."))
     else:
         r = p[p["buch"] == "rangliste"]
-        schief = []
-        for tag, g in r.groupby("as_of"):
-            n_syms = g.groupby("bot_id")["symbol"].nunique()
-            if len(n_syms) > 1 and n_syms.std() > 0 and n_syms.max() > 0:
-                # Unterschiedliche Kandidatenzahl ist ERLAUBT (andere Schwelle),
-                # unterschiedliche Stichtage sind es nicht.
-                pass
-        tage_je_bot = r.groupby("bot_id")["as_of"].nunique()
-        ok = tage_je_bot.nunique() <= 1 if len(tage_je_bot) else True
+        alle_tage = sorted(r["as_of"].unique())
+
+        # Gleich VIELE Stichtage zu verlangen waere falsch: Ein spaeter
+        # angemeldeter Bot hat zwangslaeufig eine kuerzere Historie, ohne dass
+        # etwas kaputt ist (B07/B08 kamen am 2026-07-30 dazu). Der gepaarte
+        # Vergleich schneidet ohnehin auf die gemeinsamen Tage.
+        #
+        # Wirklich schaedlich waere eine LUECKE: ein Bot, der an einem Tag
+        # zwischen seinem ersten und letzten Lauf nichts geliefert hat. Dann
+        # fehlt genau dieser Tag im Vergleich, und zwar unbemerkt.
+        luecken = []
+        for bot, g in r.groupby("bot_id"):
+            tage = sorted(g["as_of"].unique())
+            spanne = [t for t in alle_tage if tage[0] <= t <= tage[-1]]
+            fehlend = set(spanne) - set(tage)
+            if fehlend:
+                luecken.append(f"{bot}: {len(fehlend)} Tag(e)")
+
         out.append(Befund(
-            7, "Flottenkonsistenz", bool(ok),
-            f"{len(tage_je_bot)} Bot(s), Stichtage je Bot: "
-            f"{sorted(set(tage_je_bot.values))}. Ungleiche Stichtage machen den "
-            "gepaarten Vergleich ungueltig."
+            7, "Flottenkonsistenz", not luecken,
+            f"{r['bot_id'].nunique()} Bot(s) ueber {len(alle_tage)} Stichtag(e), "
+            "keine Luecken." if not luecken else
+            f"LUECKEN gefunden - {'; '.join(luecken)}. Fehlende Tage machen den "
+            "gepaarten Vergleich still unvollstaendig."
         ))
 
     # --- 8. Buchfuehrung: keine Luecken ---
