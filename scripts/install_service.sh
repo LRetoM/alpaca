@@ -121,6 +121,24 @@ cat > "$PLIST" <<PLIST_END
     <key>ThrottleInterval</key>
     <integer>60</integer>
 
+    <!-- launchd setzt fuer selbst gestartete Dienste sonst ein Soft-Limit
+         von 256 offenen Dateien. yfinance oeffnet je Download eine eigene
+         SQLite-Verbindung fuer seinen Zeitzonen-Cache, ohne sie zuverlaessig
+         zu schliessen - im Dauerbetrieb riss dieses Limit nach einigen
+         Stunden (beobachtet 2026-07-29, alle Schritte fielen fuer den Rest
+         der Nacht aus). Das Skript hebt das Limit zusaetzlich selbst an
+         (_limit_anheben) - diese Angabe ist die zweite Verteidigungslinie. -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>8192</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>8192</integer>
+    </dict>
+
     <key>StandardOutPath</key>
     <string>${LOGDIR}/${LOGBASE}.log</string>
     <key>StandardErrorPath</key>

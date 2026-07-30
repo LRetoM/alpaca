@@ -43,6 +43,36 @@ from alpaca_bot.shadow import ShadowConfig, ShadowStore, einbuchen, entscheiden,
 _stop = False
 
 
+def _limit_anheben() -> None:
+    """Hebt das Limit offener Dateien auf ein fuer den Dauerbetrieb
+    ausreichendes Mass an.
+
+    launchd setzt fuer selbst gestartete Dienste standardmaessig ein
+    Soft-Limit von 256 offenen Dateien - unabhaengig von der Shell-Grenze.
+    yfinance oeffnet fuer seinen Zeitzonen-Cache (`tkr-tz.db`) bei jedem
+    Download eine eigene SQLite-Verbindung, ohne sie zuverlaessig zu
+    schliessen. Ueber Stunden im Dauerbetrieb summiert sich das, bis das
+    256er-Limit reisst - beobachtet am 2026-07-29: ab da schlugen ALLE
+    Schritte (Entscheiden/Einbuchen/Verifizieren) mit
+    "OSError: Too many open files" bzw. "unable to open database file" fehl,
+    fuer den Rest der Nacht, ohne dass der Daemon selbst abstuerzte.
+
+    Angehoben wird auf das Hard-Limit des Systems (hier praktisch
+    unbegrenzt) - schlaegt das fehl, laeuft der Prozess mit dem
+    Standardwert weiter, statt abzubrechen.
+    """
+    try:
+        import resource
+
+        weich, hart = resource.getrlimit(resource.RLIMIT_NOFILE)
+        ziel = min(hart, 8192) if hart != resource.RLIM_INFINITY else 8192
+        if weich < ziel:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (ziel, hart))
+            print(f"  Datei-Limit angehoben: {weich} -> {ziel}")
+    except Exception as e:  # noqa: BLE001 - darf den Start nie verhindern
+        print(f"  Datei-Limit konnte nicht angehoben werden: {e}")
+
+
 def _handle_signal(signum, frame):  # noqa: ARG001
     global _stop
     print(f"\n  Signal {signum} empfangen - beende nach dem laufenden Schritt.")
@@ -74,6 +104,7 @@ def alle_schritte(cfg: ShadowConfig, store: ShadowStore, *, verbose: bool = True
 
 
 def main() -> int:
+    _limit_anheben()
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--universe", default="gemessen",

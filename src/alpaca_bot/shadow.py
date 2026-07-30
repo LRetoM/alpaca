@@ -753,6 +753,32 @@ class ShadowStore:
 # ---------------------------------------------------------------------------
 # Daten
 # ---------------------------------------------------------------------------
+def _universum_symbole(cfg: ShadowConfig) -> list[str]:
+    """Das STABILE Tagesuniversum - identisch fuer alle drei Schritte.
+
+    Wichtig fuer den Tages-Cache in `lade_bars()`: Der Cache-Schluessel haengt
+    vom exakten Symbolset ab. `einbuchen()`/`verifizieren()` bauten frueher
+    ihre Liste aus den noch offenen Vorhersagen - einer Menge, die mit jeder
+    abgearbeiteten Vorhersage SCHRUMPFT. Der Schluessel aenderte sich dadurch
+    bei praktisch jedem Durchlauf, der Cache griff nie, und es wurde JEDE
+    STUNDE neu von yfinance geladen (gemessen: ~8 offene Dateien je
+    Download-Aufruf, die yfinance nicht zuverlaessig schliesst - genau das
+    hat am 2026-07-29 nach einigen Stunden das Datei-Limit gerissen).
+
+    Alle Symbole, die einbuchen/verifizieren je brauchen, sind eine
+    Teilmenge dieses Universums. Mit einem STABILEN Symbolset trifft der
+    Cache zuverlaessig, und es gibt nur noch EINEN echten Download-Zyklus
+    je Kalendertag statt bis zu 24.
+    """
+    from . import universe
+
+    if cfg.universe == "gemessen":
+        symbols = universe.load_universe(max_symbols=cfg.max_symbols)
+    else:
+        symbols = universe.BENCHMARK_SETS[cfg.universe]
+    return list(dict.fromkeys([*symbols, MARKET_SYMBOL]))
+
+
 def lade_bars(symbols: list[str], years: float, *, verbose: bool = True) -> pd.DataFrame:
     """Tagesbars von yfinance, mit TAGESGENAUEM Cache.
 
@@ -765,7 +791,14 @@ def lade_bars(symbols: list[str], years: float, *, verbose: bool = True) -> pd.D
 
     SHADOW_CACHE.mkdir(parents=True, exist_ok=True)
     heute = dt.date.today().isoformat()
-    key = f"{len(symbols)}_{abs(hash('|'.join(sorted(symbols)))) % 10**8}"
+    # hashlib statt Pythons eingebautem hash(): Der ist pro Prozessstart
+    # zufaellig gesalzen (Hash-Randomisierung seit Python 3.3) - nach jedem
+    # Neustart des Daemons haette derselbe Symbol-Tag einen anderen
+    # Schluessel ergeben und den Tages-Cache fuer den ganzen Tag entwertet.
+    import hashlib
+
+    digest = hashlib.sha256("|".join(sorted(symbols)).encode()).hexdigest()[:10]
+    key = f"{len(symbols)}_{digest}"
     pfad = SHADOW_CACHE / f"{heute}_{key}_{years:g}y.parquet"
 
     if pfad.exists():
@@ -1174,15 +1207,10 @@ def entscheiden(cfg: ShadowConfig, store: ShadowStore | None = None,
     garantiert dieselben Kurse an denselben Tagen, die Voraussetzung fuer den
     gepaarten Vergleich (Plan §6.2).
     """
-    from . import fleet, universe
+    from . import fleet
 
     store = store or ShadowStore()
-
-    if cfg.universe == "gemessen":
-        symbols = universe.load_universe(max_symbols=cfg.max_symbols)
-    else:
-        symbols = universe.BENCHMARK_SETS[cfg.universe]
-    symbols = list(dict.fromkeys([*symbols, MARKET_SYMBOL]))
+    symbols = _universum_symbole(cfg)
 
     bots = fleet.aktive_bots(store)
     if not bots:
@@ -1283,10 +1311,15 @@ def einbuchen(cfg: ShadowConfig, store: ShadowStore | None = None,
             print("      nichts einzubuchen")
         return 0
 
-    symbols = sorted(offen["symbol"].unique())
+    # STABILES Universum laden statt der schrumpfenden Teilmenge der offenen
+    # Vorhersagen - sonst trifft der Tages-Cache nie und es wird bei jedem
+    # stuendlichen Durchlauf neu von yfinance geladen (siehe
+    # `_universum_symbole`). Alle benoetigten Symbole sind darin enthalten,
+    # weil jeder Kandidat aus genau diesem Universum stammt.
+    symbols = _universum_symbole(cfg)
     run_id = store.start_run("einbuchen", n_symbols=len(symbols))
     try:
-        bars = lade_bars([*symbols, MARKET_SYMBOL], cfg.years, verbose=verbose)
+        bars = lade_bars(symbols, cfg.years, verbose=verbose)
         n = 0
         for _, p in offen.iterrows():
             try:
@@ -1361,10 +1394,12 @@ def verifizieren(cfg: ShadowConfig, store: ShadowStore | None = None,
             print("      nichts zu verifizieren")
         return 0
 
-    symbols = sorted(offen["symbol"].unique())
+    # STABILES Universum statt der schrumpfenden Teilmenge - siehe Begruendung
+    # in `einbuchen()` und `_universum_symbole()`.
+    symbols = _universum_symbole(cfg)
     run_id = store.start_run("verifizieren", n_symbols=len(symbols))
     try:
-        bars = lade_bars([*symbols, MARKET_SYMBOL], cfg.years, verbose=verbose)
+        bars = lade_bars(symbols, cfg.years, verbose=verbose)
         try:
             spy = bars.xs(MARKET_SYMBOL, level="symbol").sort_index()["close"].astype(float)
         except KeyError:
@@ -1710,20 +1745,36 @@ def _pruefe_kosten(s: ShadowStore) -> Befund:
 
         j = Journal().slippage_report()
         angesetzt = 3.0
-        if j.empty or "mittel" not in j or not np.isfinite(j["mittel"].mean()):
+        MIN_FUELLUNGEN = 10
+        n_gesamt = int(j["n"].sum()) if not j.empty and "n" in j else 0
+
+        if j.empty or n_gesamt < MIN_FUELLUNGEN or not np.isfinite(j["mittel"]).any():
             # Kein messbarer Wert ist KEIN Fehlschlag: Slippage steht erst
             # fest, wenn genug echte Orders mit Fuellpreis UND Referenzkurs
             # vorliegen. Ein "nan" als Verstoss zu melden waere ein Fehlalarm.
+            # Ebenso wenig zaehlt eine handvoll Fuellungen - ein einzelnes
+            # Symbol mit wenigen Trades kann den unbewerteten Durchschnitt
+            # dominieren (siehe die Korrektur unten).
             return Befund(5, "Kostenkontrolle", True,
-                          "Im Depot noch keine belastbare Slippage messbar - "
+                          f"Im Depot erst {n_gesamt} Fuellung(en) mit "
+                          f"gemessener Slippage - zu wenig fuer eine "
+                          f"belastbare Aussage (Schwelle {MIN_FUELLUNGEN}). "
                           f"Schattenannahme {angesetzt:.1f} bps bleibt "
                           "vorlaeufig. Monatlich erneut pruefen.")
-        echt = float(j["mittel"].mean())
-        ok = echt <= angesetzt * 2
+
+        # Mit n GEWICHTETER Mittelwert - nicht der einfache Mittelwert der
+        # Symbol-Mittelwerte. Sonst wuerde ein Symbol mit 1 Fuellung genauso
+        # stark zaehlen wie eines mit 20, und ein einzelner Ausreisser
+        # koennte das Gesamtbild kippen (beobachtet: AMKR mit n=4 und
+        # -322,9 bps ergab durch ungewichtete Mittelung -161,4 bps und waere
+        # WEGEN des falschen Vorzeichenvergleichs faelschlich als "bestanden"
+        # durchgerutscht).
+        echt = float((j["mittel"] * j["n"]).sum() / j["n"].sum())
+        ok = abs(echt) <= angesetzt * 2
         return Befund(
             5, "Kostenkontrolle", ok,
-            f"Depot misst {echt:.1f} bps Slippage, Schatten setzt "
-            f"{angesetzt:.1f} bps an."
+            f"Depot misst {echt:+.1f} bps Slippage (n-gewichtet, "
+            f"{n_gesamt} Fuellungen), Schatten setzt {angesetzt:.1f} bps an."
             + ("" if ok else "  Schatten ist zu optimistisch - Annahme anheben.")
         )
     except Exception as e:  # noqa: BLE001
