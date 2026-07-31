@@ -13,7 +13,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data"
+
+# ACHTUNG: Datenbanken und Cache liegen bewusst AUSSERHALB von PROJECT_ROOT,
+# obwohl das Projekt selbst unter ~/Documents liegt. macOS' TCC-Dateischutz
+# fuer den "Dokumente"-Ordner gilt fuer interaktive Terminals, aber nicht
+# zuverlaessig fuer einen von launchd headless gestarteten Hintergrunddienst -
+# derselbe Python-Prozess, dieselbe Binary, aber ohne die Zustimmung, die
+# ein Terminal implizit mitbringt. Genau das hat schon einmal die Log-Dateien
+# blockiert (siehe install_service.sh) und am 30./31.07.2026 den Handelsbot
+# abstuerzen lassen: state.sqlite lag unter ~/Documents/alpaca/data, ein
+# Schreibversuch daraus schlug mit "unable to open database file" fehl -
+# ausgerechnet im Fehlerbehandler, der genau diesen Vorfall protokollieren
+# wollte, wodurch ein harmloser Netzwerk-Haenger zum Totalabsturz wurde.
+#
+# ~/Library/Application Support ist der dafuer vorgesehene Ort und liegt
+# ausserhalb des TCC-geschuetzten Bereichs.
+DATA_DIR = Path.home() / "Library" / "Application Support" / "alpaca-bot" / "data"
 CACHE_DIR = DATA_DIR / "cache"
 RESULTS_DIR = PROJECT_ROOT / "results"
 

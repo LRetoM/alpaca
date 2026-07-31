@@ -404,7 +404,19 @@ class Daemon:
                 msg = f"{type(e).__name__}: {e}"
                 print(f"  [FEHLER {self._errors}/{self.cfg.max_consecutive_errors}] {msg}")
                 traceback.print_exc()
-                self.store.heartbeat(ok=False, error=msg)
+                try:
+                    self.store.heartbeat(ok=False, error=msg)
+                except Exception as heartbeat_err:  # noqa: BLE001
+                    # Die Fehlerprotokollierung darf selbst nie zum Absturz-
+                    # grund werden. Genau das ist am 30./31.07.2026 passiert:
+                    # ein voruebergehender SSL-Fehler war an sich harmlos und
+                    # haette der Retry-Logik unten weichen sollen - stattdessen
+                    # scheiterte der heartbeat()-Aufruf selbst (TCC blockierte
+                    # state.sqlite unter ~/Documents fuer den headless
+                    # gestarteten Dienst), diese zweite Exception war
+                    # ungeschuetzt und riss den gesamten Prozess mit runter.
+                    print(f"  [FEHLER] Fehlerprotokollierung fehlgeschlagen: "
+                          f"{type(heartbeat_err).__name__}: {heartbeat_err}")
 
                 if self._errors >= self.cfg.max_consecutive_errors:
                     print("\n  Zu viele Fehler in Folge - beende mit Fehlercode.")
