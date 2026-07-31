@@ -191,7 +191,31 @@ cat > "$PLIST" <<PLIST_END
 PLIST_END
 
 launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+
+# bootout kehrt zurueck, BEVOR launchd den alten Prozess und seine
+# Ressourcen vollstaendig freigegeben hat. Ein sofortiges bootstrap
+# kollidiert damit haeufig mit "Input/output error" (Fehlercode 5) -
+# beobachtet am 31.07.2026 bei beiden Diensten. Deshalb warten, bis das
+# Label wirklich aus der Liste verschwunden ist, statt eine feste Zeit
+# zu raten.
+for _i in $(seq 1 20); do
+    launchctl list "${LABEL}" >/dev/null 2>&1 || break
+    sleep 0.5
+done
+
+BOOTSTRAP_OK=0
+for _versuch in 1 2 3; do
+    if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>&1; then
+        BOOTSTRAP_OK=1
+        break
+    fi
+    echo "  bootstrap fehlgeschlagen (Versuch ${_versuch}/3) - warte und versuche erneut ..."
+    sleep 2
+done
+if [[ $BOOTSTRAP_OK -eq 0 ]]; then
+    echo "FEHLER: Dienst konnte nach 3 Versuchen nicht gestartet werden."
+    exit 1
+fi
 
 echo "======================================================================"
 echo "  DIENST EINGERICHTET: ${LABEL}"
