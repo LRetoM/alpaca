@@ -185,6 +185,21 @@ class EngineConfig:
     die die Risikopruefung zwangslaeufig ablehnte - derselbe Kandidat
     wurde stundenlang in jeder Runde neu vorgeschlagen und blockiert."""
 
+    position_size_margin: float = 0.995
+    """Sicherheitsabstand zur Positionsgrenze (0.5 %).
+
+    Die Engine sizet Kandidaten mit hohem Score bewusst bis exakt an
+    max_position_pct heran. Das Kapital, gegen das sie rechnet, ist aber
+    eine Momentaufnahme von `portfolio.equity` - und `trading._check_risk()`
+    holt sich beim TATSAECHLICHEN Senden der Order Sekunden spaeter einen
+    FRISCHEN Kapitalwert. Bei live schwankenden Kursen reicht die kleinste
+    Bewegung dazwischen, um aus 10,000 % 10,001 % zu machen - beobachtet am
+    31.07.2026 bei META und SAIA, die deshalb ueber mehrere Runden hinweg
+    identisch vorgeschlagen und blockiert wurden, ohne dass sich am Score
+    etwas geaendert haette. Derselbe Puffer-Gedanke wie bei
+    `target_invested` (0.90 statt 1.0), nur enger, weil es hier nur um
+    Sekunden Drift geht, nicht um einen ganzen Handelstag."""
+
     min_position_pct: float = 0.001
     """Mindestgroesse als Anteil des Kapitals (0.1 %). Darunter frisst der
     Spread den Vorsprung. Bewusst relativ, nicht in USD - ein fixer
@@ -542,7 +557,7 @@ class Engine:
         if frei < mindest:
             return []
 
-        cap = portfolio.equity * cfg.max_position_pct
+        cap = portfolio.equity * cfg.max_position_pct * cfg.position_size_margin
         gewichte: dict[str, float] = {}
         restluft: dict[str, float] = {}
         info: dict[str, tuple] = {}
@@ -737,7 +752,7 @@ class Engine:
         )
         free = max(0.0, min(investable - already, portfolio.cash))
         per_slot = free / max(1, len(chosen))
-        cap = portfolio.equity * cfg.max_position_pct
+        cap = portfolio.equity * cfg.max_position_pct * cfg.position_size_margin
         mindest = portfolio.equity * cfg.min_position_pct
 
         # Bei `deploy_to_target` wird das freie Kapital vorab auf alle
