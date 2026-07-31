@@ -215,9 +215,19 @@ def _reference_price(symbol: str, side: str, fallback: float) -> float:
             return ask
         if side == "sell" and bid > 0:
             return bid
-        mid = (ask + bid) / 2
-        if mid > 0:
-            return mid
+        # Die gewuenschte Seite fehlt (haeufig vorboerslich bei duenn
+        # gehandelten Werten ueber den IEX-Feed - Ask oft 0.0). Ein
+        # Mittelwert aus einer echten und einer fehlenden Seite waere KEIN
+        # Mittelwert, sondern eine Verfaelschung um bis zu 50 %: (0+45.54)/2
+        # ergibt 22.77 und meldet einen Kurssturz, der nie stattfand. Bei
+        # einer fehlenden Seite gilt die vorhandene als bester verfuegbarer
+        # Schaetzwert, echte Mittelwertbildung nur wenn BEIDE gueltig sind.
+        if ask > 0 and bid > 0:
+            return (ask + bid) / 2
+        if ask > 0:
+            return ask
+        if bid > 0:
+            return bid
     except Exception:  # noqa: BLE001 - Quote-Ausfall darf keine Order verhindern
         pass
     return float(fallback)
