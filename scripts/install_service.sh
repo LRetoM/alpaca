@@ -53,14 +53,16 @@ PROJEKT_LOGDIR="$PROJECT_DIR/logs"
 mkdir -p "$LOGDIR" "$PROJEKT_LOGDIR"
 
 # --- Argumente einlesen (Reihenfolge egal) ---
+# Nachrichten-Merkmale (ReversalWeights.news) sind seit 03.08.2026 immer
+# aktiv, fuer beide Dienste, ohne eigenes Flag - kein --mit-news mehr noetig.
 DIENST="handel"
 WANT_LIVE=0
 WANT_REMOVE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dienst) DIENST="${2:-}"; shift 2 ;;
-        --live)   WANT_LIVE=1; shift ;;
-        --remove) WANT_REMOVE=1; shift ;;
+        --dienst)   DIENST="${2:-}"; shift 2 ;;
+        --live)     WANT_LIVE=1; shift ;;
+        --remove)   WANT_REMOVE=1; shift ;;
         *) echo "Unbekanntes Argument: $1"; exit 1 ;;
     esac
 done

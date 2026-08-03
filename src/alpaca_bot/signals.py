@@ -199,11 +199,33 @@ class ReversalWeights:
     max_volatility: float = 1.50
     min_price: float = 3.0
 
+    news: float = 0.10
+    """Zusatzgewicht fuer Nachrichten-Frequenz - additiv, klein, ungetestet.
+
+    ACHTUNG - anders als jeder andere Baustein hier: Fuer diesen Faktor
+    gibt es KEINE eigene Messung wie fuer reversal_2d/3d, rsi2 oder
+    ausverkauf (siehe Klassendoku oben - deren IC ist aus
+    scripts/11_factor_lab.py bekannt). Er wurde auf ausdruecklichen
+    Wunsch am 03.08.2026 direkt in beide Bots (Handel UND Schatten)
+    eingebaut, OHNE vorherige Schattenbetrieb-Messung - eine bewusste
+    Abweichung von der sonst im Projekt durchgehaltenen Regel "erst
+    messen, dann einsetzen" (siehe B09_nachkauf zum Vergleich).
+
+    Deshalb: kleines Gewicht (die Kernlogik bleibt dominant), additiv
+    (kein Gate - fehlende Nachrichtendaten duerfen niemals einen sonst
+    guten Kandidaten ausschliessen), und jede Entscheidung bekommt im
+    Protokoll das Feld "news_aktiv" mit, damit sich spaeter trennen
+    laesst: Ergebnisse VOR diesem Zeitpunkt vs. NACH Einfuehrung von News.
+    Faellt die Auswertung negativ aus, gehoert dieser Faktor wieder auf 0."""
+
 
 def build_reversal_frame(
     df: pd.DataFrame,
     market: pd.Series | None = None,
     weights: ReversalWeights | None = None,
+    *,
+    symbol: str | None = None,
+    news: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Kurzfrist-Umkehr-Signal aus nachweislich stabilen Bausteinen.
 
@@ -211,6 +233,15 @@ def build_reversal_frame(
         df: OHLCV eines Symbols.
         market: Schlusskurse eines Marktindex (z. B. SPY) fuer den
             Regime-Filter. Fehlt er, entfaellt der Filter.
+        symbol: noetig, wenn `news` uebergeben wird - ein Artikel-DataFrame
+            deckt i.d.R. mehrere Symbole ab und muss gefiltert werden.
+        news: roher Artikel-DataFrame wie von `news.get_news()`. Bewusst
+            der ROHE Datensatz, nicht fertige Tages-Merkmale: die
+            Zeitpunktsicherheit (ein Artikel zaehlt erst ab Veroeffentlichung
+            + Verzug, siehe `pit.asof_join`) passiert INNERHALB dieser
+            Funktion, nicht davor - sonst waere sie nicht mehr PIT-testbar.
+            Fehlt `news` oder `symbol`, entfaellt der Nachrichtenfaktor
+            ersatzlos (kein Gate, kein Abzug).
     """
     w = weights or ReversalWeights()
     c = df["close"].astype(float)
@@ -244,6 +275,28 @@ def build_reversal_frame(
     bb = ind.bollinger(c, 20)
     out["f_band_unten"] = (1 - bb["bb_pct"]).clip(0, 1).fillna(0.0)
 
+    # --- Baustein 5 (neu, ungetestet - siehe ReversalWeights.news): Nachrichten ---
+    if news is not None and not news.empty and symbol:
+        from .news import news_features as _news_zeitreihe
+
+        nf = _news_zeitreihe(news, df.index, symbol)
+        # news_z ist bereits ein Z-Score (Abweichung vom eigenen 60-Tage-
+        # Normalmass) - hohe Werte = ungewoehnlich viel Berichterstattung.
+        # Laut docs/strategie-analyse.md die staerkste der News-Teilmessungen.
+        # Skaliert auf 0..1 wie die anderen Bausteine, KEINE Richtungsannahme
+        # jenseits von "mehr Aufmerksamkeit als sonst zaehlt positiv".
+        out["news_z"] = nf["news_z"]
+        out["f_news"] = (nf["news_z"] / 3).clip(0, 1).fillna(0.0)
+        out["news_5d"] = nf["news_5d"]
+        out["news_tage_her"] = nf["days_since_news"]
+        out["news_erstabdeckung"] = nf["first_coverage"]
+    else:
+        out["news_z"] = np.nan
+        out["f_news"] = 0.0
+        out["news_5d"] = np.nan
+        out["news_tage_her"] = np.nan
+        out["news_erstabdeckung"] = np.nan
+
     # --- Filter ---
     vol = ind.realized_volatility(c, 20)
     out["volatility"] = vol
@@ -264,6 +317,7 @@ def build_reversal_frame(
         + w.rsi2 * out["f_rsi2"]
         + w.ausverkauf * out["f_ausverkauf"]
         + w.band_unten * out["f_band_unten"]
+        + w.news * out["f_news"]
     ).mul(gate).fillna(0.0)
 
     return out
@@ -281,6 +335,18 @@ def explain_reversal(row: pd.Series) -> dict:
         "markt_ok": bool(row.get("markt_ok", 1)),
         "volatilitaet": round(float(row.get("volatility", 0) or 0), 3),
         "atr_pct": round(float(row.get("atr_pct", 0) or 0), 4),
+        "f_news": round(float(row.get("f_news", 0)), 3),
+        # Geflaggt, damit sich Entscheidungen VOR/NACH der News-Einfuehrung
+        # spaeter im Journal eindeutig trennen lassen (Nutzeranforderung).
+        "news_aktiv": bool(pd.notna(row.get("news_z"))),
+        "news_z": (round(float(row["news_z"]), 3)
+                  if pd.notna(row.get("news_z")) else None),
+        "news_5d": (round(float(row["news_5d"]), 1)
+                   if pd.notna(row.get("news_5d")) else None),
+        "news_tage_her": (round(float(row["news_tage_her"]), 1)
+                          if pd.notna(row.get("news_tage_her")) else None),
+        "news_erstabdeckung": (round(float(row["news_erstabdeckung"]), 0)
+                               if pd.notna(row.get("news_erstabdeckung")) else None),
     }
 
 

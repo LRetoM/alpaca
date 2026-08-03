@@ -123,15 +123,20 @@ CREATE TABLE IF NOT EXISTS predictions (
     regime_breite    REAL,
     atr_pct          REAL,
     liquiditaet      REAL,
-    -- Nachrichten-Kontext (Plan §10.2a/b). Wird nur gefuellt, wenn der Lauf
-    -- mit --mit-news startet: Der Feed kostet Alpaca-Kontingent, und die
-    -- Merkmale sind ein Kandidat, kein bestaetigter Faktor.
+    -- Nachrichten-Kontext (Plan §10.2a/b). Seit 03.08.2026 IMMER aktiv, Teil
+    -- des normalen Starts fuer beide Bots (Handel und Schatten) - kein Flag
+    -- mehr noetig. news_z/news_5d/news_erstabdeckung/news_tage_her sind die
+    -- Werte, die tatsaechlich in den Score eingeflossen sind (ReversalWeights.
+    -- news); news_ereignis/news_ton sind reine Zusatzbeobachtung ohne
+    -- Wirkung auf die Entscheidung (siehe _news_kontext). news_aktiv trennt
+    -- Entscheidungen VOR/NACH der News-Einfuehrung im Auswertung.
     news_z           REAL,
     news_5d          REAL,
     news_erstabdeckung REAL,
     news_tage_her    REAL,
     news_ereignis    TEXT,
     news_ton         REAL,
+    news_aktiv       INTEGER,
     wuerde_gehandelt INTEGER DEFAULT 0,
     code_version     TEXT NOT NULL,
     nachgetragen     INTEGER DEFAULT 0,
@@ -421,17 +426,14 @@ class ShadowConfig:
     vergleichbar. Ein Schattentrade ohne Kosten sieht systematisch besser aus
     als jeder echte, und zwar genau in die Richtung, die einem gefaellt."""
 
-    mit_news: bool = False
-    """Nachrichten-Kontext je Vorhersage mitspeichern (Plan §10.2a/b).
-
-    Standardmaessig aus: Der Alpaca-News-Feed kostet Kontingent, und die
-    Merkmale sind ein KANDIDAT, kein bestaetigter Faktor. Sie beeinflussen
-    die Entscheidung NICHT - sie werden nur mitgeschrieben, damit sich
-    spaeter messen laesst, ob sie etwas beitragen."""
-
     news_max_symbole: int = 200
-    """Nur die bestbewerteten Kandidaten bekommen News-Kontext - der Feed
-    ist zu langsam fuer 800 Symbole je Lauf."""
+    """Nur die bestbewerteten Kandidaten bekommen den zusaetzlichen
+    Tonalitaets-/Ereignis-Kontext (news_ton/news_ereignis, _news_kontext) -
+    dieser zweite Feed-Abruf ist zu langsam fuer 800 Symbole je Lauf.
+
+    Betrifft NICHT den eigentlichen Score-Faktor (ReversalWeights.news):
+    Der laeuft seit 03.08.2026 immer, ueber das GANZE Universum, als Teil
+    des normalen Starts (siehe baue_snapshot) - kein Flag, keine Grenze."""
 
     max_new_positions: int = 3
     """Kaeufe je Lauf im Spiegelbuch - identisch mit dem Live-Bot. Im
@@ -470,6 +472,7 @@ class ShadowStore:
                 "news_z": "REAL", "news_5d": "REAL",
                 "news_erstabdeckung": "REAL", "news_tage_her": "REAL",
                 "news_ereignis": "TEXT", "news_ton": "REAL",
+                "news_aktiv": "INTEGER",
             },
             "shadow_cash": {"letzter_tag": "TEXT"},
             "shadow_runs": {"universum": "TEXT", "engine_config": "TEXT"},
@@ -529,11 +532,21 @@ class ShadowStore:
     def save_prediction(self, row: dict) -> None:
         cols = [
             "pred_id", "run_id", "bot_id", "buch", "as_of", "decided_at", "symbol",
-            "rang", "score", "decision_price", "entry_date", "entry_price_open",
-            "entry_price", "entry_price_eff", "entry_timing", "planned_stop",
-            "planned_target", "planned_hold_days", "notional", "reasons",
-            "regime_markt", "regime_vola", "regime_breite", "atr_pct",
-            "liquiditaet", "wuerde_gehandelt", "code_version", "nachgetragen",
+            "aktion", "rang", "score", "decision_price", "entry_date",
+            "entry_price_open", "entry_price", "entry_price_eff", "entry_timing",
+            "planned_stop", "planned_target", "planned_hold_days", "notional",
+            "reasons", "regime_markt", "regime_vola", "regime_breite", "atr_pct",
+            "liquiditaet",
+            # news_z/news_5d/news_erstabdeckung/news_tage_her/news_aktiv fehlten
+            # hier - die Spalten existieren zwar seit Plan §10.2a/b in der
+            # Tabelle (siehe _migrate), aber save_prediction() liess sie beim
+            # Schreiben still unter den Tisch fallen. Das erklaert, warum
+            # der Schattenbetrieb selbst mit --mit-news frueher 0 gefuellte
+            # news_5d-Werte hatte (Befund 03.08.2026) - nicht ein
+            # Ranglisten-Problem, sondern dieses Feld fehlte hier schlicht.
+            "news_z", "news_5d", "news_erstabdeckung", "news_tage_her",
+            "news_ereignis", "news_ton", "news_aktiv",
+            "wuerde_gehandelt", "code_version", "nachgetragen",
         ]
         with self._conn() as c:
             c.execute(
@@ -898,11 +911,36 @@ def baue_snapshot(bars: pd.DataFrame, *, min_bars: int = 260,
         if _letzter(df) >= as_of - pd.Timedelta(days=5)
     }
 
+    # --- Nachrichten fuer die Signalberechnung (Faktor ReversalWeights.news) ---
+    # EIN Abruf fuer das ganze Universum, wie im Handelsbot (live.py) - sonst
+    # wuerde die Rangfolge, die ueber die Kandidatenauswahl fuer den
+    # News-Kontext unten entscheidet, selbst schon ohne News gebildet, und
+    # der Faktor koennte nie mitentscheiden, wer ueberhaupt in Frage kommt.
+    # Defensiv: ein Ausfall der News-API darf den Schattenbetrieb niemals
+    # stoppen (siehe _news_kontext).
+    news_df = None
+    try:
+        from . import news as news_mod
+
+        start = (as_of - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+        news_df = news_mod.get_news(
+            list(aktuell), start=start, end=as_of.strftime("%Y-%m-%d"),
+            max_articles=5_000,
+        )
+        if verbose:
+            print(f"      Nachrichten: {len(news_df)} Artikel geladen")
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"      Nachrichten nicht ladbar ({type(e).__name__}) - "
+                  "Schattenbetrieb faehrt ohne Nachrichtenfaktor fort.")
+        news_df = None
+
     if verbose:
         print(f"      Stichtag: {as_of.date()} | {len(aktuell)} Symbole "
               f"| Marktfilter: {MARKET_SYMBOL}")
 
-    snap = MarketSnapshot(as_of=as_of, bars=aktuell, market=market.loc[:as_of])
+    snap = MarketSnapshot(as_of=as_of, bars=aktuell, market=market.loc[:as_of],
+                          news=news_df)
     snap.validate()
     return snap, {"markt": market}
 
@@ -911,7 +949,8 @@ def baue_snapshot(bars: pd.DataFrame, *, min_bars: int = 260,
 # Schritt 1: Entscheiden - beide Buecher, alle Bots der Flotte
 # ---------------------------------------------------------------------------
 def _signalrahmen(per_symbol: dict[str, pd.DataFrame], market: pd.Series,
-                  cfg: EngineConfig) -> dict[str, pd.DataFrame]:
+                  cfg: EngineConfig, news: pd.DataFrame | None = None,
+                  ) -> dict[str, pd.DataFrame]:
     """Berechnet die Signale je Symbol EINMAL fuer eine Signalkonfiguration.
 
     Die meisten Flottenvarianten aendern nur Ausstiegsparameter (stop_atr,
@@ -919,11 +958,16 @@ def _signalrahmen(per_symbol: dict[str, pd.DataFrame], market: pd.Series,
     Signalberechnung nicht. Sieben Bots brauchen dadurch zwei Durchlaeufe
     statt sieben; das ist die Voraussetzung dafuer, die Flotte ueberhaupt
     taeglich ueber ~800 Symbole laufen zu lassen.
+
+    `news` wird unveraendert an `build_reversal_frame` durchgereicht - die
+    Zeitpunktsicherheit (Verfuegbarkeit = Veroeffentlichung + Verzug) passiert
+    dort je Symbol, nicht hier (siehe signals.build_reversal_frame).
     """
     from .signals import build_reversal_frame, build_signal_frame
 
     if cfg.strategy == "reversal":
-        return {s: build_reversal_frame(df, market, cfg.reversal_weights)
+        return {s: build_reversal_frame(df, market, cfg.reversal_weights,
+                                        symbol=s, news=news)
                 for s, df in per_symbol.items()}
     return {s: build_signal_frame(df, None, cfg.weights)
             for s, df in per_symbol.items()}
@@ -931,11 +975,16 @@ def _signalrahmen(per_symbol: dict[str, pd.DataFrame], market: pd.Series,
 
 def _news_kontext(symbole: list[str], stichtag: pd.Timestamp,
                   verbose: bool = False) -> dict[str, dict]:
-    """Nachrichten-Merkmale je Symbol - darf den Lauf niemals stoppen.
+    """Zusaetzlicher Tonalitaets-/Ereignis-Kontext je Symbol - nur Metadaten.
 
-    Die Merkmale gehen NICHT in die Entscheidung ein. Sie werden nur
-    mitgeschrieben, damit sich spaeter mit derselben IC-Maschinerie messen
-    laesst, ob sie ueberhaupt etwas beitragen (Plan §10.2a).
+    Anders als `news_z`/`news_5d`/`news_tage_her`/`news_erstabdeckung` (die
+    kommen jetzt aus `signals.build_reversal_frame` und beeinflussen den
+    Score aktiv, siehe ReversalWeights.news) liefert diese Funktion NUR
+    `news_ton` und `news_ereignis` - eine zweite, unabhaengige Einordnung
+    (Tonalitaet/Ereignistyp) ueber `news_features.py`, fuer die es in
+    `news.py`s Score-Pfad keine Entsprechung gibt. Bewusst kein Gate, keine
+    Wirkung auf die Entscheidung - reine Zusatzbeobachtung fuer die
+    spaetere Auswertung. Darf den Lauf niemals stoppen.
     """
     try:
         from .news_features import kontext_fuer_stichtag
@@ -987,9 +1036,18 @@ def _rangliste(bot, snap: MarketSnapshot, store: ShadowStore, run_id: str,
             "liquiditaet": d.reasons.get("dollar_volume"),
             "wuerde_gehandelt": int(i <= max_new),
             "code_version": cv, "nachgetragen": 0,
-            "news_z": n.get("news_z"), "news_5d": n.get("news_5d"),
-            "news_erstabdeckung": n.get("news_erstabdeckung"),
-            "news_tage_her": n.get("news_tage_her"),
+            # news_z/news_5d/news_tage_her/news_erstabdeckung sind genau die
+            # Werte, die auch in den Score eingeflossen sind (aus d.reasons,
+            # von signals.build_reversal_frame) - nicht separat neu berechnet,
+            # sonst koennten Anzeige und Entscheidung auseinanderlaufen.
+            # news_ton/news_ereignis kommen weiterhin aus dem eigenstaendigen
+            # Tonalitaets-/Ereignis-Kontext (news_features.py, wirkungslos
+            # auf den Score - siehe _news_kontext).
+            "news_z": d.reasons.get("news_z"),
+            "news_5d": d.reasons.get("news_5d"),
+            "news_erstabdeckung": d.reasons.get("news_erstabdeckung"),
+            "news_tage_her": d.reasons.get("news_tage_her"),
+            "news_aktiv": int(bool(d.reasons.get("news_aktiv"))),
             "news_ereignis": n.get("news_ereignis"),
             "news_ton": n.get("news_ton"),
             **regime,
@@ -1314,26 +1372,29 @@ def entscheiden(cfg: ShadowConfig, store: ShadowStore | None = None,
                   f"Vola {regime['regime_vola']}, Breite {regime['regime_breite']}")
 
         # --- Signale je EINDEUTIGER Signalkonfiguration, nicht je Bot ---
+        # snap.news geht an JEDEN Durchlauf - der Score-Faktor
+        # (ReversalWeights.news) ist seit 03.08.2026 immer aktiv, fuer alle
+        # Bots gleich, kein Flag mehr.
         cache: dict[str, dict] = {}
         for b in bots:
             k = b.signal_schluessel()
             if k not in cache:
-                cache[k] = _signalrahmen(snap.bars, extra["markt"], b.config)
+                cache[k] = _signalrahmen(snap.bars, extra["markt"], b.config,
+                                         news=snap.news)
         if verbose:
             print(f"      {len(cache)} Signaldurchlauf/-laeufe fuer {len(bots)} Bots")
 
-        # Nachrichten-Kontext einmal fuer alle Bots, nur fuer die besten
-        # Kandidaten des Basis-Bots (der Feed ist zu langsam fuer alles).
-        news_ctx: dict[str, dict] = {}
-        if cfg.mit_news:
-            basis_signale = cache[bots[0].signal_schluessel()]
-            kand = sorted(
-                ((float(f.iloc[-1].get("score", 0) or 0), s)
-                 for s, f in basis_signale.items() if len(f)),
-                reverse=True,
-            )[: cfg.news_max_symbole]
-            news_ctx = _news_kontext([s for _, s in kand], snap.as_of,
-                                     verbose=verbose)
+        # Zusaetzlicher Tonalitaets-/Ereignis-Kontext (reine Metadaten, siehe
+        # _news_kontext) fuer die besten Kandidaten des Basis-Bots - dessen
+        # Rangliste beruecksichtigt den Score-Faktor jetzt bereits mit.
+        basis_signale = cache[bots[0].signal_schluessel()]
+        kand = sorted(
+            ((float(f.iloc[-1].get("score", 0) or 0), s)
+             for s, f in basis_signale.items() if len(f)),
+            reverse=True,
+        )[: cfg.news_max_symbole]
+        news_ctx = _news_kontext([s for _, s in kand], snap.as_of,
+                                 verbose=verbose)
 
         gesamt = 0
         for b in bots:

@@ -120,10 +120,32 @@ def build_snapshot(
             "Simulation ab."
         )
 
+    # --- Nachrichten fuer die Signalberechnung (Faktor ReversalWeights.news) ---
+    # EIN Abruf fuer alle Symbole (news.get_news nimmt eine Liste und
+    # paginiert selbst), nicht 1200 Einzelabrufe. Defensiv: ein Ausfall der
+    # News-API darf niemals den Handelslauf verhindern - der Bot faehrt
+    # dann einfach ohne den Nachrichtenfaktor fort (siehe ReversalWeights.news).
+    news_df = None
+    try:
+        from . import news as news_mod
+
+        start = (as_of - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+        news_df = news_mod.get_news(
+            list(per_symbol), start=start, end=as_of.strftime("%Y-%m-%d"),
+            max_articles=5_000,
+        )
+        if verbose:
+            print(f"      Nachrichten: {len(news_df)} Artikel geladen")
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"      Nachrichten nicht ladbar ({type(e).__name__}) - "
+                  "Bot faehrt ohne Nachrichtenfaktor fort.")
+        news_df = None
+
     if verbose:
         print(f"      Stichtag: {as_of.date()} | {len(per_symbol)} Symbole "
               f"| Marktfilter: {MARKET_SYMBOL}")
-    return MarketSnapshot(as_of=as_of, bars=per_symbol, market=market)
+    return MarketSnapshot(as_of=as_of, bars=per_symbol, market=market, news=news_df)
 
 
 def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:

@@ -75,6 +75,11 @@ class MarketSnapshot:
     insider: dict[str, pd.DataFrame] = field(default_factory=dict)
     market: pd.Series | None = None
     """Schlusskurse eines Marktindex (SPY) bis as_of - fuer den Regime-Filter."""
+    news: pd.DataFrame | None = None
+    """Roh-Artikel ueber ALLE betrachteten Symbole (Format wie news.get_news()),
+    ebenfalls nur bis as_of - `signals.build_reversal_frame` filtert intern
+    per Symbol und wendet die Verfuegbarkeitsverzoegerung an (pit.asof_join).
+    Fehlt dieses Feld, entfaellt der Nachrichtenfaktor ersatzlos."""
     signals: dict[str, pd.DataFrame] = field(default_factory=dict)
     """Optional vorberechnete Signale, ebenfalls bis as_of geschnitten.
 
@@ -105,6 +110,11 @@ class MarketSnapshot:
                         f"LOOKAHEAD in {name}[{sym}]: Daten bis {last}, "
                         f"Stichtag ist {self.as_of}."
                     )
+
+        if self.news is not None and not self.news.empty:
+            from . import pit
+
+            pit.assert_no_future_events(self.news, self.as_of, time_col="timestamp")
 
 
 @dataclass
@@ -469,7 +479,8 @@ class Engine:
             return pre
         if self.cfg.strategy == "reversal":
             return build_reversal_frame(
-                snapshot.bars[symbol], snapshot.market, self.cfg.reversal_weights
+                snapshot.bars[symbol], snapshot.market, self.cfg.reversal_weights,
+                symbol=symbol, news=snapshot.news,
             )
         return build_signal_frame(
             snapshot.bars[symbol], snapshot.insider.get(symbol), self.cfg.weights

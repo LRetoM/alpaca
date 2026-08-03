@@ -122,11 +122,6 @@ def main() -> int:
     p.add_argument("--schritt", choices=["entscheiden", "einbuchen", "verifizieren"],
                    help="Nur diesen einen Schritt ausfuehren")
     p.add_argument("--bot-id", default="B00_basis")
-    p.add_argument("--mit-news", action="store_true",
-                   help="Nachrichten-Kontext je Vorhersage mitspeichern. "
-                        "Beeinflusst die Entscheidung NICHT - die Merkmale "
-                        "werden nur erfasst, damit spaeter messbar ist, ob "
-                        "sie etwas beitragen. Kostet Alpaca-Kontingent.")
     args = p.parse_args()
 
     store = ShadowStore()
@@ -145,7 +140,6 @@ def main() -> int:
         years=args.years,
         engine=engine,
         bot_id=args.bot_id,
-        mit_news=args.mit_news,
     )
 
     for sig in (signal.SIGTERM, signal.SIGINT):
