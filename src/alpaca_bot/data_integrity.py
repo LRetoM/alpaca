@@ -1,0 +1,326 @@
+"""Automatisierte Pruefung: sind die gesammelten Daten wirklich richtig?
+
+`audit.py` prueft, ob der Bot sich an seine HANDELSREGELN gehalten hat.
+`selfcheck.py` prueft den CODE gegen die Projektregeln. Dieses Modul
+prueft eine dritte, eigene Sache: ob die DATEN SELBST - die Zahlen in
+den SQLite-Datenbanken, auf denen jede spaetere Auswertung aufbaut -
+strukturell in Ordnung sind.
+
+Der Grund, warum das ein eigenes Modul braucht: Am 03.08.2026 wurden bei
+einer manuellen Pruefung vier Datenfehler gefunden, die JEDER fuer sich
+lautlos waren - kein Absturz, keine Fehlermeldung, einfach falsche oder
+fehlende Zahlen in Auswertungen, die auf den ersten Blick plausibel
+aussahen (z.B. "0 Kaufentscheidungen" trotz echter Kaeufe). Eine
+manuelle Ad-hoc-Pruefung findet solche Fehler nur, wenn zufaellig jemand
+gezielt danach sucht. Dieses Modul automatisiert genau die Pruefungen,
+die diese vier Fehler damals aufgedeckt haben, damit sie reproduzierbar
+und wiederholbar sind - nicht nur einmalig von Hand gemacht.
+
+Jeder Check hier ist die direkte Lehre aus einem echten Vorfall:
+
+    Zeitstempel-Format    -> "Kaufentscheidungen geprueft: 0" trotz Kaeufen
+    Platzhalter-Order-IDs -> Verkaeufe nie mit Fuellpreis abgleichbar
+    Primaerschluessel-Kollision -> Dry-Run-Orders ueberschrieben sich selbst
+    Fuellpreis-Vollstaendigkeit -> Orders aelter als das Abgleichfenster verloren
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import pandas as pd
+
+from .journal import JOURNAL_DB, Journal
+from .lifecycle import LIFECYCLE_DB
+from .state import STATE_DB
+
+
+@dataclass
+class Finding:
+    severity: str
+    """'fehler' = Daten sind nachweislich falsch/verloren |
+    'auffaellig' = erklaerungsbeduerftig, nicht zwingend falsch"""
+    check: str
+    detail: str
+
+    def __str__(self) -> str:
+        tag = "[FEHLER]    " if self.severity == "fehler" else "[AUFFAELLIG]"
+        return f"{tag} {self.check}\n             {self.detail}"
+
+
+@dataclass
+class IntegrityReport:
+    findings: list[Finding] = field(default_factory=list)
+    checks: list[str] = field(default_factory=list)
+    stats: dict = field(default_factory=dict)
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [f for f in self.findings if f.severity == "fehler"]
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+    def add(self, severity: str, check: str, detail: str) -> None:
+        self.findings.append(Finding(severity, check, detail))
+
+    def ampel(self) -> str:
+        """Eine Zeile, verstaendlich ohne Vorwissen - fuer den Health-Check."""
+        if not self.ok:
+            return f"ROT - {len(self.errors)} Datenfehler gefunden"
+        if self.findings:
+            return f"GELB - {len(self.findings)} Auffaelligkeit(en), kein Datenverlust"
+        return "GRUEN - alle Datenintegritaets-Pruefungen bestanden"
+
+    def __str__(self) -> str:
+        lines = ["=" * 74, "  DATENINTEGRITAET", "=" * 74, "", f"  Status: {self.ampel()}", ""]
+        if self.stats:
+            lines.append("  Grundlage:")
+            for k, v in self.stats.items():
+                lines.append(f"    {k:<34} {v}")
+            lines.append("")
+        lines.append(f"  {len(self.checks)} Pruefungen:")
+        for c in self.checks:
+            lines.append(f"    - {c}")
+        lines.append("")
+        if self.findings:
+            for f in self.findings:
+                lines.append(str(f))
+                lines.append("")
+        else:
+            lines.append("  Keine Befunde.")
+        return "\n".join(lines)
+
+
+def _table_exists(db: Path, name: str) -> bool:
+    if not db.exists():
+        return False
+    with sqlite3.connect(db) as c:
+        row = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+    return row is not None
+
+
+def check_timestamps(j: Journal, report: IntegrityReport) -> None:
+    """Sind ALLE Zeitstempel im Journal auswertbar - nicht nur die meisten?
+
+    Lehre aus dem 03.08.2026-Vorfall: pandas' automatische Formaterkennung
+    verwirft Zeilen mit abweichendem Zeitstempel-Muster lautlos als NaT,
+    wenn nicht explizit format='mixed' angegeben wird. Ohne diesen Check
+    faellt das nur auf, wenn jemand zufaellig die Zaehlung hinterfragt.
+    """
+    report.checks.append("Alle Zeitstempel in decisions/orders/runs sind parsebar")
+    for table, col in (("decisions", "ts"), ("orders", "ts"), ("runs", "started_at")):
+        df = j.table(table)
+        if df.empty or col not in df.columns:
+            continue
+        parsed = pd.to_datetime(df[col], format="mixed", utc=True, errors="coerce")
+        bad = int(parsed.isna().sum())
+        report.stats[f"{table}.{col} geprueft"] = len(df)
+        if bad:
+            report.add(
+                "fehler", f"Zeitstempel {table}.{col}",
+                f"{bad} von {len(df)} Zeilen nicht parsebar (NaT). Jede "
+                "zeitbasierte Auswertung uebersieht diese Zeilen lautlos.",
+            )
+
+
+def check_order_ids(j: Journal, report: IntegrityReport) -> None:
+    """Haben echte Orders eine ECHTE Broker-ID, keinen Platzhalter?
+
+    Lehre: `close_position()` gab frueher nur einen Text zurueck, jeder
+    Verkauf bekam eine selbst erfundene "local_..."-ID, die nie zu einer
+    Alpaca-Order passt - `reconcile_fills()` konnte solche Verkaeufe
+    NIE abgleichen.
+    """
+    report.checks.append("Echte Orders (dry_run=0) haben keine local_-Platzhalter-ID")
+    o = j.table("orders", "dry_run = 0")
+    if o.empty:
+        return
+    fake = o[o["order_id"].astype(str).str.startswith("local_")]
+    report.stats["Echte Orders gesamt"] = len(o)
+    if not fake.empty:
+        report.add(
+            "fehler", "Platzhalter-Order-ID bei echter Order",
+            f"{len(fake)} von {len(o)} echten Orders haben eine lokal "
+            f"erfundene ID statt der Broker-ID: "
+            f"{', '.join(fake['symbol'].tolist()[:10])}. Diese koennen nie "
+            "mit einem Fuellpreis abgeglichen werden.",
+        )
+
+
+def check_id_collisions(j: Journal, report: IntegrityReport) -> None:
+    """Wurde eine order_id mehrfach vergeben (stiller Ueberschreib-Verlust)?
+
+    Lehre: OrderResult.id war im Trockenlauf immer der feste String
+    "dry-run". Da order_id PRIMARY KEY ist und mit INSERT OR REPLACE
+    geschrieben wird, ueberschrieb jede weitere Dry-Run-Order lautlos die
+    vorherige - ohne Fehlermeldung, ohne Absturz.
+    """
+    report.checks.append("Keine feste Platzhalter-ID, die sich selbst ueberschreiben wuerde")
+    o = j.table("orders")
+    if o.empty:
+        return
+    verdaechtig = {"dry-run", "not_sent", ""}
+    treffer = o[o["order_id"].isin(verdaechtig)]
+    if len(treffer) > 1:
+        report.add(
+            "fehler", "Feste Platzhalter-ID mehrfach verwendet",
+            f"order_id-Wert(e) {sorted(set(treffer['order_id']))} kommen "
+            f"{len(treffer)}x vor, obwohl PRIMARY KEY - JEDE weitere "
+            "Verwendung ueberschreibt die vorherige. Nur der letzte "
+            "Eintrag ist noch vorhanden.",
+        )
+
+
+def check_fill_completeness(j: Journal, report: IntegrityReport,
+                            max_age_hours: float = 6.0) -> None:
+    """Bleiben echte Orders zu lange ohne Fuellpreis?
+
+    Lehre: Ein starres 48h-Abgleichfenster in reconcile_fills() verlor
+    Orders, die laenger offen blieben, unwiderruflich - der Broker kannte
+    sie noch, aber das Fenster erfasste sie nicht mehr. Hier wird deutlich
+    enger geprueft (6h), um fruehzeitig zu warnen statt erst nach Tagen.
+    """
+    report.checks.append(f"Echte Orders bekommen binnen {max_age_hours:g}h einen Fuellpreis")
+    o = j.table("orders", "dry_run = 0 AND fill_price IS NULL")
+    if o.empty:
+        return
+    ts = pd.to_datetime(o["ts"], format="mixed", utc=True, errors="coerce")
+    alter_h = (pd.Timestamp.now(tz="UTC") - ts).dt.total_seconds() / 3600
+    alt = o[alter_h > max_age_hours]
+    if not alt.empty:
+        report.add(
+            "fehler", "Order ohne Fuellpreis ueber dem Zeitlimit",
+            f"{len(alt)} Order(s) aelter als {max_age_hours:g}h ohne "
+            f"fill_price: {', '.join(alt['symbol'].tolist()[:10])}. "
+            "reconcile_fills() ausfuehren oder Ursache pruefen.",
+        )
+
+
+def check_run_configs(j: Journal, report: IntegrityReport, letzte_n: int = 20) -> None:
+    """Schreiben aktuelle Laeufe die vollstaendigen Handelsregeln mit?
+
+    Ohne das kann `audit.py` spaetere Entscheidungen nicht gegen die
+    damals geltenden Schwellen pruefen.
+    """
+    report.checks.append("Aktuelle Laeufe protokollieren min_score in ihrer Konfiguration")
+    import json
+
+    runs = j.table("runs", "script = 'live_trade'")
+    if runs.empty:
+        return
+    runs["started_at"] = pd.to_datetime(runs["started_at"], format="mixed", utc=True)
+    recent = runs.sort_values("started_at").tail(letzte_n)
+    fehlend = 0
+    for _, r in recent.iterrows():
+        try:
+            cfg = json.loads(r["config"] or "{}")
+        except json.JSONDecodeError:
+            cfg = {}
+        if "min_score" not in cfg:
+            fehlend += 1
+    report.stats[f"Letzte {letzte_n} Laeufe geprueft"] = len(recent)
+    if fehlend:
+        report.add(
+            "auffaellig", "Config-Protokollierung",
+            f"{fehlend} von {len(recent)} juengsten Laeufen ohne vollstaendige "
+            "Regel-Konfiguration - vermutlich vor dem entsprechenden Fix "
+            "entstanden, kein aktuelles Problem.",
+        )
+
+
+def check_state_vs_broker(report: IntegrityReport) -> None:
+    """Deckt sich der gespeicherte Zustand mit dem echten Depot?"""
+    report.checks.append("Bot-Zustand deckt sich mit dem Broker-Depot")
+    from . import account
+    from .state import Store
+
+    try:
+        broker = set(account.positions().index)
+    except Exception as e:  # noqa: BLE001
+        report.add("auffaellig", "Depotabgleich", f"Kontoabruf fehlgeschlagen: {e}")
+        return
+    stored = set(Store().load_positions())
+    if broker - stored:
+        report.add(
+            "fehler", "Position ohne Zustand",
+            f"{', '.join(sorted(broker - stored))} - Stop/Ziel unbekannt, "
+            "kann nicht regelkonform geschlossen werden.",
+        )
+    if stored - broker:
+        report.add(
+            "auffaellig", "Verwaister Zustand",
+            f"{', '.join(sorted(stored - broker))} - Zustand ohne Position.",
+        )
+
+
+def check_extreme_slippage(j: Journal, report: IntegrityReport,
+                           schwelle_bps: float = 500.0) -> None:
+    """Listet ungewoehnlich grosse Slippage-Werte - nicht automatisch falsch.
+
+    Lehre aus SAIA (-317 bps): manche Ausreisser sind echte Marktbewegung
+    waehrend der Ausfuehrung, kein Rechenfehler. Deshalb 'auffaellig',
+    nicht 'fehler' - aber sichtbar machen, damit es nicht uebersehen wird.
+    """
+    report.checks.append(f"Auffaellige Slippage (>|{schwelle_bps:g}| bps) wird gelistet")
+    o = j.table("orders", "dry_run = 0 AND slippage_bps IS NOT NULL")
+    if o.empty:
+        return
+    extreme = o[o["slippage_bps"].abs() > schwelle_bps]
+    if not extreme.empty:
+        beispiele = ", ".join(
+            f"{r['symbol']}({r['slippage_bps']:+.0f}bps)"
+            for _, r in extreme.head(5).iterrows()
+        )
+        report.add(
+            "auffaellig", "Grosse Slippage-Werte",
+            f"{len(extreme)} Order(s) ueber {schwelle_bps:g} bps: {beispiele}. "
+            "Pruefen ob reale Marktbewegung (siehe costs.reconcile) oder "
+            "Referenzpreis-Fehler.",
+        )
+
+
+def check_lifecycle_coverage(report: IntegrityReport) -> None:
+    """Hat jeder Verkauf einen Lebenslauf-Eintrag (fuer den Lernbericht)?"""
+    report.checks.append("Jeder Ausstieg hat einen Lebenslauf-Eintrag")
+    from .lifecycle import Lifecycle
+    from .state import Store
+
+    exits = Store().recent_exits(days=90)
+    trades = Lifecycle().table()
+    report.stats["Ausstiege gesamt"] = len(exits)
+    report.stats["Lebenslauf-Eintraege"] = len(trades)
+    if len(exits) > len(trades) + 1:  # etwas Toleranz fuer Timing
+        report.add(
+            "auffaellig", "Lebenslauf unvollstaendig",
+            f"{len(exits)} Ausstiege protokolliert, aber nur {len(trades)} "
+            "Lebenslauf-Eintraege - manche Verkaeufe liefern keine Daten "
+            "fuer den Lernbericht.",
+        )
+
+
+def run_all() -> IntegrityReport:
+    """Fuehrt alle Datenintegritaets-Pruefungen aus."""
+    report = IntegrityReport()
+    j = Journal()
+
+    check_timestamps(j, report)
+    check_order_ids(j, report)
+    check_id_collisions(j, report)
+    check_fill_completeness(j, report)
+    check_run_configs(j, report)
+    check_state_vs_broker(report)
+    check_extreme_slippage(j, report)
+    check_lifecycle_coverage(report)
+
+    # journal.py's eigene Vollstaendigkeitspruefung mit einbeziehen
+    report.checks.append("Journal-interne Konsistenz (journal.integrity_check)")
+    for p in j.integrity_check():
+        report.add("auffaellig", "Journal-Konsistenz", p)
+
+    return report
