@@ -50,7 +50,7 @@ def main() -> int:
         show = trades[[c for c in cols if c in trades.columns]].copy()
         for c in ("entry_date", "exit_date"):
             if c in show:
-                show[c] = pd.to_datetime(show[c], errors="coerce", utc=True)
+                show[c] = pd.to_datetime(show[c], format="mixed", errors="coerce", utc=True)
                 show[c] = show[c].dt.strftime("%d.%m")
         print(show.to_string(index=False))
         print()

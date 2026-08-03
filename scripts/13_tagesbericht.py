@@ -56,7 +56,10 @@ def main() -> int:
 
     runs = j.table("runs", "script = 'live_trade'")
     if not runs.empty:
-        runs["started_at"] = pd.to_datetime(runs["started_at"], utc=True)
+        # format="mixed": gemischte Mikrosekunden-Praesenz in isoformat()-
+        # Zeitstempeln liess pandas' Format-Inferenz sonst ~8% der Zeilen
+        # als NaT verwerfen (siehe audit.py).
+        runs["started_at"] = pd.to_datetime(runs["started_at"], format="mixed", utc=True)
         recent = runs[runs["started_at"] >= since]
         failed = int((recent["status"] == "failed").sum())
         print(f"    Handelslaeufe im Zeitraum: {len(recent)}"
@@ -71,7 +74,7 @@ def main() -> int:
     print("\n[2] ENTSCHEIDUNGEN UND ORDERS")
     orders = j.table("orders", "dry_run = 0")
     if not orders.empty:
-        orders["ts"] = pd.to_datetime(orders["ts"], utc=True)
+        orders["ts"] = pd.to_datetime(orders["ts"], format="mixed", utc=True)
         orders = orders[orders["ts"] >= since]
 
     if orders.empty:

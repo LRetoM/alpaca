@@ -118,7 +118,12 @@ def check_decisions(j: Journal, report: AuditReport, days: int = 7) -> None:
     dec = j.table("decisions")
     if dec.empty:
         return
-    dec["ts"] = pd.to_datetime(dec["ts"], utc=True, errors="coerce")
+    # format="mixed": journal.py schreibt Zeitstempel ueber isoformat(), das
+    # Mikrosekunden WEGLAESST, wenn sie exakt 0 sind. Ohne explizites Format
+    # inferiert pandas das Muster vom ersten Wert und verwirft jeden Wert mit
+    # abweichendem Muster als NaT - beobachtet am 03.08.2026: 91 von 1173
+    # Zeitstempeln (7,8 %) gingen so verloren, darunter die META-Kaufentscheidung.
+    dec["ts"] = pd.to_datetime(dec["ts"], format="mixed", utc=True, errors="coerce")
     dec = dec[(dec["ts"] >= since) & (dec["run_id"].isin(configs))]
     buys = dec[(dec["action"] == "buy") & (dec["blocked_by"].isna())]
     report.stats["Kaufentscheidungen geprueft"] = len(buys)
@@ -262,7 +267,7 @@ def check_gaps(j: Journal, report: AuditReport, expected_interval_min: int = 15,
     runs = j.table("runs", "script = 'live_trade'")
     if runs.empty:
         return
-    runs["started_at"] = pd.to_datetime(runs["started_at"], utc=True)
+    runs["started_at"] = pd.to_datetime(runs["started_at"], format="mixed", utc=True)
     since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
     recent = runs[runs["started_at"] >= since].sort_values("started_at")
     report.stats["Handelslaeufe"] = len(recent)
