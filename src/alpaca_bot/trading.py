@@ -216,13 +216,30 @@ def trailing_stop(
     )
 
 
-def close_position(symbol: str, *, dry_run: bool = True) -> str:
-    """Position komplett schliessen."""
+def close_position(symbol: str, *, dry_run: bool = True) -> OrderResult:
+    """Position komplett schliessen.
+
+    Gibt wie `market_order()` ein OrderResult mit der ECHTEN Alpaca-
+    Order-ID zurueck. Vorher wurde die Rueckgabe von
+    `trading_client().close_position()` verworfen und durch einen reinen
+    Text ersetzt ("AMKR geschlossen") - dadurch bekam jeder Verkauf im
+    Protokoll eine selbst erfundene Platzhalter-ID (order_id="local_..."),
+    die niemals zu einer echten Order beim Broker passt.
+    `live.reconcile_fills()` konnte solche Verkaeufe deshalb NIE mit
+    einem Fuellpreis abgleichen - kein Zeitfenster-Problem, sondern ein
+    strukturell fehlender Schluessel. Betraf jeden Verkauf, nicht nur
+    Einzelfaelle. Entdeckt am 03.08.2026 bei der Pruefung der
+    Ausfuehrungsqualitaet.
+    """
     if dry_run:
-        return f"[DRY-RUN] wuerde {symbol} schliessen"
+        return OrderResult("dry-run", symbol, "sell", None, None, "not_sent", True)
     _limit.acquire()
-    trading_client().close_position(symbol)
-    return f"{symbol} geschlossen"
+    o = trading_client().close_position(symbol)
+    return OrderResult(
+        str(o.id), o.symbol, "sell",
+        float(o.qty) if o.qty else None, None,
+        str(o.status).split(".")[-1].lower(),
+    )
 
 
 def close_all(*, dry_run: bool = True) -> str:

@@ -307,7 +307,21 @@ def reconcile_fills(lookback_hours: int = 48) -> int:
     if open_orders.empty:
         return 0
 
+    # `since` deckt mindestens `lookback_hours` ab, wird aber nie enger als
+    # noetig, um die AELTESTE noch offene Order zu erfassen. Ein starres
+    # 48h-Fenster liess Orders, die aus irgendeinem Grund (Absturz,
+    # ausbleibender Zyklus) laenger offen blieben, UNWIDERRUFLICH ohne
+    # Fuellpreis zurueck - der Broker haelt die Order laengst nicht mehr im
+    # 48h-Fenster vor, obwohl er sie kennt. Beobachtet am 03.08.2026: 5
+    # Orders zwischen 64 und 132 Stunden alt, nie abgeglichen.
+    import pandas as pd
+
     since = dt.datetime.now(dt.UTC) - dt.timedelta(hours=lookback_hours)
+    ts = pd.to_datetime(open_orders["ts"], format="mixed", utc=True, errors="coerce")
+    if ts.notna().any():
+        oldest = ts.min().to_pydatetime() - dt.timedelta(hours=1)
+        since = min(since, oldest)
+
     broker = account.orders(status="closed", limit=500, after=since)
     if broker.empty:
         return 0
@@ -431,8 +445,20 @@ def run_once(
                       f"{d.reasons.get('gewinn_pct', 0):+.1%})")
             try:
                 ref = _reference_price(d.symbol, "sell", fallback=d.price)
-                msg = trading.close_position(d.symbol, dry_run=dry_run)
-                run.order(did, symbol=d.symbol, side="sell", status=str(msg),
+                res = trading.close_position(d.symbol, dry_run=dry_run)
+                run.order(did, symbol=d.symbol, side="sell",
+                          status=res.status,
+                          # NIEMALS "dry-run" als order_id durchreichen:
+                          # OrderResult.id ist im Trockenlauf immer dieser
+                          # feste String. Da orders.order_id PRIMARY KEY ist
+                          # und journal.order() mit INSERT OR REPLACE
+                          # schreibt, wuerde jede weitere Dry-Run-Order die
+                          # vorherige mit identischer ID stillschweigend
+                          # ueberschreiben - nur die letzte haette ueberlebt.
+                          # None laesst journal.order() eine eindeutige
+                          # lokale ID erzeugen, wie es schon immer fuer
+                          # NICHT gesetzte IDs vorgesehen war.
+                          order_id=(res.id if not dry_run else None),
                           dry_run=dry_run, expected_price=ref,
                           decision_price=d.price)
                 done.append(d)
@@ -457,7 +483,18 @@ def run_once(
                     side="buy", dry_run=dry_run,
                 )
                 run.order(did, symbol=d.symbol, side="buy",
-                          status=res.status, order_id=res.id,
+                          status=res.status,
+                          # NIEMALS "dry-run" als order_id durchreichen:
+                          # OrderResult.id ist im Trockenlauf immer dieser
+                          # feste String. Da orders.order_id PRIMARY KEY ist
+                          # und journal.order() mit INSERT OR REPLACE
+                          # schreibt, wuerde jede weitere Dry-Run-Order die
+                          # vorherige mit identischer ID stillschweigend
+                          # ueberschreiben - nur die letzte haette ueberlebt.
+                          # None laesst journal.order() eine eindeutige
+                          # lokale ID erzeugen, wie es schon immer fuer
+                          # NICHT gesetzte IDs vorgesehen war.
+                          order_id=(res.id if not dry_run else None),
                           notional=d.target_notional, dry_run=dry_run,
                           expected_price=ref, decision_price=d.price)
                 done.append(d)
@@ -549,7 +586,18 @@ def run_once(
                     side="buy", dry_run=dry_run,
                 )
                 run.order(did, symbol=d.symbol, side="buy",
-                          status=res.status, order_id=res.id,
+                          status=res.status,
+                          # NIEMALS "dry-run" als order_id durchreichen:
+                          # OrderResult.id ist im Trockenlauf immer dieser
+                          # feste String. Da orders.order_id PRIMARY KEY ist
+                          # und journal.order() mit INSERT OR REPLACE
+                          # schreibt, wuerde jede weitere Dry-Run-Order die
+                          # vorherige mit identischer ID stillschweigend
+                          # ueberschreiben - nur die letzte haette ueberlebt.
+                          # None laesst journal.order() eine eindeutige
+                          # lokale ID erzeugen, wie es schon immer fuer
+                          # NICHT gesetzte IDs vorgesehen war.
+                          order_id=(res.id if not dry_run else None),
                           notional=d.target_notional, dry_run=dry_run,
                           expected_price=ref, decision_price=d.price)
                 if not dry_run:
