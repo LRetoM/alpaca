@@ -162,6 +162,13 @@ class Journal:
             "orders": {
                 "decision_price": "REAL",
                 "decision_drift_bps": "REAL",
+                # 'quote' = echte Bid/Ask-Quote zum Ausfuehrungszeitpunkt,
+                # 'fallback' = keine Quote verfuegbar, Entscheidungskurs als
+                # Notloesung eingesetzt. Ohne dieses Feld liesse sich nicht
+                # unterscheiden, ob eine Zeile echte Ausfuehrungsqualitaet
+                # misst oder nur Kursdrift seit der Entscheidung - siehe
+                # live._reference_price().
+                "referenz_quelle": "TEXT",
             },
         }
         with self._conn() as c:
@@ -333,16 +340,59 @@ class Journal:
         agg = agg[agg["n"] >= 5]
         return agg.sort_values(["grund", "mittel"], ascending=[True, False]).round(4)
 
-    def slippage_report(self) -> pd.DataFrame:
+    def slippage_report(self, *, nur_bereinigt: bool = True) -> pd.DataFrame:
         """Erwarteter gegen tatsaechlichen Ausfuehrungspreis.
 
         Die Luecke zwischen Backtest und Realitaet. Wenn sie systematisch
         groesser ist als die im Backtest angesetzten Basispunkte, sind alle
         Backtest-Ergebnisse zu optimistisch - und zwar genau um diesen Betrag.
+
+        Zwei Arten von Zeilen verzerren dieses Bild, wenn man sie mitzaehlt:
+
+        1. **Legacy-Datensaetze aus der Zeit vor dem `close_position()`-Fix**
+           (Commit 9c26b6a, 03.08.2026). Vorher gab `close_position()` reinen
+           Text zurueck ("AMKR geschlossen") statt eines echten Broker-Status
+           - genau dieser Text steht noch im `status`-Feld alter Zeilen und
+           macht sie strukturell erkennbar, ohne auf ein Datum raten zu
+           muessen. Konkret beobachtet: drei AMKR-Verkaeufe vom 28.07.2026
+           mit `expected_price=60.74` bei Fuellpreisen um 45-46 - eine
+           Verzerrung von ueber +2000 bps, die den gesamten Mittelwert
+           uebertoent.
+        2. **Zeilen ohne echte Marktquote** (`referenz_quelle='fallback'`,
+           siehe `live._reference_price`). Dort ist `expected_price` der
+           Entscheidungskurs, keine Marktbeobachtung - die "Slippage"
+           waere in Wahrheit Kursdrift seit der Entscheidung, genau die
+           Vermischung, die dieses Modul verhindern soll.
+
+        Nicht ausgeschlossen wird `referenz_quelle='quote_verworfen'`: Dort
+        wich die Bid/Ask-Quote zu stark vom letzten echten Trade ab und
+        wurde durch diesen ersetzt (beobachtet bei SIMO/KGS am 04.08.2026,
+        Quote 11-14 % neben Fuellpreis UND Entscheidungskurs). Der
+        verwendete Wert ist dann ein echter, zeitgleicher Marktpreis -
+        zaehlt also mit, im Unterschied zum Entscheidungskurs-Fallback.
+
+        `nur_bereinigt=True` (Standard) schliesst Legacy-Zeilen und Fallback
+        aus. `False` zeigt alles - auch die bekannten Ausreisser - fuer die
+        Nachvollziehbarkeit.
         """
         o = self.table("orders", "dry_run = 0 AND fill_price IS NOT NULL")
         if o.empty:
             return pd.DataFrame()
+
+        legacy = o["status"].astype(str).str.endswith(" geschlossen")
+
+        if nur_bereinigt:
+            fallback = o["referenz_quelle"] == "fallback"
+            ausgeschlossen = legacy | fallback
+            if ausgeschlossen.any():
+                print(f"  [slippage_report] {int(legacy.sum())} Legacy-Zeile(n) "
+                      f"(vor dem close_position()-Fix) und "
+                      f"{int(fallback.sum())} Zeile(n) ohne echte Quote "
+                      f"ausgeschlossen von {len(o)} gesamt.")
+            o = o[~ausgeschlossen]
+        if o.empty:
+            return pd.DataFrame()
+
         o["slippage_bps"] = (
             (o["fill_price"] - o["expected_price"]) / o["expected_price"] * 10_000
         ).where(o["side"] == "buy", lambda s: -s)
@@ -528,6 +578,7 @@ class RunLogger:
         expected_price: float | None = None,
         decision_price: float | None = None,
         fill_price: float | None = None,
+        referenz_quelle: str | None = None,
         raw: Any = None,
     ) -> None:
         """Protokolliert eine Order und verknuepft sie mit ihrer Entscheidung.
@@ -542,6 +593,13 @@ class RunLogger:
 
         Beides zu vermischen war ein Fehler: Die Drift ueber Nacht wurde als
         Slippage ausgewiesen und ergab Werte wie -2452 Basispunkte.
+
+        `referenz_quelle` ('quote'|'quote_verworfen'|'fallback', siehe
+        live._reference_price) haelt fest, ob `expected_price` aus einer
+        echten, plausiblen Bid/Ask-Quote stammt, aus dem letzten Trade (weil
+        die Quote selbst unglaubwuerdig war), oder nur der Entscheidungskurs
+        als Notloesung war. `slippage_report()` nutzt das, um Kursdrift
+        nicht faelschlich als Slippage zu zaehlen.
         """
         oid = order_id or f"local_{uuid.uuid4().hex[:10]}"
 
@@ -563,10 +621,10 @@ class RunLogger:
                 "INSERT OR REPLACE INTO orders (order_id, decision_id, run_id, ts,"
                 " symbol, side, qty, notional, status, dry_run, fill_price,"
                 " expected_price, decision_price, slippage_bps, decision_drift_bps,"
-                " raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " referenz_quelle, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (oid, decision_id, self.run_id, ts, symbol, side, qty, notional,
                  status, int(dry_run), fill_price, expected_price, decision_price,
-                 slip, drift, _dumps(raw)),
+                 slip, drift, referenz_quelle, _dumps(raw)),
             )
             if decision_id:
                 c.execute(

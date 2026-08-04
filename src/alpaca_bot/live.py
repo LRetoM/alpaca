@@ -214,7 +214,81 @@ def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
     )
 
 
-def _reference_price(symbol: str, side: str, fallback: float) -> float:
+@dataclass
+class Referenzpreis:
+    """Preis samt Herkunft - die Herkunft entscheidet, ob eine Zeile spaeter
+    als echte Ausfuehrungsmessung zaehlen darf oder nur eine Notloesung ist.
+    """
+
+    preis: float
+    quelle: str
+    """'quote'           = echte Bid/Ask-Quote von Alpaca verwendet, gegen
+                           den letzten Trade geprueft und plausibel.
+    'quote_verworfen'   = die Bid/Ask-Quote wich zu stark vom letzten echten
+                           Trade ab (siehe `_MAX_QUOTE_ABWEICHUNG`) - `preis`
+                           ist dann der letzte Trade, nicht die Quote. Live
+                           beobachtet bei SIMO und KGS am 04.08.2026: die
+                           Quote lag 11-14 % neben Entscheidungskurs UND
+                           Fuellpreis, waehrend Minutenbars zur selben Zeit
+                           den tatsaechlichen Kurs exakt beim Fuellpreis
+                           zeigten - die Quote selbst war fehlerhaft, keine
+                           reale Bewegung.
+    'fallback'          = keine gueltige Quote verfuegbar (IEX-Ausfall, Symbol
+                           nicht abrufbar) - `preis` ist der Entscheidungskurs,
+                           keine Marktbeobachtung. Eine Zeile mit dieser
+                           Herkunft misst Kursdrift seit der Entscheidung,
+                           nicht Slippage - genau die Vermischung, vor der
+                           dieses Modul warnt (siehe unten).
+
+    `journal.slippage_report()` schliesst nur 'fallback' aus dem Mittelwert
+    aus - 'quote_verworfen' beruht auf einem echten Trade und zaehlt daher
+    mit, zeigt seine Zahl aber gesondert an."""
+
+
+_MAX_QUOTE_ABWEICHUNG = 0.05
+"""Ab welcher Abweichung vom letzten echten Trade gilt eine Bid/Ask-Quote
+als unglaubwuerdig - NICHT die Schwelle gegen den Entscheidungskurs (siehe
+Docstring von `_reference_price`)."""
+
+
+def _quote_plausibel(symbol: str, kandidat: float) -> tuple[bool, float | None]:
+    """Prueft eine Quote gegen den letzten TATSAECHLICH gehandelten Kurs.
+
+    Der Entscheidungskurs taugt als Massstab nicht: Ein Kandidat dieser
+    Strategie ist per Definition ein Wert, der gerade stark gefallen ist -
+    eine Abweichung von 15-20 % zum Vortagesschluss ist hier normaler
+    Alltag, kein Datenfehler (siehe SAIA: 342-362 $ Intraday-Spanne an
+    einem einzigen Tag, real, kein Bug). Eine Schwelle dagegen wuerde genau
+    die grossen, echten Ausfuehrungsrisiken verstecken, die diese Messung
+    aufdecken soll.
+
+    Der letzte Trade dagegen ist eine ECHTE, zeitgleiche Marktbeobachtung -
+    keine Erwartung, sondern ein Faktum. Weicht die Quote davon um mehr als
+    `_MAX_QUOTE_ABWEICHUNG` ab, ist mit hoher Wahrscheinlichkeit die Quote
+    fehlerhaft, nicht der Markt in Bewegung.
+
+    Live beobachtet am 04.08.2026: SIMO-Verkauf mit Quote 225.32 $, obwohl
+    Minutenbars zur selben Zeit Trades um 261-262 $ zeigen (Fuellpreis
+    261.00 $, exakt im Bereich der echten Trades). KGS-Verkauf mit Quote
+    50.67 $ gegen echte Trades um 59.0-59.4 $ (Fuellpreis 59.02 $). In
+    beiden Faellen lag NUR die Bid/Ask-Quote daneben - nicht der
+    Entscheidungskurs, nicht der Fuellpreis. Der IEX-Feed sieht nur ~2 %
+    des US-Handelsvolumens; bei duenn gehandelten Werten wird die Quote
+    dadurch gelegentlich unzuverlaessig, obwohl echte Trades korrekt
+    durchkommen.
+    """
+    try:
+        snap = data.snapshots(symbol)
+        last = float(snap.loc[symbol, "last"] or 0)
+    except Exception:  # noqa: BLE001 - Cross-Check darf keine Order verhindern
+        return True, None
+    if last <= 0 or kandidat <= 0:
+        return True, None
+    abweichung = abs(kandidat - last) / last
+    return abweichung <= _MAX_QUOTE_ABWEICHUNG, last
+
+
+def _reference_price(symbol: str, side: str, fallback: float) -> Referenzpreis:
     """Der Kurs, den man im Moment der Order realistisch bekommen konnte.
 
     DAS ist die richtige Bezugsgroesse fuer Slippage - nicht der Kurs, auf
@@ -228,15 +302,22 @@ def _reference_price(symbol: str, side: str, fallback: float) -> float:
 
     Kauf laeuft ueber den Briefkurs, Verkauf ueber den Geldkurs - was
     darueber hinaus verloren geht, ist echte Slippage.
+
+    Jede so gewonnene Quote wird zusaetzlich gegen den letzten echten
+    Trade geprueft (`_quote_plausibel`) - eine Bid/Ask-Quote kann auf dem
+    IEX-Feed veraltet oder fehlerhaft sein, auch wenn beide Seiten formal
+    gueltige (>0) Werte liefern.
     """
     try:
         q = data.latest_quotes(symbol)
         ask = float(q.loc[symbol, "ask"] or 0)
         bid = float(q.loc[symbol, "bid"] or 0)
+
+        kandidat: float | None = None
         if side == "buy" and ask > 0:
-            return ask
-        if side == "sell" and bid > 0:
-            return bid
+            kandidat = ask
+        elif side == "sell" and bid > 0:
+            kandidat = bid
         # Die gewuenschte Seite fehlt (haeufig vorboerslich bei duenn
         # gehandelten Werten ueber den IEX-Feed - Ask oft 0.0). Ein
         # Mittelwert aus einer echten und einer fehlenden Seite waere KEIN
@@ -244,15 +325,21 @@ def _reference_price(symbol: str, side: str, fallback: float) -> float:
         # ergibt 22.77 und meldet einen Kurssturz, der nie stattfand. Bei
         # einer fehlenden Seite gilt die vorhandene als bester verfuegbarer
         # Schaetzwert, echte Mittelwertbildung nur wenn BEIDE gueltig sind.
-        if ask > 0 and bid > 0:
-            return (ask + bid) / 2
-        if ask > 0:
-            return ask
-        if bid > 0:
-            return bid
+        elif ask > 0 and bid > 0:
+            kandidat = (ask + bid) / 2
+        elif ask > 0:
+            kandidat = ask
+        elif bid > 0:
+            kandidat = bid
+
+        if kandidat is not None:
+            plausibel, letzter_trade = _quote_plausibel(symbol, kandidat)
+            if plausibel or letzter_trade is None:
+                return Referenzpreis(kandidat, "quote")
+            return Referenzpreis(letzter_trade, "quote_verworfen")
     except Exception:  # noqa: BLE001 - Quote-Ausfall darf keine Order verhindern
         pass
-    return float(fallback)
+    return Referenzpreis(float(fallback), "fallback")
 
 
 def _nachkauf_im_zustand(d: Decision, fill_schaetzung: float) -> None:
@@ -481,8 +568,8 @@ def run_once(
                           # lokale ID erzeugen, wie es schon immer fuer
                           # NICHT gesetzte IDs vorgesehen war.
                           order_id=(res.id if not dry_run else None),
-                          dry_run=dry_run, expected_price=ref,
-                          decision_price=d.price)
+                          dry_run=dry_run, expected_price=ref.preis,
+                          referenz_quelle=ref.quelle, decision_price=d.price)
                 done.append(d)
                 executed += 0 if dry_run else 1
             except Exception as e:  # noqa: BLE001
@@ -518,7 +605,8 @@ def run_once(
                           # NICHT gesetzte IDs vorgesehen war.
                           order_id=(res.id if not dry_run else None),
                           notional=d.target_notional, dry_run=dry_run,
-                          expected_price=ref, decision_price=d.price)
+                          expected_price=ref.preis, referenz_quelle=ref.quelle,
+                          decision_price=d.price)
                 done.append(d)
                 executed += 0 if dry_run else 1
             except (trading.RiskError, compliance.ComplianceError) as e:
@@ -556,7 +644,7 @@ def run_once(
                 ref = _reference_price(d.symbol, "buy", fallback=d.price)
                 pos = portfolio.positions.get(d.symbol)
                 if pos is not None and pos.entry_price > 0:
-                    gewinn_jetzt = ref / pos.entry_price - 1
+                    gewinn_jetzt = ref.preis / pos.entry_price - 1
                     if gewinn_jetzt < cfg.topup_min_gain_pct:
                         if verbose:
                             print(f"              -> abgebrochen: "
@@ -582,7 +670,7 @@ def run_once(
                 # Kurs neu ausrechnen und kappen statt blind zu uebernehmen.
                 if pos is not None:
                     cap = portfolio.equity * cfg.max_position_pct
-                    ist_wert = pos.qty * ref
+                    ist_wert = pos.qty * ref.preis
                     erlaubt = max(0.0, cap - ist_wert)
                     if erlaubt < portfolio.equity * cfg.min_position_pct:
                         if verbose:
@@ -621,9 +709,10 @@ def run_once(
                           # NICHT gesetzte IDs vorgesehen war.
                           order_id=(res.id if not dry_run else None),
                           notional=d.target_notional, dry_run=dry_run,
-                          expected_price=ref, decision_price=d.price)
+                          expected_price=ref.preis, referenz_quelle=ref.quelle,
+                          decision_price=d.price)
                 if not dry_run:
-                    _nachkauf_im_zustand(d, ref)
+                    _nachkauf_im_zustand(d, ref.preis)
                 done.append(d)
                 executed += 0 if dry_run else 1
             except (trading.RiskError, compliance.ComplianceError) as e:
