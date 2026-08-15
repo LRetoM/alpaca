@@ -177,6 +177,31 @@ Absturz — deshalb prüft `data_integrity.py` inzwischen automatisch.
 
 ---
 
+## G2. Das Risiko-Dach — warum die Einzahlungsbereinigung entscheidend ist
+
+**Datum:** 15.08.2026, beim Bau von `risiko.py` gemessen.
+
+Ohne Bereinigung um Ein-/Auszahlungen ist die Drawdown-Sperre genau dann
+wirkungslos, wenn am meisten Kapital im Spiel ist. Verifiziert:
+
+| Schritt | Konto | Drawdown **mit** Bereinigung | **ohne** |
+|---|---|---|---|
+| Start | 100.000 | 0 % | 0 % |
+| +50.000 eingezahlt | 150.000 | **0 %** (kein Scheingewinn) | 0 % |
+| Verlust auf | 125.000 | **25 % → Sperre** | 16,7 % → **keine Sperre** |
+
+Derselbe reale Verlust hätte ohne Bereinigung die Grenze nicht gerissen.
+Ebenso bei der Rendite: naiv **+25 %**, zeitgewichtet **−16,67 %**.
+
+**Folge:** `risiko.py` hängt zwingend an `state.kapitalfluesse`. Fällt die
+Kapitalfluss-Erfassung aus, ist die Sperre nicht mehr verlässlich.
+
+Weiter gilt: **Dividenden (DIV) und Zinsen (INT) werden NICHT
+herausgerechnet** — sie sind echter Ertrag des eingesetzten Kapitals. Nur
+CSD/CSW verändern die Bezugsgröße.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

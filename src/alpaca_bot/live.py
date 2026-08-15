@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from . import account, compliance, data, trading
+from . import account, compliance, data, risiko, trading
 from .engine import Decision, Engine, EngineConfig, MarketSnapshot, PortfolioState, Position
 from .journal import Journal
 
@@ -530,6 +530,22 @@ def run_once(
             return LiveResult([], [], 0, 0, dry_run, status.equity)
 
         # --- 2. Lage erfassen ---
+        # Sektoren fuer die Klumpenkontrolle des Risiko-Dachs. Einmal je
+        # Lauf, aus dem dauerhaften Cache - ohne sie kann `risiko` nicht
+        # pruefen, ob das Depot in einem Sektor klumpt. Ein Ausfall darf
+        # den Handel nicht stoppen; dann entfaellt nur diese eine Regel.
+        try:
+            from . import universe as _uni
+
+            sektoren = _uni.sektoren(sorted({*symbols, *[
+                s for s in account.positions().index
+            ]}), verbose=False)
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"      Sektoren nicht ladbar ({type(e).__name__}) - "
+                      "Klumpenkontrolle entfaellt fuer diesen Lauf.")
+            sektoren = None
+
         snapshot = build_snapshot(symbols, verbose=verbose)
         portfolio = build_portfolio(snapshot)
         run.log("lage", stichtag=str(snapshot.as_of.date()),
@@ -602,6 +618,22 @@ def run_once(
                       f"Stop {d.stop_price:.2f} Ziel {d.target_price:.2f}")
             try:
                 compliance.assert_can_trade(d.symbol, "buy")
+                # Risiko-Dach je Order: Die Kontopruefung zu Beginn des
+                # Laufs kennt die geplanten Kaeufe noch nicht. Erst hier
+                # steht fest, wie hoch Exposure und Cash-Quote NACH dieser
+                # Order waeren - und genau das ist die Frage.
+                frei = risiko.pruefe_order(d.symbol, "buy", d.target_notional,
+                                           sektoren=sektoren)
+                if not frei.ok:
+                    if verbose:
+                        print(f"              -> Risiko-Dach: "
+                              f"{'; '.join(frei.gruende)}")
+                    run.decision(d.symbol, "buy", reasons=d.reasons,
+                                 conviction=d.conviction, price=d.price,
+                                 strategy="engine",
+                                 blocked_by=f"Risikodach: {'; '.join(frei.gruende)[:200]}")
+                    blocked += 1
+                    continue
                 ref = _reference_price(d.symbol, "buy", fallback=d.price)
                 res = trading.market_order(
                     d.symbol, notional=round(d.target_notional, 2),
@@ -707,6 +739,23 @@ def run_once(
                         d.target_notional = round(erlaubt, 2)
 
                 compliance.assert_can_trade(d.symbol, "buy")
+                # Auch der Nachkauf ist ein Kauf und erhoeht Exposure und
+                # Klumpenrisiko. Ihn auszunehmen hiesse, die Grenzen ueber
+                # wiederholtes Aufstocken zu umgehen - bei bis zu neun
+                # Nachkaeufen je Symbol (gemessen: MUSA) ist das kein
+                # theoretischer Fall.
+                frei = risiko.pruefe_order(d.symbol, "buy", d.target_notional,
+                                           sektoren=sektoren)
+                if not frei.ok:
+                    if verbose:
+                        print(f"              -> Risiko-Dach: "
+                              f"{'; '.join(frei.gruende)}")
+                    run.decision(d.symbol, "topup", reasons=d.reasons,
+                                 conviction=d.conviction, price=d.price,
+                                 strategy="engine",
+                                 blocked_by=f"Risikodach: {'; '.join(frei.gruende)[:200]}")
+                    blocked += 1
+                    continue
                 res = trading.market_order(
                     d.symbol, notional=round(d.target_notional, 2),
                     side="buy", dry_run=dry_run,

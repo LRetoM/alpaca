@@ -344,3 +344,62 @@ BENCHMARK_SETS: dict[str, list[str]] = {
         "NEE", "DUK", "SO", "D", "AEP", "AMT", "PLD", "EQIX", "CCI", "SPG",
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Sektoren - Grundlage der Klumpenkontrolle im Risiko-Dach
+# ---------------------------------------------------------------------------
+SEKTOR_CACHE = PROJECT_ROOT / "results" / "factor_lab" / "sektoren.csv"
+
+
+def sektoren(symbols: list[str], *, use_cache: bool = True,
+             verbose: bool = False) -> dict[str, str]:
+    """Symbol -> Sektor, dauerhaft gecacht.
+
+    **Wofuer:** `risiko.pruefe_order` kann ohne diese Zuordnung das
+    Klumpenrisiko nicht pruefen. Fuenfzehn Halbleiterwerte sind EINE Wette,
+    keine fuenfzehn - im Crash verhalten sie sich auch so. Ohne Sektordaten
+    saehe ein solches Depot wie ein perfekt gestreutes aus.
+
+    Der Cache ist bewusst OHNE Datum im Namen: Der Sektor eines
+    Unternehmens aendert sich praktisch nie. Ein taegliches Neuladen waere
+    bei 1.200 Symbolen ein Vielfaches des yfinance-Tageskontingents - und
+    genau dieses Kontingent wird fuer die Forschung gebraucht.
+
+    Nur FEHLENDE Symbole werden nachgeladen. Faellt der Abruf aus, bleibt
+    das Symbol unbekannt; `risiko.sektor_anteile` zaehlt es dann unter
+    'unbekannt', statt es stillschweigend zu ignorieren.
+    """
+    import csv
+
+    bekannt: dict[str, str] = {}
+    if use_cache and SEKTOR_CACHE.exists():
+        with SEKTOR_CACHE.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("symbol"):
+                    bekannt[row["symbol"]] = row.get("sektor") or "unbekannt"
+
+    fehlend = [s for s in symbols if s not in bekannt]
+    if not fehlend:
+        return {s: bekannt.get(s, "unbekannt") for s in symbols}
+
+    import yfinance as yf
+
+    limiter = RateLimiter("yfinance")
+    for i, sym in enumerate(fehlend, 1):
+        try:
+            limiter.acquire()
+            info = yf.Ticker(sym).info
+            bekannt[sym] = (info or {}).get("sector") or "unbekannt"
+        except Exception:  # noqa: BLE001 - einzelne Ausfaelle sind normal
+            bekannt[sym] = "unbekannt"
+        if verbose and i % 25 == 0:
+            print(f"      Sektoren: {i}/{len(fehlend)}")
+
+    SEKTOR_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with SEKTOR_CACHE.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["symbol", "sektor"])
+        for s, sek in sorted(bekannt.items()):
+            w.writerow([s, sek])
+    return {s: bekannt.get(s, "unbekannt") for s in symbols}

@@ -80,6 +80,39 @@ def main() -> int:
         gruende.append(f"Status nicht abrufbar: {type(e).__name__}: {e}")
         ampel = "ROT"
 
+    # --- 2b. Risiko-Dach ---
+    # Steht bewusst VOR der Datenintegritaet: Eine aktive Sperre ist die
+    # wichtigste Einzelinformation ueberhaupt - sie bedeutet, dass der Bot
+    # gerade NICHT handelt. Wer sie uebersieht, wundert sich tagelang ueber
+    # ausbleibende Trades.
+    try:
+        from alpaca_bot import risiko
+        from alpaca_bot.state import Store as _S
+
+        sperre = _S().sperre_lesen()
+        if int(sperre.get("aktiv") or 0) == 1:
+            ampel = "ROT"
+            gruende.append(f"RISIKO-SPERRE AKTIV: {sperre.get('grund')}")
+            print(f"  Risiko-Dach     : SPERRE AKTIV")
+        else:
+            v = _S().kapital_verlauf(tage=90)
+            if v.empty:
+                print("  Risiko-Dach     : frei (noch keine Messpunkte)")
+            else:
+                a = v.iloc[-1]
+                g = risiko.Risikogrenzen()
+                print(f"  Risiko-Dach     : frei | Drawdown "
+                      f"{a['drawdown_pct']:.1%} (Grenze {g.max_drawdown_pct:.0%}) "
+                      f"| Exposure {a['exposure']:.0%}")
+                if a["drawdown_pct"] > g.max_drawdown_pct * 0.75:
+                    ampel = "GELB" if ampel == "GRUEN" else ampel
+                    gruende.append(
+                        f"Drawdown {a['drawdown_pct']:.1%} naehert sich der "
+                        f"Grenze {g.max_drawdown_pct:.0%}.")
+    except Exception as e:  # noqa: BLE001
+        gruende.append(f"Risiko-Dach nicht pruefbar: {type(e).__name__}: {e}")
+        ampel = "ROT"
+
     # --- 3. Datenintegritaet ---
     try:
         from alpaca_bot import data_integrity

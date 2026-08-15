@@ -104,6 +104,7 @@ class Daemon:
         self._stop = False
         self._errors = 0
         self._last_evaluation: dt.date | None = None
+        self._last_fluss_check: dt.date | None = None
 
         # Auf Beendigungssignale sauber reagieren, damit der Zustand
         # konsistent bleibt und der Dienst nicht in einer Schleife haengt.
@@ -270,6 +271,28 @@ class Daemon:
         except Exception as e:  # noqa: BLE001
             print(f"      Lebenslauf-Analyse fehlgeschlagen: {type(e).__name__}: {e}")
 
+    def _maybe_kapitalfluesse(self) -> None:
+        """Traegt Ein-/Auszahlungen nach - einmal je Kalendertag.
+
+        Nicht je Zyklus: Der Abruf kostet zwei API-Aufrufe, und Fluesse
+        aendern sich nicht minuetlich. Der eigene Tageszaehler ist bewusst
+        getrennt von dem der Ergebnisbewertung - faellt einer aus, laeuft
+        der andere weiter.
+        """
+        today = dt.date.today()
+        if getattr(self, "_last_fluss_check", None) == today:
+            return
+        try:
+            from . import kapital
+
+            n = kapital.fluesse_nachtragen(self.store, verbose=True)
+            if n:
+                print(f"      {n} Kapitalfluss/-fluesse neu gebucht")
+            self._last_fluss_check = today
+        except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
+            print(f"      Kapitalfluss-Abgleich fehlgeschlagen: "
+                  f"{type(e).__name__}: {e}")
+
     def _maybe_evaluate_outcomes(self) -> None:
         """Ordnet einmal taeglich jeder Entscheidung ihr Ergebnis zu.
 
@@ -358,6 +381,36 @@ class Daemon:
             print(f"      Fuellpreis-Abgleich fehlgeschlagen: {type(e).__name__}")
 
         self._maybe_evaluate_outcomes()
+
+        # Kapitalfluesse VOR der Risikopruefung nachtragen: Der
+        # einzahlungsbereinigte Hoechststand haengt davon ab. Wuerde eine
+        # Einzahlung erst nach der Pruefung gebucht, sähe der Zuwachs fuer
+        # genau einen Zyklus wie ein Gewinn aus - und nach einer AUSZAHLUNG
+        # wuerde faelschlich ein Drawdown gemeldet, der nur eine Entnahme war.
+        self._maybe_kapitalfluesse()
+
+        # --- Risiko-Dach: steht ueber allem, auch ueber der Strategie ---
+        try:
+            from . import risiko
+
+            frei = risiko.pruefe_konto()
+            if not frei.ok:
+                print(f"  [{dt.datetime.now():%H:%M:%S}] RISIKO-DACH BLOCKIERT:")
+                for g in frei.gruende:
+                    print(f"      {g}")
+                # Bewusst `ok=True`: Das ist kein Fehler, sondern eine
+                # bewusste Entscheidung des Systems. Ein Fehlerzaehler wuerde
+                # sonst hochlaufen und nach `max_consecutive_errors` den
+                # Prozess beenden - eine Sperre wuerde damit zum Absturz.
+                self.store.heartbeat(ok=True, error="risiko_dach_blockiert")
+                return True
+        except Exception as e:  # noqa: BLE001
+            # Faellt die Pruefung selbst aus, wird NICHT gehandelt. Ein
+            # Risiko-Dach, das im Zweifel durchlaesst, ist keines.
+            print(f"  [{dt.datetime.now():%H:%M:%S}] Risikopruefung "
+                  f"fehlgeschlagen ({type(e).__name__}: {e}) - kein Handel.")
+            self.store.heartbeat(ok=True, error=f"risiko_pruefung_fehler: {e}")
+            return True
 
         state = self.recover()
         print(f"  [{dt.datetime.now():%H:%M:%S}] Kapital "

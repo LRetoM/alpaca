@@ -71,6 +71,47 @@ CREATE TABLE IF NOT EXISTS exits (
     PRIMARY KEY (symbol, exit_date)
 );
 CREATE INDEX IF NOT EXISTS idx_exits_date ON exits(exit_date);
+
+-- ------------------------------------------------------------- Risiko-Dach
+-- Die Sperre ist bewusst EINE Zeile mit fester id: Es kann immer nur einen
+-- Sperrzustand geben. Waere sie eine Ereignisliste, muesste jeder Leser
+-- selbst entscheiden, welcher Eintrag noch gilt - und ein vergessener
+-- Filter hiesse, dass der Bot trotz Sperre weiterhandelt.
+CREATE TABLE IF NOT EXISTS risiko_sperre (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    aktiv        INTEGER NOT NULL DEFAULT 0,
+    grund        TEXT,
+    kennzahlen   TEXT,
+    gesetzt_am   TEXT,
+    geloest_am   TEXT,
+    geloest_von  TEXT
+);
+
+-- Equity je Zyklus. `heartbeat` haelt nur den LETZTEN Wert - ohne diese
+-- Tabelle laesst sich im Nachhinein nicht sagen, wann ein Drawdown begann.
+CREATE TABLE IF NOT EXISTS kapital_verlauf (
+    ts            TEXT PRIMARY KEY,
+    equity        REAL NOT NULL,
+    cash          REAL NOT NULL,
+    exposure      REAL NOT NULL,
+    n_positionen  INTEGER NOT NULL,
+    hoechststand  REAL NOT NULL,
+    drawdown_pct  REAL NOT NULL,
+    einzahlungen_kumuliert REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_kapital_ts ON kapital_verlauf(ts);
+
+-- Ein- und Auszahlungen. Der Alpaca-Aktivitaets-`id` ist der Schluessel:
+-- Nur so kann derselbe Fluss nicht zweimal gebucht werden, egal wie oft
+-- der Abgleich laeuft.
+CREATE TABLE IF NOT EXISTS kapitalfluesse (
+    id          TEXT PRIMARY KEY,
+    ts          TEXT NOT NULL,
+    art         TEXT NOT NULL,
+    betrag      REAL NOT NULL,
+    erkannt_am  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fluesse_ts ON kapitalfluesse(ts);
 """
 
 
@@ -222,6 +263,101 @@ class Store:
         with self._conn() as c:
             row = c.execute("SELECT * FROM heartbeat WHERE id = 1").fetchone()
         return dict(row) if row else {}
+
+    # --- Risiko-Sperre -----------------------------------------------------
+    def sperre_lesen(self) -> dict:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM risiko_sperre WHERE id = 1").fetchone()
+        return dict(row) if row else {"aktiv": 0}
+
+    def sperre_setzen(self, grund: str, kennzahlen: dict | None = None) -> None:
+        """Setzt die Sperre. Idempotent - eine bestehende Sperre bleibt mit
+        ihrem URSPRUENGLICHEN Grund und Zeitpunkt stehen.
+
+        Warum nicht ueberschreiben: Der erste Ausloeser ist der
+        interessante. Wuerde jeder Zyklus den Grund neu schreiben, stuende
+        am Ende der zuletzt gepruefte dort - und die Frage "womit fing es
+        an" waere nicht mehr beantwortbar.
+        """
+        with self._conn() as c:
+            vorhanden = c.execute(
+                "SELECT aktiv FROM risiko_sperre WHERE id = 1"
+            ).fetchone()
+            if vorhanden and int(vorhanden["aktiv"]) == 1:
+                return
+            c.execute(
+                "INSERT INTO risiko_sperre (id, aktiv, grund, kennzahlen,"
+                " gesetzt_am, geloest_am, geloest_von) VALUES (1,1,?,?,?,NULL,NULL)"
+                " ON CONFLICT(id) DO UPDATE SET aktiv=1, grund=excluded.grund,"
+                " kennzahlen=excluded.kennzahlen, gesetzt_am=excluded.gesetzt_am,"
+                " geloest_am=NULL, geloest_von=NULL",
+                (grund, json.dumps(kennzahlen or {}, ensure_ascii=False),
+                 dt.datetime.now(dt.UTC).isoformat()),
+            )
+
+    def sperre_loesen(self, von: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE risiko_sperre SET aktiv=0, geloest_am=?, geloest_von=?"
+                " WHERE id = 1",
+                (dt.datetime.now(dt.UTC).isoformat(), von),
+            )
+
+    # --- Kapitalverlauf und Kapitalfluesse ---------------------------------
+    def kapital_punkt(self, *, equity: float, cash: float, exposure: float,
+                      n_positionen: int, hoechststand: float,
+                      drawdown_pct: float, einzahlungen: float) -> None:
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO kapital_verlauf VALUES (?,?,?,?,?,?,?,?)",
+                (dt.datetime.now(dt.UTC).isoformat(), float(equity), float(cash),
+                 float(exposure), int(n_positionen), float(hoechststand),
+                 float(drawdown_pct), float(einzahlungen)),
+            )
+
+    def kapital_verlauf(self, tage: int = 90) -> pd.DataFrame:
+        cutoff = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=tage)).isoformat()
+        with self._conn() as c:
+            return pd.read_sql_query(
+                "SELECT * FROM kapital_verlauf WHERE ts >= ? ORDER BY ts",
+                c, params=(cutoff,),
+            )
+
+    def fluss_buchen(self, fluss_id: str, ts, art: str, betrag: float) -> bool:
+        """Bucht einen Kapitalfluss. Gibt True zurueck, wenn er NEU war.
+
+        Der Alpaca-Aktivitaets-`id` ist der Primaerschluessel - derselbe
+        Fluss kann dadurch nicht zweimal gezaehlt werden, egal wie oft der
+        Abgleich laeuft. Ohne diese Zusicherung wuerde jede Wiederholung
+        den Hoechststand des Drawdown-Zaehlers weiter verschieben.
+        """
+        with self._conn() as c:
+            vorher = c.execute(
+                "SELECT 1 FROM kapitalfluesse WHERE id = ?", (fluss_id,)
+            ).fetchone()
+            if vorher:
+                return False
+            c.execute(
+                "INSERT INTO kapitalfluesse VALUES (?,?,?,?,?)",
+                (fluss_id, pd.Timestamp(ts).isoformat(), art, float(betrag),
+                 dt.datetime.now(dt.UTC).isoformat()),
+            )
+        return True
+
+    def kapitalfluesse(self) -> pd.DataFrame:
+        with self._conn() as c:
+            return pd.read_sql_query(
+                "SELECT * FROM kapitalfluesse ORDER BY ts", c
+            )
+
+    def einzahlungen_summe(self) -> float:
+        """Summe aller Ein- minus Auszahlungen. Bezugsgroesse fuer den
+        einzahlungsbereinigten Hoechststand."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(betrag), 0) AS s FROM kapitalfluesse"
+            ).fetchone()
+        return float(row["s"] or 0.0)
 
     def status_text(self) -> str:
         s = self.status()

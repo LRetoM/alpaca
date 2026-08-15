@@ -151,7 +151,15 @@ Vergleichs (beide Bots sehen dieselben Tage) senkt die nötige Zeit von
 ```
 python scripts/18_health_check.py
 ```
-**Grün** = nichts zu tun. **Gelb/Rot** = melden.
+**Grün** = nichts zu tun. **Gelb/Rot** = melden. Zeigt jetzt auch den
+Drawdown und warnt bereits, wenn er 75 % der Sperrgrenze erreicht (15 %) —
+also **bevor** gesperrt wird.
+
+Bei aktiver Sperre:
+```
+python scripts/20_risiko.py               # Grund und Kennzahlen ansehen
+python scripts/20_risiko.py --entsperren  # erst NACH Ursachenklärung
+```
 
 ### 5.2 Alle 1–2 Wochen (10 Minuten)
 
@@ -189,15 +197,40 @@ Interessant sind dort:
 | **Automatische Integritätsprüfung** | Findet Protokollfehler, bevor sie Entscheidungen verfälschen. |
 | **Betrieb bewährt** | 11 Tage ununterbrochen, 1 abgefangener Fehler. |
 
-### Was strukturell fehlt
+### Was seit 15.08.2026 gebaut ist — Live-Tauglichkeit
+
+| Baustein | Was er verhindert | Datei |
+|---|---|---|
+| **Drawdown-Sperre** (20 %) | Dass ein Bot mit kaputter Logik das Konto leerhandelt | `risiko.py` |
+| **Tagesverlustgrenze** (5 %) | Weiterkaufen in einen laufenden Absturz | `risiko.py` |
+| **Exposure-Grenze** (100 %) | Ungewollten Hebel (Alpaca erlaubt bis 4×) | `risiko.py` |
+| **Cash-Reserve** (2 %) | Zwangsverkäufe bei Kurslücken | `risiko.py` |
+| **Klumpenkontrolle** (40 %/Sektor) | Dass 15 Positionen in Wahrheit *eine* Wette sind | `risiko.py` + `universe.sektoren` |
+| **Positionsobergrenze** (30) | Konfigurationsfehler bei `max_positions` | `risiko.py` |
+| **Kapitalflüsse** | Dass Einzahlungen als Gewinn gelesen werden | `kapital.py` |
+| **Zeitgewichtete Rendite** | Unvergleichbare Kennzahlen nach Einzahlung | `kapital.py` |
+| **Equity je Zyklus** | Dass ein Drawdown-Beginn nicht rekonstruierbar ist | `state.kapital_verlauf` |
+
+**Wichtige Eigenschaften, bewusst so gebaut:**
+
+- **Die Sperre ist persistent und löst sich nie selbst.** Eine Sperre, die
+  sich nach einer Stunde aufhebt, kauft genau in den Crash zurück, wegen
+  dem sie ausgelöst hat. Lösen nur über `scripts/20_risiko.py --entsperren`
+  mit wörtlicher Bestätigung.
+- **Verkaufen ist immer erlaubt.** Eine Sperre darf nie verhindern, aus
+  einer Position herauszukommen.
+- **Fällt die Risikoprüfung selbst aus, wird nicht gehandelt.** Ein
+  Risiko-Dach, das im Zweifel durchlässt, ist keines.
+- **Auch Nachkäufe werden geprüft.** Sonst ließen sich die Grenzen über
+  wiederholtes Aufstocken umgehen (gemessen: bis zu 9 Nachkäufe je Symbol).
+
+### Was weiterhin fehlt
 
 | Lücke | Folge | Priorität |
 |---|---|---|
-| **Kein Risiko-Dach** | Kein Drawdown-Stopp, keine Tagesverlustgrenze, keine Klumpenkontrolle. Ein Bot mit kaputter Logik verliert, bis nichts mehr da ist. | **hoch** (siehe `docs/mehrbot-plan.md` §5) |
-| **Kapitalflüsse nicht erfasst** | Sobald du einzahlst, wird jede Renditekennzahl falsch. | **hoch** |
 | **Regime nicht protokolliert** | „In welcher Marktlage funktioniert es?" ist am Depot nicht beantwortbar. | mittel |
-| **Sektor nicht erfasst** | Klumpenrisiko unsichtbar (15 Halbleiterwerte wären *eine* Wette). | mittel |
-| **Laptop statt Server** | Deckel zu = alles aus. | mittel |
+| **Laptop statt Server** | Deckel zu = alles aus. Kein Auto-Login wegen FileVault. | mittel |
+| **Slippage noch nicht belastbar** | Die Kernfrage (§3.1) braucht 30+ saubere Orders | läuft |
 
 **Einschätzung:** Der Mess- und Lernapparat ist für ein Privatprojekt
 ungewöhnlich sauber. Die Lücken liegen fast alle im **Risikoschutz** —
@@ -212,8 +245,8 @@ ist das Risiko-Dach Pflicht.**
 | # | Schritt | Wann | Bedingung |
 |---|---|---|---|
 | 1 | Bots laufen lassen, nichts ändern | jetzt – ~12.09. | — |
-| 2 | Risiko-Dach bauen (`risiko.py`) | parallel möglich | berührt die Handelslogik nicht |
-| 3 | Kapitalflüsse erfassen | parallel möglich | dito |
+| 2 | ~~Risiko-Dach bauen~~ | **erledigt 15.08.** | — |
+| 3 | ~~Kapitalflüsse erfassen~~ | **erledigt 15.08.** | — |
 | 4 | Zwischenauswertung | ~12.09. | ≥20 Handelstage |
 | 5 | Entscheidung über B10 | ~10.10. | ≥40 Handelstage, alle 4 Kriterien aus §3.3 |
 | 6 | Echtgeld erwägen | frühestens danach | Slippage-Median < 8 bps **und** Risiko-Dach steht |
@@ -231,5 +264,5 @@ laufende Messung deshalb nicht.
 | Health-Check zweimal in Folge ROT | Handel aus, Ursache klären |
 | Regelabgleich meldet Abweichung | Sofort aus — ein Regelbruch ist ein Logikfehler, kein Pech |
 | Slippage-Median > 15 bps über 30 Trades | Alle Backtest- und Schattenergebnisse neu bewerten |
-| Konto-Drawdown > 20 % | Handel aus (derzeit **nicht automatisch** — siehe Lücke in §6) |
+| Konto-Drawdown > 20 % | **automatische Vollsperre** durch `risiko.py`, Lösen nur von Hand |
 | B10 verlängert > 60 % der Positionen | Regel greift zu oft, Schwelle war falsch kalibriert |
