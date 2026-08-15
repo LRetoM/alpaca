@@ -271,6 +271,40 @@ class Daemon:
         except Exception as e:  # noqa: BLE001
             print(f"      Lebenslauf-Analyse fehlgeschlagen: {type(e).__name__}: {e}")
 
+    def _maybe_stops_intraday(self) -> None:
+        """Prueft die Stop-Marken gegen den aktuellen Kurs - jeden Zyklus.
+
+        Kostet einen einzigen Quote-Abruf je gehaltener Position und ist
+        damit um Groessenordnungen billiger als der volle Entscheidungslauf
+        (1.200 Symbole). Deshalb laeuft er bei JEDEM Zyklus mit, waehrend
+        die Kandidatensuche weiterhin nur im Handelsfenster stattfindet.
+
+        Ein Fehler hier darf den Lauf nicht abbrechen, aber er muss
+        sichtbar sein: Faellt der Stop-Schutz still aus, merkt es sonst
+        niemand - und genau das waere der gefaehrlichste Zustand.
+        """
+        try:
+            clock = account.market_clock()
+        except Exception as e:  # noqa: BLE001
+            print(f"      Boersenzeit nicht abrufbar ({type(e).__name__}) - "
+                  "Intraday-Stops uebersprungen.")
+            return
+        if not clock.get("is_open"):
+            return
+        try:
+            verkauft = live.pruefe_stops_intraday(
+                dry_run=self.cfg.dry_run, verbose=True
+            )
+            if verkauft:
+                print(f"      {len(verkauft)} Position(en) per Intraday-Stop "
+                      f"geschlossen: {', '.join(verkauft)}")
+        except Exception as e:  # noqa: BLE001
+            print(f"      INTRADAY-STOP FEHLGESCHLAGEN: {type(e).__name__}: {e}")
+            try:
+                self.store.heartbeat(ok=True, error=f"stop_intraday: {e}")
+            except Exception:  # noqa: BLE001
+                pass
+
     def _maybe_kapitalfluesse(self) -> None:
         """Traegt Ein-/Auszahlungen nach - einmal je Kalendertag.
 
@@ -364,6 +398,18 @@ class Daemon:
     # --- Ein Durchgang -----------------------------------------------------
     def step(self) -> bool:
         """Ein Entscheidungslauf. Gibt zurueck, ob er erfolgreich war."""
+        # --- Intraday-Stops ZUERST, und unabhaengig vom Handelsfenster ---
+        # Die uebrigen Fensterregeln schuetzen vor TEUREN Einstiegen: Die
+        # Eroeffnungsspanne hat die weitesten Spreads, kurz vor Schluss
+        # duenner Handel. Fuer eine Notbremse gilt das Gegenteil - genau
+        # dann, wenn eine Aktie nach einer Meldung 30 % verliert, waere
+        # Warten der teuerste Fehler. Ein Stop ist kein Einstieg.
+        #
+        # `close_buffer_minutes` und `open_delay_minutes` bleiben deshalb
+        # bewusst unberuecksichtigt; nur eine geschlossene Boerse haelt die
+        # Pruefung auf, weil dort schlicht nichts ausgefuehrt werden kann.
+        self._maybe_stops_intraday()
+
         can_trade, reason = self.trading_window()
         if not can_trade:
             print(f"  [{dt.datetime.now():%H:%M:%S}] kein Handel: {reason}")

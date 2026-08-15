@@ -202,6 +202,55 @@ CSD/CSW verändern die Bezugsgröße.
 
 ---
 
+## G3. Der Stop wirkte nur einmal am Tag — Reaktionszeit bis 24 Stunden
+
+**Datum:** 15.08.2026. **Schwere:** hoch, betraf jede offene Position.
+
+`build_snapshot` verwirft bewusst die unfertige Tagesbar, damit
+Einstiegssignale auf denselben Kursen beruhen, auf denen sie gemessen
+wurden. Verifiziert am 15.08.: Der Bot rechnete mit dem **Stichtag
+14.08.** — also dem Vortagesschluss.
+
+Für Einstiege ist das richtig. Für Stops war es gefährlich:
+
+| Ereignis | Reaktion **vorher** |
+|---|---|
+| Aktie stürzt heute 30 % ab | **erst am nächsten Handelstag** |
+| Gap-Down über Nacht | am selben Tag |
+
+Erschwerend: Der Live-Bot sendet ausschließlich `market_order` — es lag
+**keine Stop-Order beim Broker**, die intraday ausgelöst hätte. Es gab
+also innerhalb eines Tages überhaupt keinen Schutz.
+
+**Und die Messung log:** `shadow.py` rechnet seit jeher mit
+Intraday-Stops (`if bar["low"] <= pos.stop_price`). Die Schattenergebnisse
+haben den Verlustschutz damit **systematisch überschätzt** — genau in den
+teuersten Fällen.
+
+**Behoben** durch `live.pruefe_stops_intraday()`: prüft jeden Zyklus
+(~15 Min) die Stop-Marken gegen den aktuellen Kurs. Damit stimmen Live
+und Schatten erstmals überein.
+
+Bewusste Abgrenzung — **nur der Stop**, nicht die übrigen Ausstiege:
+
+| Regel | Bezugskurs | Warum |
+|---|---|---|
+| Stop | **aktuell** | Notbremse, kein Signal — keine Backtest-Rechtfertigung für Verzögerung |
+| Gewinnziel | Tagesschluss | Chance, kein Risiko |
+| Score-Ausstieg | Tagesschluss | ist ein Signal, auf Tagesschlusskursen gemessen |
+| Zeitausstieg | Tagesschluss | datumsbasiert |
+
+**Schutz gegen Fehlauslösung:** Verkauft wird nur auf eine als plausibel
+geprüfte Quote hin. Eine veraltete IEX-Quote meldete am 04.08. SIMO mit
+225 statt 261 — ein Stop-Verkauf darauf wäre ein realer Verlust aus einem
+reinen Datenfehler gewesen.
+
+**Restrisiko:** Läuft der Bot nicht (Rechner aus, Absturz), greift auch
+dieser Stop nicht. Echte Stop-Orders beim Broker wären der nächste
+Schritt — sie wirken auch bei totem Bot.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

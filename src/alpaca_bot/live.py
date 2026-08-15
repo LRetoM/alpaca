@@ -486,6 +486,122 @@ def reconcile_fills(lookback_hours: int = 48) -> int:
     return updated
 
 
+def pruefe_stops_intraday(
+    *, dry_run: bool = True, verbose: bool = True,
+) -> list[str]:
+    """Prueft die Stop-Marken gegen den AKTUELLEN Kurs - nicht gegen gestern.
+
+    **Das Problem, das diese Funktion loest:** `build_snapshot` verwirft
+    bewusst die unfertige Tagesbar, damit die Einstiegssignale exakt auf
+    denselben Kursen beruhen, auf denen sie gemessen wurden. Folge:
+    `Engine._check_exits` sieht den Schlusskurs von GESTERN. Stuerzt eine
+    Aktie heute nach einer Meldung um 30 % ab, faellt das erst im Lauf des
+    naechsten Handelstages auf - bis zu 24 Stunden spaeter. Bracket-Orders
+    mit Stop beim Broker gibt es nicht; der Live-Bot sendet ausschliesslich
+    Market-Orders. Es existierte also kein einziger Schutz innerhalb eines
+    Tages.
+
+    **Warum das kein neues Verhalten ist:** Der Schattenbetrieb rechnet seit
+    jeher MIT Intraday-Stops (`shadow.py`: `if bar["low"] <= pos.stop_price`).
+    Die Schattenergebnisse haben den Verlustschutz damit systematisch
+    ueberschaetzt - genau in den Faellen, die am teuersten sind. Diese
+    Funktion stellt die Uebereinstimmung zwischen Messung und Realitaet
+    her, sie weicht nicht davon ab.
+
+    **Bewusste Abgrenzung - nur der Stop, nichts anderes:**
+
+        Stop-Marke        -> HIER, gegen den aktuellen Kurs (Sicherheit)
+        Gewinnziel        -> weiterhin Tagesschluss (Chance, nicht Risiko)
+        Score-Ausstieg    -> weiterhin Tagesschluss (ist ein SIGNAL und
+                             auf Tagesschlusskursen gemessen)
+        Zeitausstieg      -> weiterhin Tagesschluss (datumsbasiert)
+
+    Ein Stop ist kein Signal, sondern eine Notbremse - fuer ihn gibt es
+    kein Backtest-Argument, das eine Verzoegerung rechtfertigt. Fuer den
+    Score dagegen schon: Er wurde auf Tagesschlusskursen gemessen und
+    waere auf einem Zwischenstand etwas anderes als das Geprueffte.
+
+    **Schutz gegen Fehlausloesung:** Es wird ausschliesslich auf eine
+    geprueft plausible Quote hin verkauft (`Referenzpreis.quelle`). Eine
+    veraltete IEX-Quote hat am 04.08.2026 SIMO mit 225 statt 261 gemeldet -
+    ein Stop-Verkauf auf so einen Wert waere ein realer Verlust aus einem
+    reinen Datenfehler. Ist die Quote unbrauchbar, bleibt es beim
+    bisherigen Verhalten (Pruefung am naechsten Tagesschluss).
+
+    Returns: Liste der verkauften Symbole.
+    """
+    from .state import Store
+
+    store = Store()
+    stored = store.load_positions()
+    if not stored:
+        return []
+
+    pos_df = account.positions()
+    if pos_df.empty:
+        return []
+
+    gehalten = [s for s in pos_df.index if s in stored]
+    if not gehalten:
+        return []
+
+    journal = Journal()
+    verkauft: list[str] = []
+
+    with journal.run("stop_intraday", config={"n_positionen": len(gehalten),
+                                              "dry_run": dry_run}) as run:
+        for sym in gehalten:
+            stop = float(stored[sym].get("stop_price") or 0)
+            if stop <= 0:
+                continue
+
+            ref = _reference_price(sym, "sell", fallback=0.0)
+            if ref.quelle == "fallback" or ref.preis <= 0:
+                # Keine belastbare Quote - lieber nicht handeln als auf
+                # einen Datenfehler hin verkaufen.
+                continue
+            if ref.preis > stop:
+                continue
+
+            qty = float(pos_df.loc[sym, "qty"])
+            einstand = float(pos_df.loc[sym, "avg_entry"] or 0)
+            gewinn = (ref.preis / einstand - 1) if einstand > 0 else 0.0
+            gruende = {
+                "ausstiegsgrund": "stop_intraday",
+                "stop": round(stop, 4),
+                "kurs_jetzt": round(ref.preis, 4),
+                "gewinn_pct": round(gewinn, 4),
+                "referenz_quelle": ref.quelle,
+            }
+            if verbose:
+                print(f"      STOP INTRADAY {sym:<6} Kurs {ref.preis:.2f} "
+                      f"<= Stop {stop:.2f}  ({gewinn:+.1%})")
+
+            did = run.decision(sym, "sell", reasons=gruende, price=ref.preis,
+                               strategy="stop_intraday")
+            try:
+                res = trading.close_position(sym, dry_run=dry_run)
+                run.order(did, symbol=sym, side="sell", status=res.status,
+                          order_id=(res.id if not dry_run else None),
+                          qty=qty, dry_run=dry_run,
+                          expected_price=ref.preis,
+                          referenz_quelle=ref.quelle)
+                if not dry_run:
+                    meta = stored.get(sym, {})
+                    store.record_exit(
+                        sym, exit_price=ref.preis, exit_reason="stop_intraday",
+                        entry_price=meta.get("entry_price"), return_pct=gewinn,
+                        bars_held=meta.get("bars_held"),
+                    )
+                    store.drop_position(sym)
+                verkauft.append(sym)
+            except Exception as e:  # noqa: BLE001
+                run.error(f"Intraday-Stop {sym} fehlgeschlagen: {e}")
+
+        run.log("abschluss", verkauft=len(verkauft), geprueft=len(gehalten))
+    return verkauft
+
+
 def run_once(
     symbols: list[str],
     engine_config: EngineConfig | None = None,

@@ -50,8 +50,11 @@ Das ist die wichtigste Unterscheidung des ganzen Umbaus.
 | Slippage-Bereinigung | **keine** — Auswertung |
 | Symbolauswahl bei `evaluate_outcomes` | **keine** — Auswertung |
 | `zeitausstieg_dynamisch` | **AUS** — Standard `False` |
+| **Intraday-Stop** (neu 15.08.) | **JA — echte Verhaltensänderung.** Stop-Marken werden jetzt jeden Zyklus (~15 Min) gegen den aktuellen Kurs geprüft statt einmal täglich gegen den Vortagesschluss. Bringt Live mit dem Schatten in Übereinstimmung, der das schon immer so gerechnet hat. |
 
-> **Der Live-Bot handelt exakt wie vor dem Urlaub.** Verifiziert: Bei
+> **Der Live-Bot wählt Kandidaten exakt wie vor dem Urlaub.** Einzige
+> Verhaltensänderung ist der Intraday-Stop (Zeile oben) — er verkauft
+> früher, kauft aber nichts anderes. Verifiziert: Bei
 > `zeitausstieg_dynamisch=False` wird `max_hold_days_hart` nicht einmal
 > gelesen; Tag 5, 19, 20 und 25 ergeben alle unverändert `zeitausstieg`.
 
