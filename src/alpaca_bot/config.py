@@ -116,3 +116,46 @@ def get_settings() -> Settings:
             "Das ist die Sicherung gegen versehentliches Handeln mit echtem Geld."
         )
     return settings
+
+
+def code_version() -> str:
+    """Git-Commit, der diesen Lauf erzeugt hat - fuer BEIDE Pfade.
+
+    **Unverzichtbar fuer die Frage "ist es besser geworden?".** Ohne diese
+    Angabe lassen sich Codeaenderungen nicht von Marktphasen trennen: Wird
+    ein Ergebnis schlechter, ist nicht mehr feststellbar, ob eine
+    Aenderung schuld war oder nur der Markt gedreht hat. Und ohne diese
+    Unterscheidung laesst sich auch nicht gezielt auf einen besseren Stand
+    zurueckrollen.
+
+    `+dirty` heisst: Zum Zeitpunkt des Laufs lagen nicht eingecheckte
+    Aenderungen vor. Solche Daten sind fuer einen Versionsvergleich nur
+    eingeschraenkt brauchbar - der Commit allein beschreibt den Code dann
+    nicht vollstaendig.
+
+    **Warum hier und nicht in shadow.py:** Dort stand die Funktion mit
+    `cwd=DATA_DIR.parent`. Solange die Datenbanken im Projektordner lagen,
+    war das zufaellig richtig. Der Umzug nach ~/Library/Application Support
+    (30.07.2026, TCC-Dateischutz) zeigte dorthin auf ein Verzeichnis OHNE
+    Git - seitdem lieferte sie stumm 'unbekannt'. Gemessen am 15.08.2026:
+    8.278 von 12.516 Schattenvorhersagen ohne Version, also zwei Drittel
+    der Daten ohne Zuordnung. Der Bezug muss deshalb fest auf
+    PROJECT_ROOT stehen, nicht auf einen Datenpfad.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5,
+        )
+        v = out.stdout.strip()
+        if not v:
+            return "unbekannt"
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return f"{v}+dirty" if dirty else v
+    except Exception:  # noqa: BLE001 - fehlendes git darf den Lauf nie stoppen
+        return "unbekannt"

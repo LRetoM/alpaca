@@ -170,6 +170,11 @@ class Journal:
                 # live._reference_price().
                 "referenz_quelle": "TEXT",
             },
+            # Ohne die Codeversion je Lauf laesst sich spaeter nicht sagen,
+            # ob ein schlechteres Ergebnis an einer Aenderung lag oder am
+            # Markt - und damit auch nicht, auf welchen Stand man
+            # zurueckrollen muesste. Siehe config.code_version().
+            "runs": {"code_version": "TEXT"},
         }
         with self._conn() as c:
             for table, columns in wanted.items():
@@ -202,12 +207,14 @@ class Journal:
             "platform": platform.platform(),
             "argv": sys.argv,
         }
+        from .config import code_version
+
         with self._conn() as c:
             c.execute(
-                "INSERT INTO runs (run_id, script, started_at, status, config, environment)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO runs (run_id, script, started_at, status, config,"
+                " environment, code_version) VALUES (?,?,?,?,?,?,?)",
                 (run_id, script, dt.datetime.now(dt.UTC).isoformat(), "running",
-                 _dumps(config or {}), _dumps(env)),
+                 _dumps(config or {}), _dumps(env), code_version()),
             )
         logger = RunLogger(self, run_id, script)
         try:

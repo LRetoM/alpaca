@@ -202,6 +202,15 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"    Risiko-/Kapitalbericht fehlgeschlagen: {type(e).__name__}: {e}")
 
+    # --- 5c. Ergebnisse nach Codeversion ---
+    print()
+    try:
+        from alpaca_bot import versionen
+
+        print(versionen.bericht(j))
+    except Exception as e:  # noqa: BLE001
+        print(f"    Versionsbericht fehlgeschlagen: {type(e).__name__}: {e}")
+
     # --- 6. Waren die Ausstiege richtig? ---
     print("\n[6] NACHBETRACHTUNG: ZEITAUSSTIEG UND WIEDEREINSTIEGE")
     try:

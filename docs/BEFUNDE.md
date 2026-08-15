@@ -251,6 +251,55 @@ Schritt — sie wirken auch bei totem Bot.
 
 ---
 
+## G4. Live gegen Schatten — jeder bekannte Unterschied
+
+**Datum:** 15.08.2026, systematisch abgeglichen. **Warum das zählt:** Der
+Schatten ist die Messung, Live die Realität. Jeder Unterschied bedeutet,
+dass die Messung etwas anderes misst als das, was passiert.
+
+| Aspekt | Live | Schatten | Stand |
+|---|---|---|---|
+| **Intraday-Stop** | jetzt ja (~15 Min) | ja (`bar["low"]`) | **behoben 15.08.** |
+| **Kursdaten** | Alpaca/IEX | yfinance | **bewusst** — gehandelt wird bei Alpaca, geforscht mit freien Daten |
+| **Kosten** | echte Spreads | 5 bps + 3 bps angenommen | **bewusst** — die Annahme wird gegen `slippage_report()` geprüft |
+| **Ausführung** | Market-Order im Tagesverlauf | Eröffnungskurs des Folgetags | **offen** — Schatten nimmt einen günstigeren Zeitpunkt an |
+| **Risiko-Dach** | ja (seit 15.08.) | nein | **offen** — Schatten kennt keine Sperre, überschätzt damit im Crash |
+| **PDT-Regeln** | ja (`compliance`) | nein | gering — greift erst unter 25.000 $ |
+| **Codeversion** | jetzt erfasst | jetzt erfasst | **behoben 15.08.** |
+
+**Die zwei offenen Punkte überschätzen beide den Schatten**, nie den
+Live-Bot — die Messung ist also optimistisch, nicht pessimistisch. Das
+ist die ungefährlichere Richtung, aber es heißt: Ein im Schatten knapp
+bestandener Bot ist live noch nicht bestanden.
+
+---
+
+## G5. Versionserfassung war zwei Monate lang kaputt
+
+**Datum:** 15.08.2026. **Genau die Fehlerart, gegen die dieses Register
+existiert.**
+
+`shadow.code_version()` bestimmte den Git-Commit mit
+`cwd=DATA_DIR.parent`. Solange die Datenbanken im Projektordner lagen,
+stimmte das zufällig. Der Umzug nach `~/Library/Application Support`
+(30.07., wegen TCC-Dateischutz) zeigte auf ein Verzeichnis **ohne Git** —
+seitdem lieferte die Funktion stumm `'unbekannt'`.
+
+**8.278 von 12.516 Vorhersagen (66 %) ohne Versionszuordnung.** Der
+Fehler hat sich nie gemeldet; er war nur sichtbar, wenn man gezielt danach
+sah.
+
+**Folge für die Auswertung:** Für zwei Drittel der Schattendaten lässt
+sich nicht mehr sagen, welcher Codestand sie erzeugt hat — ein
+Versionsvergleich ist dort unmöglich.
+
+**Behoben:** `config.code_version()` ist jetzt die einzige Quelle für
+beide Pfade und bezieht sich fest auf `PROJECT_ROOT`. Zusätzlich erfasst
+das Live-Journal die Version je Lauf (`runs.code_version`) — vorher gar
+nicht. Auswertung über `versionen.bericht()`.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

@@ -344,26 +344,18 @@ CREATE TABLE IF NOT EXISTS hypothesen (
 
 
 def code_version() -> str:
-    """Git-Commit, der diese Vorhersage erzeugt hat.
+    """Git-Commit dieses Laufs. Delegiert an `config.code_version`.
 
-    Unverzichtbar fuer die Frage "ist es besser geworden?": Ohne sie lassen
-    sich Regimewechsel und Codeaenderungen nicht trennen (Plan §3.1).
+    Stand frueher hier mit `cwd=DATA_DIR.parent` - nach dem Umzug der
+    Datenbanken nach ~/Library/Application Support zeigte das auf ein
+    Verzeichnis ohne Git und lieferte stumm 'unbekannt' (zwei Drittel
+    aller Vorhersagen betroffen). Jetzt eine gemeinsame Quelle fuer
+    Schatten- UND Handelspfad, damit beide dieselbe Version melden und
+    vergleichbar bleiben.
     """
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=DATA_DIR.parent, capture_output=True, text=True, timeout=5,
-        )
-        v = out.stdout.strip()
-        if v:
-            dirty = subprocess.run(
-                ["git", "status", "--porcelain", "--untracked-files=no"],
-                cwd=DATA_DIR.parent, capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            return f"{v}+dirty" if dirty else v
-    except Exception:  # noqa: BLE001 - fehlendes git darf den Lauf nie stoppen
-        pass
-    return "unbekannt"
+    from .config import code_version as _cv
+
+    return _cv()
 
 
 def _json(obj) -> str:
