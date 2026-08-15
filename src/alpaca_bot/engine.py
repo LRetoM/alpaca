@@ -273,12 +273,29 @@ class EngineConfig:
 
     **Ungetestet.** Gehoert in die Flotte, nicht in den Live-Bot."""
 
-    trend_rueckfall_pct: float = 0.02
-    """Wie weit darf der Kurs vom Hoechststand zurueckfallen und die
-    Position gilt trotzdem noch als 'traegt'? 2 % ist bewusst eng: Der
-    gesamte Vorsprung je Trade betraegt 0,11 %, ein Rueckfall von 2 % ist
-    dagegen bereits ein Vielfaches davon. Nur relevant, wenn
-    `zeitausstieg_dynamisch` aktiv ist."""
+    trend_rueckfall_atr: float = 1.0
+    """Wie weit darf der Kurs vom Hoechststand zurueckfallen, ohne dass der
+    Trend als gebrochen gilt - gemessen in ATR, nicht in Prozent.
+
+    **Warum ATR und kein fester Prozentsatz:** Umkehr-Kandidaten sind per
+    Definition Werte, die gerade stark gefallen sind - also volatile.
+    Gemessen an den tatsaechlich gehaltenen Positionen (15.08.2026, 200
+    Positionstage) betraegt ihr ATR im Median **5,16 %**, im oberen Viertel
+    ueber 8 %. Ein fester Schwellwert kann das nicht abbilden:
+
+        feste 2 %      -> loeste an 27,5 % aller Positionstage aus
+        1.0 x ATR      -> loest an  6,0 % aus  (~5,2 % beim Median)
+        1.5 x ATR      -> loest an  1,0 % aus
+
+    Bei 2 % wuerde also mehr als jeder vierte Tag als "Trend gebrochen"
+    gelten, obwohl eine Bewegung dieser Groesse fuer diese Werte voellig
+    normales Rauschen ist. Die Verlaengerung waere damit praktisch nie
+    wirksam geworden - der Parameter haette anders geheissen als er wirkt.
+
+    1.0 als Standard: Ein Rueckfall um eine volle Tagesschwankung ist mehr
+    als Rauschen, aber noch keine Trendwende. Derselbe Massstab, den
+    `stop_atr` und `target_atr` bereits verwenden - ein fester Prozentwert
+    waere hier der einzige Fremdkoerper im System gewesen."""
 
     max_hold_days_hart: int = 20
     """Absolute Obergrenze, auch wenn die Position noch traegt. Ohne sie
@@ -373,7 +390,7 @@ class EngineConfig:
             "trail_after_atr": self.trail_after_atr,
             "max_hold_days": self.max_hold_days,
             "zeitausstieg_dynamisch": self.zeitausstieg_dynamisch,
-            "trend_rueckfall_pct": self.trend_rueckfall_pct,
+            "trend_rueckfall_atr": self.trend_rueckfall_atr,
             "max_hold_days_hart": self.max_hold_days_hart,
             "min_dollar_volume": self.min_dollar_volume,
             "min_price": self.min_price,
@@ -723,7 +740,9 @@ class Engine:
                 # steigende Position die Frist unbegrenzt verlaengern.
                 if pos.bars_held >= cfg.max_hold_days_hart:
                     reason = "zeitausstieg_hart"
-                elif cfg.zeitausstieg_dynamisch and self._traegt_noch(pos, price):
+                elif cfg.zeitausstieg_dynamisch and self._traegt_noch(
+                    pos, price, float(row.get("atr", 0) or 0)
+                ):
                     verlaengert = True
                 else:
                     reason = "zeitausstieg"
@@ -765,7 +784,7 @@ class Engine:
                 )
         return out
 
-    def _traegt_noch(self, pos: Position, price: float) -> bool:
+    def _traegt_noch(self, pos: Position, price: float, atr: float) -> bool:
         """Laeuft die Position noch, oder stagniert sie nur?
 
         Zwei Bedingungen, beide notwendig:
@@ -776,8 +795,20 @@ class Engine:
              grossen macht.
           2. **Nahe am eigenen Hoechststand.** `high_water` wird taeglich
              in `update_position` fortgeschrieben. Faellt der Kurs mehr als
-             `trend_rueckfall_pct` darunter zurueck, ist der Trend gebrochen -
-             dann wird die aufgeschobene Frist sofort wirksam.
+             `trend_rueckfall_atr` x ATR darunter zurueck, ist der Trend
+             gebrochen - dann wird die aufgeschobene Frist sofort wirksam.
+
+        Der Abstand skaliert mit der Volatilitaet des Wertes: Ein ruhiger
+        Wert darf weniger zurueckfallen als ein unruhiger, bevor das als
+        Trendbruch gilt. Ein fester Prozentsatz waere hier falsch - siehe
+        die Messung im Docstring von `trend_rueckfall_atr`.
+
+        Fehlt der ATR (0 oder nicht berechenbar), gilt die Position als
+        NICHT mehr tragend: Ohne Volatilitaetsmass laesst sich Rauschen
+        nicht von einer Trendwende unterscheiden, und im Zweifel gilt die
+        urspruengliche Regel - verkaufen. Eine Verlaengerung ist eine
+        Ausnahme und muss positiv begruendet sein, nicht durch fehlende
+        Daten entstehen.
 
         Bewusst KEINE Bedingung auf den Score: Der misst „ist der Wert
         ueberverkauft", also die Einstiegs-These. Nach einem erfolgreichen
@@ -789,8 +820,10 @@ class Engine:
         """
         if pos.entry_price <= 0 or price <= pos.entry_price:
             return False
+        if atr <= 0:
+            return False
         hoechst = max(pos.high_water or pos.entry_price, price)
-        return price >= hoechst * (1 - self.cfg.trend_rueckfall_pct)
+        return (hoechst - price) <= self.cfg.trend_rueckfall_atr * atr
 
     # -- Einstiege ----------------------------------------------------------
     def _find_entries(
