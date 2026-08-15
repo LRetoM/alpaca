@@ -245,10 +245,26 @@ class Referenzpreis:
     mit, zeigt seine Zahl aber gesondert an."""
 
 
-_MAX_QUOTE_ABWEICHUNG = 0.05
+_MAX_QUOTE_ABWEICHUNG = 0.02
 """Ab welcher Abweichung vom letzten echten Trade gilt eine Bid/Ask-Quote
 als unglaubwuerdig - NICHT die Schwelle gegen den Entscheidungskurs (siehe
-Docstring von `_reference_price`)."""
+Docstring von `_reference_price`).
+
+Am 04.08.2026 mit 5 % eingefuehrt und an den beiden schlimmsten Faellen
+(SIMO/KGS, 11-14 % Abweichung) geeicht. Die Nachmessung nach 11 Tagen
+Betrieb zeigte, dass das zu grob war: 13 Quotes wurden korrekt
+abgefangen, aber ACHT weitere Ausreisser ueber 200 bps rutschten durch -
+alle mit einer Abweichung zwischen 2,1 % und 4,9 %, also knapp unter der
+Schwelle (MUSA 4,9 %, FICO 4,9 %, CTVA 4,7 %, MAR 4,0 %, PFGC 4,0 %,
+POST 3,9 %, MAR 2,9 %, APP 2,1 %).
+
+2 % ist bewusst streng: Zwischen Quote und letztem Trade liegen Sekunden.
+Eine ECHTE Kursbewegung von ueber 2 % in Sekunden ist bei den hier
+gehandelten liquiden Werten die Ausnahme, eine veraltete IEX-Quote die
+Regel. Der Preis eines Fehlalarms ist zudem gering: Verworfen wird die
+Quote zugunsten des letzten Trades - ebenfalls ein echter Marktpreis,
+nur Sekunden alt. Es geht also nie um "Messung oder keine Messung",
+sondern nur darum, welcher von zwei echten Kursen die Referenz ist."""
 
 
 def _quote_plausibel(symbol: str, kandidat: float) -> tuple[bool, float | None]:

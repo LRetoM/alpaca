@@ -116,10 +116,21 @@ class Lifecycle:
             return pd.read_sql_query("SELECT * FROM trades", c)
 
     def pending_analysis(self) -> list[str]:
-        """Trades, deren Nachlauf noch nicht ausgewertet wurde."""
+        """Trades, deren Nachlauf noch nicht vollstaendig ausgewertet ist.
+
+        Die Bedingung MUSS alle Nachlauf-Fenster abdecken, nicht nur das
+        kuerzeste. Frueher stand hier allein `after_5d IS NULL`: Sobald
+        der 5-Tage-Wert gefuellt war, verliess der Trade die Warteschlange -
+        und `after_10d`, das fuenf Tage laenger braucht, wurde NIE
+        nachgetragen. Bestaetigt am 15.08.2026: 36 von 36 Trades hatten
+        `after_10d = None`, obwohl fuer die aelteren laengst Kurse
+        vorlagen. Genau dieser Wert beantwortet aber die Frage, ob der
+        Zeitausstieg nach 5 Tagen zu frueh kommt.
+        """
         with self._conn() as c:
             rows = c.execute(
-                "SELECT trade_id FROM trades WHERE after_5d IS NULL"
+                "SELECT trade_id FROM trades"
+                " WHERE after_1d IS NULL OR after_5d IS NULL OR after_10d IS NULL"
             ).fetchall()
         return [r["trade_id"] for r in rows]
 
@@ -272,13 +283,29 @@ def analyse(trades: pd.DataFrame, mindestanzahl: int = 30) -> list[Insight]:
     # --- 5. Sagt der Einstiegs-Score das Ergebnis vorher? ---
     if done["entry_score"].notna().sum() >= 10:
         korr = done["entry_score"].corr(done["return_pct"], method="spearman")
+        # Das VORZEICHEN entscheidet, nicht nur die Staerke. Frueher stand
+        # hier nur `abs(korr) < 0.1`, wodurch eine deutlich NEGATIVE
+        # Korrelation als "sortiert in die richtige Richtung" gemeldet
+        # wurde - also genau der schlimmste Fall (die Rangliste sortiert
+        # verkehrt herum) als Erfolg. Beobachtet am 15.08.2026: korr =
+        # -0.133 wurde gelobt.
+        if abs(korr) < 0.1:
+            vorschlag = ("Ein Score, der nicht mit dem Ergebnis korreliert, "
+                         "sortiert die Kandidaten nicht - dann ist die "
+                         "Rangliste wertlos.")
+        elif korr < 0:
+            vorschlag = ("ACHTUNG: Die Korrelation ist NEGATIV - hohe Scores "
+                         "fuehrten zu SCHLECHTEREN Ergebnissen. Entweder ist "
+                         "die Rangliste verkehrt herum, oder die Stichprobe "
+                         "ist noch zu klein. Keine Regelaenderung ohne "
+                         "Bestaetigung im Schattenbetrieb.")
+        else:
+            vorschlag = "Der Score sortiert in die richtige Richtung."
         out.append(Insight(
             "Aussagekraft des Scores",
             f"Rangkorrelation zwischen Einstiegs-Score und Ergebnis: {korr:+.3f}.",
             f"{int(done['entry_score'].notna().sum())} Trades mit Score",
-            "Ein Score, der nicht mit dem Ergebnis korreliert, sortiert die "
-            "Kandidaten nicht - dann ist die Rangliste wertlos."
-            if abs(korr) < 0.1 else "Der Score sortiert in die richtige Richtung.",
+            vorschlag,
             belastbar=genug,
         ))
 

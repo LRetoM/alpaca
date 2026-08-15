@@ -271,7 +271,29 @@ def check_extreme_slippage(j: Journal, report: IntegrityReport,
     o = j.table("orders", "dry_run = 0 AND slippage_bps IS NOT NULL")
     if o.empty:
         return
-    extreme = o[o["slippage_bps"].abs() > schwelle_bps]
+
+    # Nur Zeilen pruefen, deren Referenzpreis ueberhaupt beurteilbar ist.
+    # Drei Gruppen sind es NICHT:
+    #
+    #   * Status-Text "X geschlossen" -> vor dem close_position()-Fix
+    #     (9c26b6a), Referenzpreis nachweislich unbrauchbar.
+    #   * referenz_quelle IS NULL     -> vor Einfuehrung der Quote-Pruefung
+    #     (04.08.2026); ob die Quote taugte, ist nachtraeglich nicht mehr
+    #     feststellbar. Genau hier liegen die bekannten Faelle SIMO/KGS.
+    #   * referenz_quelle = 'fallback' -> gar keine Quote vorhanden, der
+    #     Wert misst Kursdrift statt Slippage.
+    #
+    # Ohne diese Trennung meldet der Health-Check bei JEDEM Lauf dieselben
+    # historischen Zeilen. Eine Warnung, die dauerhaft steht, wird
+    # ueberlesen - und zwar genau dann, wenn sie einmal etwas Neues meldet.
+    # Sie verschwinden deshalb aus der MELDUNG, werden aber gezaehlt: Was
+    # nicht beurteilbar ist, darf trotzdem nicht unsichtbar werden.
+    quelle = o.get("referenz_quelle", pd.Series(index=o.index, dtype=object))
+    legacy = o["status"].astype(str).str.endswith(" geschlossen")
+    unpruefbar = legacy | quelle.isna() | (quelle == "fallback")
+    aktuell = o[~unpruefbar]
+
+    extreme = aktuell[aktuell["slippage_bps"].abs() > schwelle_bps]
     if not extreme.empty:
         beispiele = ", ".join(
             f"{r['symbol']}({r['slippage_bps']:+.0f}bps)"
@@ -279,9 +301,15 @@ def check_extreme_slippage(j: Journal, report: IntegrityReport,
         )
         report.add(
             "auffaellig", "Grosse Slippage-Werte",
-            f"{len(extreme)} Order(s) ueber {schwelle_bps:g} bps: {beispiele}. "
-            "Pruefen ob reale Marktbewegung (siehe costs.reconcile) oder "
-            "Referenzpreis-Fehler.",
+            f"{len(extreme)} von {len(aktuell)} pruefbaren Order(s) ueber "
+            f"{schwelle_bps:g} bps: {beispiele}. Pruefen ob reale "
+            "Marktbewegung (siehe costs.reconcile) oder Referenzpreis-Fehler.",
+        )
+    if unpruefbar.any():
+        report.checks.append(
+            f"{int(unpruefbar.sum())} Order(s) ohne pruefbaren Referenzpreis "
+            "von der Slippage-Pruefung ausgenommen (vor close_position()-Fix, "
+            "vor der Quote-Pruefung, oder ohne echte Quote)"
         )
 
 

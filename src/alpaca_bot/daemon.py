@@ -41,6 +41,29 @@ from .journal import Journal
 from .state import Store
 
 
+def _handelstage(entry_date, exit_ts) -> int | None:
+    """Haltedauer in HANDELSTAGEN - dieselbe Rechnung wie build_portfolio.
+
+    Kalendertage waeren hier falsch: Eine Position von Freitag bis Montag
+    hat drei Kalendertage, aber nur einen Handelstag gelebt - und der
+    Zeitausstieg (`max_hold_days`) rechnet in Handelstagen. Zwei
+    verschiedene Zaehlweisen im selben System machen jede Auswertung nach
+    Haltedauer unvergleichbar.
+    """
+    if not entry_date:
+        return None
+    try:
+        start = pd.Timestamp(entry_date)
+        if start.tz is None:
+            start = start.tz_localize("UTC")
+        ende = pd.Timestamp(exit_ts)
+        if ende.tz is None:
+            ende = ende.tz_localize("UTC")
+        return max(0, len(pd.bdate_range(start.normalize(), ende.normalize())) - 1)
+    except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
+        return None
+
+
 @dataclass
 class DaemonConfig:
     symbols: list[str] = field(default_factory=list)
@@ -171,6 +194,7 @@ class Daemon:
             from .lifecycle import Lifecycle
 
             entry = meta.get("entry_price")
+            exit_ts = pd.Timestamp.now(tz="UTC")
             Lifecycle().record({
                 "trade_id": uuid.uuid4().hex,
                 "symbol": decision.symbol,
@@ -180,11 +204,19 @@ class Daemon:
                 "entry_reasons": meta.get("reasons"),
                 "planned_stop": meta.get("stop_price"),
                 "planned_target": meta.get("target_price"),
-                "exit_date": pd.Timestamp.now(tz="UTC").isoformat(),
+                "exit_date": exit_ts.isoformat(),
                 "exit_price": decision.price,
                 "exit_reason": str(decision.reasons.get("ausstiegsgrund", "")),
                 "return_pct": decision.reasons.get("gewinn_pct"),
-                "bars_held": meta.get("bars_held"),
+                # Aus den DATEN rechnen, nicht aus `meta` uebernehmen:
+                # `position_meta.bars_held` wird beim Anlegen auf 0 gesetzt
+                # und NIE erhoeht - die Engine berechnet den Wert zur
+                # Laufzeit frisch aus `entry_date` (live.build_portfolio),
+                # schreibt ihn aber nicht zurueck. Wer `meta` vertraut,
+                # schreibt fuer JEDEN Trade eine 0 ins Protokoll und macht
+                # damit jede Auswertung nach Haltedauer unmoeglich
+                # (bestaetigt: 36 von 36 Trades hatten bars_held = 0).
+                "bars_held": _handelstage(meta.get("entry_date"), exit_ts),
             })
         except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
             print(f"      Lebenslauf nicht erfasst: {type(e).__name__}: {e}")
@@ -258,7 +290,21 @@ class Daemon:
             if decisions.empty:
                 self._last_evaluation = today
                 return
-            symbols = sorted(decisions["symbol"].dropna().unique())[:200]
+
+            # Symbole mit NOCH OFFENEN Ergebnissen zuerst. Frueher stand
+            # hier `sorted(...)[:200]` - eine rein alphabetische Auswahl.
+            # Solange weniger als 200 Symbole zusammenkommen, faellt das
+            # nicht auf (aktuell 157); darueber hinaus wuerde alles ab
+            # etwa "T" systematisch NIE ausgewertet, ohne dass es jemand
+            # bemerkt. Die Prioritaet nach offenen Ergebnissen stellt
+            # sicher, dass die Grenze zuerst die bereits fertigen Symbole
+            # abschneidet, nicht die noch fehlenden.
+            offen = self.journal.table("outcomes")
+            fehlend = decisions[~decisions["decision_id"].isin(offen["decision_id"])]
+            vorrang = list(dict.fromkeys(fehlend["symbol"].dropna()))
+            rest = [s for s in sorted(decisions["symbol"].dropna().unique())
+                    if s not in set(vorrang)]
+            symbols = (vorrang + rest)[:300]
             bars = data.get_bars(symbols, "1D", lookback_days=120)
             n = self.journal.evaluate_outcomes(
                 make_price_lookup(bars), horizons=(1, 3, 5)
