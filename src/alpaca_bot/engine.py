@@ -244,6 +244,49 @@ class EngineConfig:
     max_hold_days: int = 60
     """Zeitausstieg. Eine These, die 60 Tage nicht aufgeht, war falsch."""
 
+    zeitausstieg_dynamisch: bool = False
+    """Darf der Zeitausstieg aufgeschoben werden, solange die Position traegt?
+
+    Standard `False` = unveraendertes Verhalten: Nach `max_hold_days` wird
+    verkauft, egal wie der Wert gerade laeuft.
+
+    `True` = die Frist wird verlaengert, SOLANGE zwei Bedingungen zugleich
+    gelten (siehe `_traegt_noch`): Die Position steht im Gewinn UND ihr
+    Kurs liegt nahe an ihrem eigenen Hoechststand seit Einstieg. Faellt
+    sie vom Hoechststand zurueck oder ins Minus, greift der Zeitausstieg
+    sofort - auch rueckwirkend, wenn die Frist laengst ueberschritten ist.
+
+    **Warum ueberhaupt:** Gemessen am 15.08.2026 sind 15 von 24
+    Ausstiegen im Schattenbetrieb Zeitausstiege (62 %) - die Frist ist der
+    mit Abstand wirksamste Ausstiegsgrund. Zugleich zeigte sich, dass
+    `target_atr` praktisch WIRKUNGSLOS ist (Bot B03: identische Renditen,
+    nur anderes Etikett, weil `exit_score` gleichzeitig ausloest). Wer
+    Gewinne laufen lassen will, muss deshalb genau hier ansetzen und
+    nicht am Gewinnziel.
+
+    **Warum nicht einfach `max_hold_days` hochsetzen:** Das wuerde auch
+    jede stagnierende Position laenger halten und damit Kapital binden,
+    das anderswo arbeiten koennte. B04_halten_lang misst genau das
+    (10 statt 5 Tage) und liegt bei t = 0.94 - kein nachweisbarer Vorteil.
+    Die dynamische Variante haelt NUR die Werte laenger, die tatsaechlich
+    noch laufen.
+
+    **Ungetestet.** Gehoert in die Flotte, nicht in den Live-Bot."""
+
+    trend_rueckfall_pct: float = 0.02
+    """Wie weit darf der Kurs vom Hoechststand zurueckfallen und die
+    Position gilt trotzdem noch als 'traegt'? 2 % ist bewusst eng: Der
+    gesamte Vorsprung je Trade betraegt 0,11 %, ein Rueckfall von 2 % ist
+    dagegen bereits ein Vielfaches davon. Nur relevant, wenn
+    `zeitausstieg_dynamisch` aktiv ist."""
+
+    max_hold_days_hart: int = 20
+    """Absolute Obergrenze, auch wenn die Position noch traegt. Ohne sie
+    koennte eine Position unbegrenzt laufen - und der Umkehr-Effekt ist
+    auf 3-5 Tagen gemessen, nicht auf Monaten. Was so lange laeuft, ist
+    kein Umkehr-Trade mehr, sondern ein Momentum-Trade unter falschem
+    Namen (genau der Fehler, der den ersten Anlauf ruiniert hat)."""
+
     min_dollar_volume: float = 2_000_000
     """Liquiditaetsuntergrenze. Was nicht handelbar ist, ist kein Signal."""
 
@@ -329,6 +372,9 @@ class EngineConfig:
             "target_atr": self.target_atr,
             "trail_after_atr": self.trail_after_atr,
             "max_hold_days": self.max_hold_days,
+            "zeitausstieg_dynamisch": self.zeitausstieg_dynamisch,
+            "trend_rueckfall_pct": self.trend_rueckfall_pct,
+            "max_hold_days_hart": self.max_hold_days_hart,
             "min_dollar_volume": self.min_dollar_volume,
             "min_price": self.min_price,
             "reenter_cooldown_days": self.reenter_cooldown_days,
@@ -665,15 +711,33 @@ class Engine:
             score = float(row.get("score", 0.0))
             pnl = pos.unrealized_pct(price)
 
+            verlaengert = False
             reason: str | None = None
             if price <= pos.stop_price:
                 reason = "stop_ausgeloest"
             elif price >= pos.target_price:
                 reason = "gewinnziel_erreicht"
             elif pos.bars_held >= cfg.max_hold_days:
-                reason = "zeitausstieg"
+                # Reihenfolge ist hier entscheidend: Die harte Obergrenze
+                # wird ZUERST geprueft, sonst koennte eine dauerhaft
+                # steigende Position die Frist unbegrenzt verlaengern.
+                if pos.bars_held >= cfg.max_hold_days_hart:
+                    reason = "zeitausstieg_hart"
+                elif cfg.zeitausstieg_dynamisch and self._traegt_noch(pos, price):
+                    verlaengert = True
+                else:
+                    reason = "zeitausstieg"
             elif score < cfg.exit_score:
                 reason = "these_traegt_nicht_mehr"
+
+            # Die Score-Regel gilt AUCH fuer verlaengerte Positionen. Sonst
+            # entstuende eine Position, die zwar noch steigt, deren These
+            # aber laengst nicht mehr traegt - und die durch die
+            # Verlaengerung gegen genau die Regel immun waere, die sie
+            # sonst geschlossen haette.
+            if verlaengert and score < cfg.exit_score:
+                reason = "these_traegt_nicht_mehr"
+                verlaengert = False
 
             if reason:
                 out.append(
@@ -691,10 +755,42 @@ class Engine:
                             "einstieg": round(pos.entry_price, 4),
                             "stop": round(pos.stop_price, 4),
                             "ziel": round(pos.target_price, 4),
+                            # Nur gesetzt, wenn die Frist ueberschritten war -
+                            # macht im Protokoll unterscheidbar, ob ein Trade
+                            # regulaer oder nach Verlaengerung endete.
+                            **({"nach_verlaengerung": True}
+                               if pos.bars_held > cfg.max_hold_days else {}),
                         },
                     )
                 )
         return out
+
+    def _traegt_noch(self, pos: Position, price: float) -> bool:
+        """Laeuft die Position noch, oder stagniert sie nur?
+
+        Zwei Bedingungen, beide notwendig:
+
+          1. **Im Gewinn.** Eine Position im Minus laenger zu halten, weil
+             sie „noch laufen koennte", ist Hoffnung, keine Regel - und
+             genau das Muster, das aus einem begrenzten Verlust einen
+             grossen macht.
+          2. **Nahe am eigenen Hoechststand.** `high_water` wird taeglich
+             in `update_position` fortgeschrieben. Faellt der Kurs mehr als
+             `trend_rueckfall_pct` darunter zurueck, ist der Trend gebrochen -
+             dann wird die aufgeschobene Frist sofort wirksam.
+
+        Bewusst KEINE Bedingung auf den Score: Der misst „ist der Wert
+        ueberverkauft", also die Einstiegs-These. Nach einem erfolgreichen
+        Anstieg ist ein Umkehr-Kandidat definitionsgemaess nicht mehr
+        ueberverkauft - der Score MUSS also fallen. Ihn hier zu verlangen
+        hiesse, die Verlaengerung genau dann zu verweigern, wenn sie
+        funktioniert hat. Die Score-Untergrenze (`exit_score`) greift
+        weiterhin separat.
+        """
+        if pos.entry_price <= 0 or price <= pos.entry_price:
+            return False
+        hoechst = max(pos.high_water or pos.entry_price, price)
+        return price >= hoechst * (1 - self.cfg.trend_rueckfall_pct)
 
     # -- Einstiege ----------------------------------------------------------
     def _find_entries(
