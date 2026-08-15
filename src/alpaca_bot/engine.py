@@ -735,14 +735,27 @@ class Engine:
             elif price >= pos.target_price:
                 reason = "gewinnziel_erreicht"
             elif pos.bars_held >= cfg.max_hold_days:
-                # Reihenfolge ist hier entscheidend: Die harte Obergrenze
-                # wird ZUERST geprueft, sonst koennte eine dauerhaft
-                # steigende Position die Frist unbegrenzt verlaengern.
-                if pos.bars_held >= cfg.max_hold_days_hart:
+                # Die gesamte Sonderbehandlung haengt an
+                # `zeitausstieg_dynamisch`. Steht der Schalter aus, gilt
+                # exakt die alte Regel - ohne dass `max_hold_days_hart`
+                # ueberhaupt gelesen wird.
+                #
+                # Das ist kein Schoenheitsfehler: Stuende die harte Grenze
+                # ausserhalb dieser Bedingung, bekaeme eine Position ab Tag
+                # 20 das Etikett "zeitausstieg_hart" statt "zeitausstieg" -
+                # auch im Live-Bot, der gar nicht verlaengert. Bei der
+                # Momentum-Konfiguration (max_hold_days=60) waere das sogar
+                # der Normalfall gewesen, weil 60 >= 20 immer zutrifft.
+                # Gleiche Handelsentscheidung, aber ein anderer Grund im
+                # Protokoll - und damit eine still verfaelschte Auswertung
+                # nach Ausstiegsgruenden.
+                if not cfg.zeitausstieg_dynamisch:
+                    reason = "zeitausstieg"
+                elif pos.bars_held >= cfg.max_hold_days_hart:
+                    # Harte Grenze VOR der Trendpruefung, sonst koennte eine
+                    # dauerhaft steigende Position unbegrenzt weiterlaufen.
                     reason = "zeitausstieg_hart"
-                elif cfg.zeitausstieg_dynamisch and self._traegt_noch(
-                    pos, price, float(row.get("atr", 0) or 0)
-                ):
+                elif self._traegt_noch(pos, price, float(row.get("atr", 0) or 0)):
                     verlaengert = True
                 else:
                     reason = "zeitausstieg"

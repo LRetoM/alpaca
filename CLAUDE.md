@@ -2,11 +2,16 @@
 
 ## Vor jeder Änderung
 
-**`docs/BEFUNDE.md` lesen.** Dort steht, was bereits gemessen, widerlegt
-oder als Fehler behoben wurde. Mehrere Fehler in diesem Projekt sind
-entstanden, weil eine bereits beantwortete Frage erneut beantwortet
-wurde — oder weil ein Befund ohne Blick auf seine Stichprobengröße
-übernommen wurde.
+**Zwei Dokumente lesen:**
+
+- **`docs/BEFUNDE.md`** — was bereits gemessen, widerlegt oder als Fehler
+  behoben wurde. Mehrere Fehler in diesem Projekt sind entstanden, weil
+  eine bereits beantwortete Frage erneut beantwortet wurde — oder weil
+  ein Befund ohne Blick auf seine Stichprobengröße übernommen wurde.
+- **`docs/BETRIEBSPLAN.md`** — was gerade läuft, wie lange, und welche
+  Kriterien vorab festgelegt wurden. **Eine laufende Messung darf nicht
+  durch eine Änderung an der Handelslogik unterbrochen werden**, sonst
+  ist die Vergleichsbasis zerstört.
 
 Nach einer Messung oder einem behobenen Fehler: **Eintrag in
 `docs/BEFUNDE.md` ergänzen.** Mit Zahl, Datum und Quelle.
