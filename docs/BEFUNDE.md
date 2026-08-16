@@ -300,6 +300,55 @@ nicht. Auswertung über `versionen.bericht()`.
 
 ---
 
+## G6. Die Flotten-Referenz war seit über zwei Wochen falsch
+
+**Datum:** 16.08.2026, gefunden auf direkte Nachfrage "stimmt alles mit
+Schatten und Live überein?". **Schwere: hoch** — betraf die Vergleichsbasis
+fast der gesamten Flotte.
+
+`B00_basis` trägt die Behauptung „Entspricht exakt der Einstellung des
+Live-Bots". Das stimmte am 29.07., dem Tag der Anmeldung — **seit dem
+30.07.2026 nicht mehr**: `scripts/12_daemon.py` änderte an diesem Tag
+seine Standardwerte auf `deploy_to_target=True` und `allow_topup=True`
+(Commits `3e3d30e`, `f253724`). `B00_basis` blieb bei `False`/`False`
+stehen.
+
+**Ausmaß:** 8 der 10 Flottenbots (`B01`–`B07`, `B10`) vergleichen sich
+gegen `B00`. Über zwei Wochen lang bezog sich „Referenz = Live" auf eine
+Konfiguration, die live gar nicht mehr lief.
+
+**Einordnung — nicht so schlimm wie es klingt:** Die Vergleiche
+`B01`–`B07` gegen `B00` bleiben **intern gültig**: Beide Seiten jedes
+Vergleichs teilten dieselbe `False`/`False`-Basis, die eine getestete
+Achse (`stop_atr`, `target_atr`, …) war jeweils sauber isoliert. Falsch
+war nur die Behauptung, das Ergebnis sage etwas über den *tatsächlichen*
+Live-Bot aus.
+
+**Der Zufallsfund, der die Reparatur einfach machte:** `B09_nachkauf`
+(`deploy_to_target=True, allow_topup=True`, sonst Standard) ist seit dem
+30.07. **zufällig exakt deckungsgleich** mit der echten Live-Konfiguration
+— registriert um 18:30 Uhr desselben Tages, kurz nachdem der Live-Standard
+umgestellt wurde, aber als Investitionsgrad-Experiment gegen `B08`
+geführt, nie als Live-Spiegel erkannt.
+
+**Behoben:**
+- `B00_basis` und `B09_nachkauf`: Hypothesentext in Code **und** laufender
+  Datenbank korrigiert (Registrierungen sind unveränderlich für die
+  Konfiguration, der Beschreibungstext war nachträglich korrigierbar).
+- `B10_dyn_ausstieg` (16.08. registriert, 1 Tag alt, keine verwertbaren
+  Daten) **stillgelegt** — verglich gegen die falsche Basis.
+- `B11_dyn_ausstieg_live` neu angemeldet: identische Idee, aber gegen
+  `B09_nachkauf` verglichen. Verifiziert bitweise: unterscheidet sich von
+  der echten Live-Konfiguration in **exakt einem** Feld
+  (`zeitausstieg_dynamisch`).
+
+**Lehre:** „Entspricht dem Live-Bot" ist eine Behauptung, die verfällt,
+sobald sich der Live-Standard ändert — sie muss bei jeder Änderung an
+`scripts/12_daemon.py`s Voreinstellungen neu geprüft werden, nicht nur
+einmal bei der Registrierung.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

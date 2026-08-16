@@ -64,7 +64,7 @@ woran lag.
 
 ### 2.2 Im SCHATTEN: die neue Idee, ohne Kapitalrisiko
 
-`B10_dyn_ausstieg` — die dynamische Haltedauer:
+`B11_dyn_ausstieg_live` — die dynamische Haltedauer:
 
 ```
 Position hat 5 Tage erreicht
@@ -104,7 +104,7 @@ Schwelle: **t > 2,76** (`fleet.schwelle_sigma`, steigt mit jedem Versuch).
 
 | Bot | Erwartung | Stand |
 |---|---|---|
-| `B10_dyn_ausstieg` | **offen** — hält Gewinner länger, ohne Stagnierende zu binden | neu, 0 Tage |
+| `B11_dyn_ausstieg_live` | **offen** — hält Gewinner länger, ohne Stagnierende zu binden | neu, 0 Tage |
 | `B04_halten_lang` | wird vermutlich **nichts** zeigen | t = 0,94 |
 | `B07_mehr_positionen` | Verdacht auf **negativ** | t = −2,42 |
 | `B08`/`B09` | offen | t = 0,14 |
@@ -114,7 +114,7 @@ Schwelle: **t > 2,76** (`fleet.schwelle_sigma`, steigt mit jedem Versuch).
 
 B10 gilt als **bestanden**, wenn *alle vier* zutreffen:
 
-1. `vergleich_gepaart("B10_dyn_ausstieg", "B00_basis")` liefert **t > 2,76**
+1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B00_basis")` liefert **t > 2,76**
 2. über mindestens **20 Handelstage**
 3. Anteil verlängerter Positionen liegt zwischen **10 % und 60 %**
    (darunter: Regel greift praktisch nie; darüber: sie ist keine
