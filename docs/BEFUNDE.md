@@ -349,6 +349,50 @@ einmal bei der Registrierung.
 
 ---
 
+## G7. Regimefilter löst auch Verkäufe aus — nicht nur Käufe
+
+**Datum:** 16.08.2026. **Bisher nirgends dokumentiert.**
+
+`ReversalWeights.market_regime_filter` ist als Kaufsperre dokumentiert
+("Nur kaufen, wenn der Gesamtmarkt über seinem 200-Tage-Schnitt liegt").
+Verifiziert am Code (`signals.py`): Der Filter setzt den Score aber nicht
+nur für NEUE Kandidaten auf 0, sondern für ALLE Symbole — und derselbe
+Score wird auch für die Ausstiegsregel `exit_score` verwendet
+(`engine._check_exits`).
+
+**Getestet mit einer Engine-Instanz:** Eine Aktie mit einem klaren,
+starken Umkehr-Setup (−30 % in 20 Tagen) wurde bei SPY unter seinem
+200-Tage-Schnitt sofort verkauft, Grund `these_traegt_nicht_mehr`, Score
+exakt 0,0 — obwohl das Einzelsignal stark war.
+
+**Folge:** Kippt der Markt, würde das gesamte Depot in einem einzigen
+Zyklus komplett liquidiert, unabhängig vom Zustand der Einzelpositionen.
+Kein bewusst designtes Verhalten, sondern ein Nebeneffekt der geteilten
+Score-Berechnung zwischen Kauf- und Verkaufslogik.
+
+**Noch nicht geändert** — betrifft Handelslogik, erst im Schatten prüfen
+(z. B. eigener Bot: Regimefilter nur beim Einstieg, nicht beim Ausstieg).
+
+## G8. Wie lange kann der Bot komplett in Cash sitzen?
+
+**Datum:** 16.08.2026, gerechnet an 9 Jahren echten SPY-Kursen.
+
+Liegt SPY unter seinem 200-Tage-Schnitt, kauft der Bot nichts Neues
+(Score aller Kandidaten = 0, siehe G7). Gemessen:
+
+| Zeitraum | Dauer |
+|---|---|
+| 11.04.–15.08.2022 | ~4 Monate |
+| 17.08.–29.11.2022 | ~3 Monate |
+| 26.03.–09.05.2025 | ~2 Monate |
+
+**Anteil aller Handelstage 2018–2026 unter dem 200-Tage-Schnitt: 18 %.**
+Mehrmonatige Cash-Phasen sind damit erwartbares, kein fehlerhaftes
+Verhalten — sollten aber nicht mit einem stehengebliebenen Bot verwechselt
+werden, wenn man den Tagesbericht liest.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
