@@ -80,6 +80,28 @@ class MarketSnapshot:
     ebenfalls nur bis as_of - `signals.build_reversal_frame` filtert intern
     per Symbol und wendet die Verfuegbarkeitsverzoegerung an (pit.asof_join).
     Fehlt dieses Feld, entfaellt der Nachrichtenfaktor ersatzlos."""
+    kontext: dict[str, dict] = field(default_factory=dict)
+    """Zusatzangaben je Symbol fuer das PROTOKOLL - nie fuer die Entscheidung.
+
+    Erlaubte Schluessel: `sektor`, `liq_dezil`. Sie beantworten spaeter
+    Fragen, die am Depot sonst unbeantwortbar bleiben: "Funktioniert die
+    Strategie bei Nebenwerten besser?" und "Klumpt das Depot in einem
+    Sektor?" (BEFUNDE, Luecken im Betriebsplan).
+
+    **Bewusst NICHT in die Score-Berechnung eingebunden.** Wuerde der
+    Sektor die Entscheidung beeinflussen, waere das eine ungetestete
+    Strategieaenderung. Hier geht es ausschliesslich darum, spaeter
+    auswerten zu koennen, was ohnehin passiert ist."""
+
+    regime: dict = field(default_factory=dict)
+    """Marktlage zum Entscheidungszeitpunkt - ebenfalls nur fuers Protokoll.
+
+    Der Schattenbetrieb erfasst das seit jeher (`shadow._regime`), der
+    Live-Pfad bisher gar nicht. Damit war die wichtigste Frage des
+    Projekts am Depot nicht beantwortbar: In WELCHER Marktlage traegt die
+    Strategie? (docs/schattenbetrieb.md §13 nennt genau das "wo der echte
+    Gewinn liegt".)"""
+
     signals: dict[str, pd.DataFrame] = field(default_factory=dict)
     """Optional vorberechnete Signale, ebenfalls bis as_of geschnitten.
 
@@ -951,6 +973,17 @@ class Engine:
             reasons["rang"] = len(out) + 1
             reasons["stop_abstand_pct"] = round(1 - stop / price, 4)
             reasons["ziel_abstand_pct"] = round(target / price - 1, 4)
+
+            # Auswertungsschluessel - beeinflussen die Entscheidung NICHT,
+            # machen sie aber im Nachhinein zuordenbar. `reasons` ist ein
+            # freies Dictionary, und `journal.decision_quality()` gruppiert
+            # neue Schluessel automatisch nach Wertbaendern - es braucht
+            # dafuer keine Schemaaenderung.
+            reasons["kandidaten_gesamt"] = len(candidates)
+            for schluessel, wert in (snapshot.kontext.get(sym) or {}).items():
+                reasons[schluessel] = wert
+            for schluessel, wert in (snapshot.regime or {}).items():
+                reasons[schluessel] = wert
 
             out.append(
                 Decision(

@@ -403,3 +403,34 @@ def sektoren(symbols: list[str], *, use_cache: bool = True,
         for s, sek in sorted(bekannt.items()):
             w.writerow([s, sek])
     return {s: bekannt.get(s, "unbekannt") for s in symbols}
+
+
+def liquiditaets_dezile(symbols: list[str]) -> dict[str, int]:
+    """Symbol -> Liquiditaetsdezil (1 = liquideste 10 %, 10 = duennste).
+
+    **Wofuer:** Beantwortet die offene Frage aus `load_universe`: Die
+    Umkehr-Faktoren waren auf 2.162 Symbolen stabil, auf den 150
+    liquidesten dagegen NICHT (`rsi2` dort nur 29 % positive Jahre). Ob
+    das live genauso ist, laesst sich nur beantworten, wenn jede
+    Entscheidung ihr Dezil mitfuehrt.
+
+    **Survivorship-Warnung:** Bei duennen Werten ist der Bias am
+    groessten (micro_cap 18 %/Jahr Delisting gegen large_cap 2 %). Ein
+    Vorsprung im untersten Dezil ist deshalb zuerst ein Verdacht, kein
+    Befund - siehe `bias_probe`.
+    """
+    try:
+        df = pd.read_csv(UNIVERSE_FILE)
+    except (FileNotFoundError, OSError):
+        return {}
+    if "dollar_volume" not in df.columns:
+        return {}
+    df = df.dropna(subset=["symbol", "dollar_volume"]).copy()
+    if df.empty:
+        return {}
+    # qcut mit duplicates="drop": Bei vielen gleichen Umsaetzen koennen
+    # Dezilgrenzen zusammenfallen - ohne das Flag wirft pandas.
+    df["dezil"] = pd.qcut(df["dollar_volume"].rank(ascending=False, method="first"),
+                          10, labels=False, duplicates="drop") + 1
+    zuordnung = dict(zip(df["symbol"].astype(str), df["dezil"].astype(int)))
+    return {s: zuordnung[s] for s in symbols if s in zuordnung}

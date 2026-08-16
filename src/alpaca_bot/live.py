@@ -142,10 +142,45 @@ def build_snapshot(
                   "Bot faehrt ohne Nachrichtenfaktor fort.")
         news_df = None
 
+    # --- Auswertungskontext: Regime, Sektor, Liquiditaetsdezil ---
+    # Beeinflusst die Entscheidung NICHT, macht sie aber im Nachhinein
+    # zuordenbar. Ohne diese Felder ist am Depot nicht beantwortbar, in
+    # welcher Marktlage und bei welcher Werteklasse die Strategie traegt -
+    # die wichtigste offene Frage des Projekts.
+    regime: dict = {}
+    try:
+        sma200 = market.rolling(200).mean()
+        ueber = bool(market.iloc[-1] > sma200.iloc[-1]) if len(market) >= 200 else None
+        vola = float(market.pct_change().tail(20).std() * (252 ** 0.5))
+        regime = {
+            "regime_markt": ("bullisch" if ueber else "baerisch")
+                            if ueber is not None else "unbekannt",
+            "regime_vola": ("ruhig" if vola < 0.15
+                            else "unruhig" if vola > 0.30 else "normal"),
+        }
+    except Exception as e:  # noqa: BLE001 - Protokollfeld darf nie stoppen
+        if verbose:
+            print(f"      Regime nicht bestimmbar ({type(e).__name__})")
+
+    kontext: dict[str, dict] = {}
+    try:
+        from . import universe as _uni
+
+        sek = _uni.sektoren(list(per_symbol), verbose=False)
+        dezile = _uni.liquiditaets_dezile(list(per_symbol))
+        for sym in per_symbol:
+            kontext[sym] = {"sektor": sek.get(sym, "unbekannt"),
+                            "liq_dezil": dezile.get(sym)}
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"      Kontext nicht ladbar ({type(e).__name__})")
+
     if verbose:
         print(f"      Stichtag: {as_of.date()} | {len(per_symbol)} Symbole "
-              f"| Marktfilter: {MARKET_SYMBOL}")
-    return MarketSnapshot(as_of=as_of, bars=per_symbol, market=market, news=news_df)
+              f"| Marktfilter: {MARKET_SYMBOL} | Regime: "
+              f"{regime.get('regime_markt', '?')}/{regime.get('regime_vola', '?')}")
+    return MarketSnapshot(as_of=as_of, bars=per_symbol, market=market,
+                          news=news_df, kontext=kontext, regime=regime)
 
 
 def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:

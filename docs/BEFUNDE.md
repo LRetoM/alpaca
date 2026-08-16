@@ -97,6 +97,22 @@ die vom Meldetag. Für Screening brauchbar, als Beleg nicht.
 | **PEAD über Kursreaktion** (`H02`) | IC **−0,010** (t=−6,5) — Richtung entgegengesetzt. Sieht nach Umkehr aus, also dem, was der Bot ohnehin handelt. | 04.08.2026 |
 | **Symbol-Aufteilung auf mehrere Bots** | Mathematisch ≈ „ein Bot mit N·15 Positionen", nur mit **schlechterer Auswahl** (Rangliste künstlich in Töpfe zerschnitten). Zudem existieren keine 3×1.200 liquiden Symbole — nur 2.189 ab 1 Mio. $/Tag. | 04.08.2026 |
 
+| **18 neue Faktorkandidaten** (16.08.2026) | Struktur, Lücken, Volumen, Marktbezug — **keiner** besteht. Zwei erreichten \|t\|>2 (`bewegung_je_volumen` IC +0,013 t=2,06; `aufwaertstage_5` IC −0,012 t=−2,13), scheiterten aber an der Jahresstabilität (7/9 bzw. 3/9 Jahre). Gemessen über 8 Jahre, 789 Symbole, ~2.000 Handelstage. | 16.08.2026 |
+
+**Aufschlussreich am Vorzeichen:** `aufwaertstage_5` (−0,012),
+`rel_staerke_5` (−0,015) und `beschleunigung_5_10` (−0,012) sind alle
+**negativ** — wenige Aufwärtstage, schwache relative Stärke und
+nachlassende Beschleunigung sagen *höhere* Folgerenditen voraus. Das ist
+schlicht der Umkehr-Effekt in anderer Verpackung, den der Bot bereits
+handelt. Die Kandidaten entdecken das bestehende Signal neu, statt neue
+Information zu liefern.
+
+**Methodischer Wert des Negativergebnisses:** Er bestätigt die Kalibrierung
+aus §A — kein Einzelfaktor dieses Projekts kam je über IC 0,05, und der
+Faktorraum aus Kurs- und Volumendaten ist damit vermutlich ausgeschöpft.
+Neue Information müsste von **außerhalb** kommen (Nachrichten, Insider,
+Fundamentaldaten), nicht aus einer weiteren Kursableitung.
+
 ---
 
 ## D. Gemessen, aber (noch) nicht belastbar
