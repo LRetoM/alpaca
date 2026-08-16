@@ -119,12 +119,37 @@ class TestDynamischerZeitausstieg:
 
     def test_im_minus_wird_nie_verlaengert(self, snapshot_fabrik,
                                            position_fabrik, portfolio_fabrik):
-        """Eine Verlustposition laenger zu halten ist Hoffnung, keine Regel."""
+        """Eine Verlustposition laenger zu halten ist Hoffnung, keine Regel.
+
+        WICHTIG - der Fall muss die Gewinnbedingung ISOLIEREN: Der Kurs
+        liegt hier NAH am Hoechststand (97 -> 95, also unter 1x ATR), die
+        ATR-Pruefung allein wuerde also verlaengern. Nur die
+        Gewinnbedingung verhindert es.
+
+        Eine frueheren Fassung dieses Tests nutzte hoechst=110 gegen
+        price=95 - dort griff bereits die ATR-Pruefung, und der Test war
+        gruen, ohne die Gewinnbedingung je zu beruehren. Der
+        Mutationstest (Schritt 23) hat das aufgedeckt.
+        """
         snap = snapshot_fabrik({"X": {"kurs": 95.0, "score": 0.5, "atr": 5.0}})
-        pos = position_fabrik(einstand=100.0, hoechst=110.0, gehalten=5,
+        pos = position_fabrik(einstand=100.0, hoechst=97.0, gehalten=5,
                               stop=50.0, ziel=500.0)
+        # Gegenprobe im Test selbst: Der ATR-Abstand ist eingehalten ...
+        assert (97.0 - 95.0) <= 1.0 * 5.0, "Testaufbau: ATR-Pruefung waere erfuellt"
+        # ... trotzdem muss verkauft werden, weil die Position im Minus ist.
         assert grund(Engine(self._cfg()), snap,
                      portfolio_fabrik([pos])) == "zeitausstieg"
+
+    def test_knapp_im_gewinn_wird_verlaengert(self, snapshot_fabrik,
+                                              position_fabrik, portfolio_fabrik):
+        """Gegenstueck zum Test darueber: identischer ATR-Abstand, aber im
+        Gewinn - hier MUSS verlaengert werden. Erst beide Faelle zusammen
+        beweisen, dass die Gewinnbedingung wirkt und nicht nur der ATR."""
+        snap = snapshot_fabrik({"X": {"kurs": 101.0, "score": 0.5, "atr": 5.0}})
+        pos = position_fabrik(einstand=100.0, hoechst=103.0, gehalten=5,
+                              stop=50.0, ziel=500.0)
+        assert (103.0 - 101.0) <= 1.0 * 5.0, "Testaufbau: gleicher ATR-Abstand"
+        assert grund(Engine(self._cfg()), snap, portfolio_fabrik([pos])) is None
 
     def test_fehlender_atr_verlaengert_nicht(self, snapshot_fabrik,
                                              position_fabrik, portfolio_fabrik):

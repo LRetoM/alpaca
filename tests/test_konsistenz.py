@@ -120,20 +120,46 @@ class TestSchattenKannNichtHandeln:
     nur im Kopf existiert, haelt nicht."""
 
     def test_shadow_importiert_kein_trading(self):
+        """Erfasst ALLE Importformen, auch `from . import trading`.
+
+        Die erste Fassung pruefte `if isinstance(k, ast.ImportFrom) and
+        k.module` - bei einem relativen Import ohne Modulnamen
+        (`from . import trading`) ist `k.module` aber None, und genau
+        dieser Fall wurde stillschweigend uebersprungen. Der Mutationstest
+        (Schritt 23) baute exakt diese Zeile ein und der Test blieb gruen.
+        """
         quelle = (PROJECT_ROOT / "src" / "alpaca_bot" / "shadow.py").read_text(
             encoding="utf-8")
         baum = ast.parse(quelle)
-        importiert = set()
+        importiert: set[str] = set()
         for k in ast.walk(baum):
-            if isinstance(k, ast.ImportFrom) and k.module:
-                importiert.add(k.module)
+            if isinstance(k, ast.ImportFrom):
+                # k.module ist None bei `from . import x` - die Namen
+                # muessen deshalb IMMER mit erfasst werden.
+                if k.module:
+                    importiert.add(k.module)
                 for n in k.names:
-                    importiert.add(f"{k.module}.{n.name}")
+                    importiert.add(n.name)
+                    if k.module:
+                        importiert.add(f"{k.module}.{n.name}")
             elif isinstance(k, ast.Import):
                 for n in k.names:
                     importiert.add(n.name)
         verboten = {m for m in importiert if "trading" in m}
         assert not verboten, f"shadow.py importiert Handelscode: {verboten}"
+
+    def test_pruefung_erkennt_relativen_import(self):
+        """Gegenprobe auf die PRUEFLOGIK selbst - ohne sie waere nicht
+        feststellbar, ob der Test oben ueberhaupt etwas finden kann."""
+        baum = ast.parse("from . import trading")
+        gefunden: set[str] = set()
+        for k in ast.walk(baum):
+            if isinstance(k, ast.ImportFrom):
+                if k.module:
+                    gefunden.add(k.module)
+                for n in k.names:
+                    gefunden.add(n.name)
+        assert "trading" in gefunden
 
     def test_shadow_daemon_importiert_kein_trading(self):
         quelle = (PROJECT_ROOT / "scripts" / "16_shadow_daemon.py").read_text(
