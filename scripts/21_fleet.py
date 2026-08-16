@@ -11,12 +11,12 @@ der beste trotzdem eine deutliche Ueberrendite - rein zufaellig. Deshalb
 zaehlt dieses Skript JEDEN je angemeldeten Bot mit (auch stillgelegte) und
 weist die daraus folgende Zufallsschwelle bei jeder Auswertung aus.
 
-    python scripts/18_fleet.py                        # Uebersicht
-    python scripts/18_fleet.py --startaufstellung     # die 7 Bots aus §5.3
-    python scripts/18_fleet.py --divergenz            # wirkungslose Varianten finden
-    python scripts/18_fleet.py --vergleich B00_basis B01_stop_eng
-    python scripts/18_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos"
-    python scripts/18_fleet.py --anmelden MEIN_BOT --achse stop_atr --wert 2.5 \\
+    python scripts/21_fleet.py                        # Uebersicht
+    python scripts/21_fleet.py --startaufstellung     # die 7 Bots aus §5.3
+    python scripts/21_fleet.py --divergenz            # wirkungslose Varianten finden
+    python scripts/21_fleet.py --vergleich B00_basis B01_stop_eng
+    python scripts/21_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos"
+    python scripts/21_fleet.py --anmelden MEIN_BOT --achse stop_atr --wert 2.5 \\
         --hypothese "Begruendung mit mindestens 20 Zeichen"
 """
 

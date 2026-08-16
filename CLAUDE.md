@@ -50,10 +50,37 @@ Neue Ideen laufen als eigener Bot in der Flotte (`fleet.anmelden`) mit
   blockiert Hintergrunddienste dort).
 - Jede neue externe API zuerst in `ratelimit.QUOTAS` eintragen.
 
+## Tests — nicht verhandelbar
+
+**Nach JEDER Codeänderung, vor jedem Neustart:**
+
+```
+python scripts/22_tests.py        # beide Schichten
+python scripts/18_health_check.py
+```
+
+Schlägt etwas fehl: **nicht neu starten**, erst beheben.
+
+**Jeder gefundene Fehler bekommt einen Regressionstest** in `tests/`,
+benannt nach dem konkreten Vorfall. Ein Fehler, der einmal auftrat, darf
+nie unbemerkt zurückkommen. Details: `docs/TESTPLAN.md`.
+
+Warum das streng ist: Bis zum 16.08.2026 prüfte nur
+`scripts/00_selftest.py` — und der deckt die **Forschungsschicht** ab
+(Indikatoren, Backtest, ML). Handelslogik, Risiko-Dach, Protokollierung
+und Live/Schatten-Konsistenz waren ungetestet. Genau dort lagen dann auch
+alle gefundenen Fehler: `bars_held` immer 0, `after_10d` nie gefüllt,
+`code_version` zwei Monate kaputt, Flotten-Referenz zwei Wochen falsch.
+
 ## Nach Codeänderungen an der Handelslogik
 
-1. `python scripts/00_selftest.py` (47 Prüfungen)
+1. `python scripts/22_tests.py` (Tests, beide Schichten)
 2. `python scripts/18_health_check.py`
-3. Dienste neu starten, sonst läuft weiter der alte Code:
-   `launchctl kickstart -k gui/$(id -u)/de.local.alpacabot`
-   `launchctl kickstart -k gui/$(id -u)/de.local.alpacaschatten`
+3. Dienste **vollständig** neu starten, sonst läuft weiter der alte Code:
+   ```
+   launchctl bootout gui/$(id -u)/de.local.alpacabot
+   launchctl bootout gui/$(id -u)/de.local.alpacaschatten
+   # auf Prozessende warten, dann:
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacabot.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacaschatten.plist
+   ```

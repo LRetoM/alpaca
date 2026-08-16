@@ -1341,7 +1341,7 @@ def entscheiden(cfg: ShadowConfig, store: ShadowStore | None = None,
     if not bots:
         raise RuntimeError(
             "Keine Bots angemeldet. Zuerst die Startaufstellung anlegen:\n"
-            "  python scripts/18_fleet.py --startaufstellung"
+            "  python scripts/21_fleet.py --startaufstellung"
         )
 
     run_id = store.start_run("entscheiden", n_symbols=len(symbols),

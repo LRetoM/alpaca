@@ -336,7 +336,7 @@ def uebersicht(store: ShadowStore | None = None) -> str:
     lines = ["=" * 78, "  BOT-FLOTTE", "=" * 78]
     if df.empty:
         lines.append("  Keine Bots angemeldet.")
-        lines.append("  -> python scripts/18_fleet.py --startaufstellung")
+        lines.append("  -> python scripts/21_fleet.py --startaufstellung")
         return "\n".join(lines)
 
     for _, r in df.iterrows():
