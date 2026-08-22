@@ -182,6 +182,23 @@ class TestProtokollStoertDenBetriebNie:
             "jeder Rueckgabepunkt muss melden, sonst gilt ein geschlossener "
             "Markt als ausgefallener Bot")
 
+    def test_daemon_meldet_auch_ohne_handel(self):
+        """Der Daemon kehrt bei geschlossener Boerse zurueck, BEVOR
+        `run_once` gerufen wird.
+
+        Gefunden am 22.08.2026 beim Nachpruefen: Die Meldung sass nur in
+        `run_once` - und der Waechter meldete den Live-Bot trotz laufendem
+        Dienst als "nie gelaufen". Ein Waechter, der einen gesunden Bot
+        anschwaerzt, verliert genau das Vertrauen, das er herstellen soll.
+        """
+        import inspect
+
+        from alpaca_bot import daemon
+
+        quelle = inspect.getsource(daemon)
+        assert "_melde_zyklus" in quelle, (
+            "der Daemon muss auch den Nicht-Handel melden")
+
     def test_alle_erwartungen_haben_einen_zweck(self):
         """Der Zweck steht im Befund - ohne ihn ist ein Ausfall nicht
         einzuordnen, ohne den Code zu lesen."""

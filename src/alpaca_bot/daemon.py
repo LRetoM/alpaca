@@ -414,6 +414,13 @@ class Daemon:
         if not can_trade:
             print(f"  [{dt.datetime.now():%H:%M:%S}] kein Handel: {reason}")
             self.store.heartbeat(ok=True)
+            # Auch das ist ein vollstaendiger Zyklus: Der Bot hat geprueft
+            # und entschieden, nicht zu handeln. Die Meldung muss HIER
+            # stehen und nicht nur in `live.run_once` - der Daemon kehrt
+            # bei geschlossener Boerse zurueck, bevor `run_once` ueberhaupt
+            # gerufen wird. Ohne sie saehe der Nutzungsnachweis jedes
+            # Wochenende einen ausgefallenen Handelsbot (§G15).
+            live._melde_zyklus(0, 0, f"kein_handel:{reason[:24]}")
             return True
 
         # Ausfuehrungspreise der letzten Orders nachtragen. Muss VOR dem
