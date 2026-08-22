@@ -378,8 +378,8 @@ MUTATIONEN = [
     Mutation(
         "Live-Zyklus meldet seine Nutzung nicht mehr",
         "src/alpaca_bot/live.py",
-        '                signatur=f"{len(decisions)}e_{executed}a@{snapshot.as_of.date()}")',
-        '                signatur="")',
+        '        _melde_zyklus(len(decisions), executed, str(snapshot.as_of.date()))',
+        "        pass",
         "test_nutzung",
         "Ohne Stichtag in der Signatur faellt ein Bot, der taeglich "
         "dieselbe Lage sieht, nicht mehr als 'immer gleich' auf.",

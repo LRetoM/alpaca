@@ -127,6 +127,26 @@ def main() -> int:
         gruende.append(f"Datenintegritaet nicht pruefbar: {type(e).__name__}: {e}")
         ampel = "ROT"
 
+    # --- 3b. Nutzungsnachweis ---
+    # Bewusst GELB und nicht ROT: Ein stillstehender Baustein ist kein
+    # Datenverlust und kein Handelsfehler - er kostet nur Zeit, in der wir
+    # nichts lernen. Das rechtfertigt eine Warnung, keinen Stopp. Er gehoert
+    # aber hierher, weil genau das dreimal wochenlang unbemerkt blieb (§G15).
+    try:
+        from alpaca_bot import nutzung
+
+        befunde = nutzung.pruefen()
+        schlecht = [b for b in befunde if not b.ok]
+        print(f"  Bausteine       : {len(befunde) - len(schlecht)}/{len(befunde)} "
+              f"arbeiten wie geplant")
+        if schlecht:
+            ampel = "GELB" if ampel == "GRUEN" else ampel
+            for b in schlecht:
+                gruende.append(f"Baustein '{b.baustein}': "
+                               f"{b.detail.splitlines()[0]}")
+    except Exception as e:  # noqa: BLE001 - der Nachweis darf nie blockieren
+        print(f"  Bausteine       : nicht pruefbar ({type(e).__name__})")
+
     # --- 4. Depot vs. Zustand ---
     try:
         from alpaca_bot import account

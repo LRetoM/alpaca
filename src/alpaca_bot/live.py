@@ -637,6 +637,28 @@ def pruefe_stops_intraday(
     return verkauft
 
 
+def _melde_zyklus(n_entscheidungen: int, ausgefuehrt: int, stichtag: str) -> None:
+    """Meldet den Zyklus an den Nutzungsnachweis - an JEDEM Ausgang.
+
+    `run_once` hat mehrere Rueckgabepunkte: einen fuer den blockierten
+    Handel (Boerse zu, PDT-Sperre, Risiko-Dach) und einen fuer den
+    vollstaendigen Durchlauf. Meldete nur der vollstaendige, saehe der
+    Waechter am Wochenende einen ausgefallenen Live-Bot und leuchtete
+    zwei Tage gelb - und eine Warnung, die immer leuchtet, wird
+    weggeklickt (§G13).
+
+    Ein blockierter Zyklus IST ein Lauf: Der Bot hat geprueft und
+    entschieden, nicht zu handeln. Genau das soll der Nachweis sehen.
+    """
+    try:
+        from . import nutzung
+
+        nutzung.melden("live.zyklus", n_entscheidungen,
+                       signatur=f"{n_entscheidungen}e_{ausgefuehrt}a@{stichtag}")
+    except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
+        pass
+
+
 def run_once(
     symbols: list[str],
     engine_config: EngineConfig | None = None,
@@ -678,6 +700,7 @@ def run_once(
             print(str(status))
         if not status.ok:
             run.warn("Handel blockiert", gruende=status.blocks)
+            _melde_zyklus(0, 0, "blockiert")
             return LiveResult([], [], 0, 0, dry_run, status.equity)
 
         # --- 2. Lage erfassen ---
@@ -944,16 +967,6 @@ def run_once(
 
         run.log("abschluss", ausgefuehrt=executed, blockiert=blocked,
                 entscheidungen=len(decisions), abgeschickt=len(done))
-        # Nutzungsmeldung: Die Signatur traegt den Stichtag, damit ein Bot,
-        # der zwar laeuft, aber taeglich dieselbe Lage sieht, als "immer
-        # gleich" auffaellt statt als gesund zu gelten (§G15).
-        try:
-            from . import nutzung
-
-            nutzung.melden(
-                "live.zyklus", len(decisions),
-                signatur=f"{len(decisions)}e_{executed}a@{snapshot.as_of.date()}")
-        except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
-            pass
+        _melde_zyklus(len(decisions), executed, str(snapshot.as_of.date()))
         return LiveResult(decisions, done, executed, blocked, dry_run,
                           portfolio.equity)

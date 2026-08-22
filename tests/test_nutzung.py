@@ -145,8 +145,8 @@ class TestProtokollStoertDenBetriebNie:
         from alpaca_bot import live
 
         quelle = inspect.getsource(live.run_once)
-        assert 'nutzung.melden(' in quelle
-        assert '"live.zyklus"' in quelle
+        assert "_melde_zyklus(" in quelle
+        assert '"live.zyklus"' in inspect.getsource(live._melde_zyklus)
 
     def test_live_signatur_traegt_den_stichtag(self):
         """Die Meldung allein reicht nicht - es kommt darauf an, WAS sie
@@ -163,8 +163,24 @@ class TestProtokollStoertDenBetriebNie:
         from alpaca_bot import live
 
         quelle = inspect.getsource(live.run_once)
-        assert "snapshot.as_of" in quelle.split("nutzung.melden(")[1][:220], (
+        assert "snapshot.as_of" in quelle.split("_melde_zyklus(")[-1][:220], (
             "die Nutzungssignatur muss den Stichtag tragen")
+
+    def test_auch_ein_blockierter_zyklus_meldet_sich(self):
+        """Sonst leuchtet der Waechter jedes Wochenende gelb.
+
+        `run_once` kehrt bei geschlossener Boerse frueh zurueck. Ein
+        blockierter Zyklus IST ein Lauf - der Bot hat geprueft und
+        entschieden, nicht zu handeln.
+        """
+        import inspect
+
+        from alpaca_bot import live
+
+        quelle = inspect.getsource(live.run_once)
+        assert quelle.count("_melde_zyklus(") >= 2, (
+            "jeder Rueckgabepunkt muss melden, sonst gilt ein geschlossener "
+            "Markt als ausgefallener Bot")
 
     def test_alle_erwartungen_haben_einen_zweck(self):
         """Der Zweck steht im Befund - ohne ihn ist ein Ausfall nicht
