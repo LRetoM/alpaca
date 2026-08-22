@@ -10,11 +10,11 @@
 > (Indikatoren, Backtest, ML, Lookahead). Handelslogik, Risiko-Dach,
 > Protokollierung und Live/Schatten-Konsistenz waren **ungetestet**.
 >
-> **Stand 22.08.2026:** **312 Tests** in 20 Dateien, 48 Selbstprüfungen,
-> 54 von 54 Mutationen gefangen.
+> **Stand 22.08.2026:** **332 Tests** in 21 Dateien, 48 Selbstprüfungen,
+> 59 von 59 Mutationen gefangen.
 >
 > Die Spalte „Tests" in §2 zählt Testfunktionen und summiert sich auf
-> **307**. pytest meldet 312, weil zwei Tests parametrisiert sind
+> **327**. pytest meldet 332, weil zwei Tests parametrisiert sind
 > (`test_engine_ausstiege.py` über fünf Haltedauern,
 > `test_lernkern.py` über zwei Zeitzonen) und jede Parametrisierung
 > einzeln zählt. Beide Zahlen sind richtig — sie zählen Verschiedenes.
@@ -62,6 +62,7 @@ aus `BEFUNDE.md` §G15/§G16.
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
+| `test_risiko_bewertbarkeit.py` | 17 | **§G18:** Keine Position verschwindet still aus der Risikorechnung — Fallback `market_value` → `qty·current_price` → `qty·avg_entry`. Ist nichts bestimmbar, wird **blockiert** statt übersprungen (Verkäufe bleiben erlaubt). Dazu: das JSONL-Rohprotokoll meldet seinen Ausfall, `earnings` rechnet überlappungskorrigiert. |
 | `test_risiko.py` | 18 | Drawdown-Sperre bei 20 %. **Einzahlungsbereinigung** (ohne sie hätte ein realer 25-%-Verlust nur 16,7 % gezeigt). Sperre ist persistent, Lösen nur wörtlich, **Verkaufen immer erlaubt**, Exposure/Cash/Sektor/Anzahl je einzeln, Prüfung fällt aus → kein Handel. |
 
 ### 2.3 Protokoll und Datenqualität
@@ -96,7 +97,7 @@ aus `BEFUNDE.md` §G15/§G16.
 | `test_lernkern.py` | 22 | Panel-Zusicherungen, Zeitzonen, Wächter gegen leere Merkmale, **Walk-Forward ohne Leck** (kein Handelstag in beiden Fenstern), ehrliche Bewertung, Fokus rechnet nicht hoch, wo nichts gemessen ist, Abnahmehürden. |
 | `test_dauerbetrieb.py` | 13 | IC korrigiert die Überlappung, Musterspeicher rechnet mit Horizont, Lernschritt ist im Daemon verdrahtet und steht **hinter** den erzeugenden Schritten, Verifizieren rechnet nicht doppelt. |
 | `test_musterspeicher.py` | 17 | **§G16:** keine Duplikate, Zerfallenes bleibt zerfallen, jeder Schnitt zählt als Versuch. Fokus-Zahlen kommen aus den Quellen. **Vorzeichenstabilität ist verdrahtet.** |
-| `test_nutzung.py` | 17 | Die **fünf** Arten des stillen Ausfalls: nie gelaufen, immer leer, immer gleich, zu selten, **fehlerhaft** (§G16). Ausnahmen sind begründet, das Protokoll stört den Betrieb nie. |
+| `test_nutzung.py` | 20 | Die **fünf** Arten des stillen Ausfalls: nie gelaufen, immer leer, immer gleich, zu selten, **fehlerhaft** (§G16). „Immer gleich“ nur bei **neuen Daten** — sonst leuchtet der Health-Check an jedem Wochenende (§G18). Ausnahmen sind begründet, das Protokoll stört den Betrieb nie. |
 
 ### 2.7 Werkzeuge — Ereignisstudie und RL
 
@@ -134,7 +135,7 @@ Einzeln:
 
 ```
 python scripts/00_selftest.py       # Forschungsschicht (48 Prüfungen)
-.venv/bin/pytest tests/ -q          # Betriebsschicht (312 Tests)
+.venv/bin/pytest tests/ -q          # Betriebsschicht (332 Tests)
 ```
 
 **Alles gehört nach jeder Codeänderung ausgeführt, bevor die Dienste neu

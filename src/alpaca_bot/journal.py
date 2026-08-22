@@ -712,12 +712,38 @@ class RunLogger:
         self.log("snapshot", name, datei=str(path), zeilen=len(df))
         return path
 
+    _raw_defekt: bool = field(default=False, init=False)
+    """Ist die JSONL-Sicherung fuer diesen Lauf ausgefallen?"""
+
     def _write_raw(self, obj: dict) -> None:
+        """Schreibt ins JSONL-Rohprotokoll - die zweite Aufzeichnung.
+
+        **Warum das nicht still scheitern darf (§G18).** Das Modul
+        beschreibt die Aufgabenteilung so: "SQLite ist die
+        Auswertungsschicht, JSONL die Sicherung - waere die Datenbank je
+        beschaedigt, liesse sie sich daraus vollstaendig rekonstruieren."
+
+        Ein `except: pass` machte daraus eine Sicherung, die man fuer
+        vorhanden haelt, waehrend sie nicht mehr geschrieben wird - genau
+        die Fehlerklasse aus §G15 (gebaut, laeuft nicht, meldet sich
+        nie). Ein voller Datentraeger oder eine entzogene
+        Schreibberechtigung faellt sonst erst auf, wenn man die Sicherung
+        BRAUCHT.
+
+        Der Ausfall darf den Handel weiterhin nicht stoppen - deshalb
+        wird gemeldet, nicht geworfen. Und nur EINMAL je Lauf: Eine
+        Meldung bei jeder Zeile waere Laerm, und Laerm wird ueberlesen.
+        """
         try:
             self._raw.write(_dumps(obj) + "\n")
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as e:
+            if not self._raw_defekt:
+                self._raw_defekt = True
+                print(f"  [Journal] ROHPROTOKOLL FAELLT AUS: "
+                      f"{type(e).__name__}: {e}. Die SQLite-Aufzeichnung "
+                      f"laeuft weiter, aber die JSONL-Sicherung dieses "
+                      f"Laufs ist unvollstaendig.")
 
 
 def _bucket(value) -> str:

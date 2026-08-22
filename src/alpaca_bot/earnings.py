@@ -278,14 +278,37 @@ def vorwaertsrenditen(bars: pd.DataFrame, horizonte=(5, 10, 20, 40)) -> dict[int
 
 
 def kennzahlen(faktor: pd.DataFrame, fwd: pd.DataFrame,
-               min_symbole: int = 10) -> dict:
+               min_symbole: int = 10, horizont: int = 1) -> dict:
     """Querschnitts-IC je Tag, plus t-Wert ueber die Tagesreihe.
 
     Nutzt dieselbe Rechnung wie `research._daily_cross_sectional_ic` -
     Spearman ueber den Querschnitt, dann Mittelwert und t-Wert ueber die
     Tage. Ein Faktor ohne |t| > 2 ueber mehrere Jahre bindet keine
     weitere Zeit.
+
+    **Der t-Wert ist um die Ueberlappung korrigiert (§G12).** Diese
+    Funktion war die LETZTE Stelle im Projekt, die es nicht war - §G12
+    hat `statistik`, `research`, `shadow_eval`, `nachbetrachtung` und
+    `10_simulate.py` behoben und `earnings.py` uebersehen (§G18).
+
+    Das faellt hier ins Gewicht, weil `19_faktor_tests.py` die
+    Kennzahl ueber Horizonte von 1 bis 60 Tagen abruft. Bei einem
+    60-Tage-Fenster teilen benachbarte Tage 59/60 ihres Renditefensters -
+    der rohe t-Wert ist dort weit jenseits von "etwas zu hoch".
+
+    Args:
+        horizont: Laenge des Renditefensters in Handelstagen. Steuert die
+            Korrektur. Vorgabe 1 = keine Ueberlappung, damit bestehende
+            Aufrufer sich nicht still aendern - wer einen Horizont hat,
+            muss ihn nennen (dieselbe Regel wie in
+            `statistik.gruppierter_test`).
+
+    Returns:
+        `t` ist der KORRIGIERTE Wert, `t_roh` steht zum Vergleich
+        daneben. Ist die Reihe zu kurz fuer den Schaetzer, ist `t` NaN -
+        der rohe springt bewusst nicht ein (§G14).
     """
+    from . import statistik
     from .research import _daily_cross_sectional_ic
 
     gemeinsam = faktor.index.intersection(fwd.index)
@@ -297,15 +320,28 @@ def kennzahlen(faktor: pd.DataFrame, fwd: pd.DataFrame,
     ic = ic.dropna()
     if len(ic) < 20:
         return {"n_tage": int(len(ic)), "ic": np.nan, "t": np.nan,
+                "t_roh": np.nan, "horizont": horizont,
                 "quintil_spanne": np.nan, "n_beobachtungen": 0}
 
-    t = ic.mean() / (ic.std(ddof=1) / np.sqrt(len(ic)))
+    # Chronologisch: Newey-West liest die Autokorrelation aus der
+    # REIHENFOLGE. Eine unsortierte Reihe ergaebe keinen ungenauen,
+    # sondern einen bedeutungslosen Wert.
+    ic = ic.sort_index()
+    t_roh = float(ic.mean() / (ic.std(ddof=1) / np.sqrt(len(ic))))
+    if horizont > 1:
+        t_korr, aufbl = statistik.newey_west_t(ic.to_numpy(), lag=horizont - 1)
+    else:
+        t_korr, aufbl = t_roh, 1.0
+
     sp = spread.reindex(ic.index).dropna()
     return {
         "n_tage": int(len(ic)),
         "n_beobachtungen": int((f.notna() & r.notna()).sum().sum()),
         "ic": round(float(ic.mean()), 5),
-        "t": round(float(t), 2),
+        "t": round(float(t_korr), 2) if np.isfinite(t_korr) else np.nan,
+        "t_roh": round(t_roh, 2),
+        "aufblaehung": round(float(aufbl), 2) if np.isfinite(aufbl) else np.nan,
+        "horizont": horizont,
         "quintil_spanne": round(float(sp.mean()), 5) if len(sp) else np.nan,
         "anteil_positive_tage": round(float((ic > 0).mean()), 3),
     }

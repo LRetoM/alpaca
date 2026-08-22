@@ -99,6 +99,63 @@ class Freigabe:
         return "Risiko-Dach BLOCKIERT:\n  " + "\n  ".join(self.gruende)
 
 
+def positionswert(zeile) -> float | None:
+    """Wert EINER Position - mit Fallback-Kette statt stillem Nullwert.
+
+    **Der Fehler, gegen den das steht (§G18).** Vorher stand hier
+    sinngemaess `qty * (current_price or 0)` in einem
+    `except: continue`. Zwei Wege liessen eine Position still aus der
+    Risikorechnung verschwinden:
+
+      * `current_price` ist `None` - `account.positions()` setzt das Feld
+        ausdruecklich so, wenn Alpaca keinen Kurs liefert (etwa bei einer
+        Handelsaussetzung). `or 0` machte daraus den Wert **null**, ganz
+        ohne Exception.
+      * `qty` unlesbar - die Zeile fiel per `continue` heraus.
+
+    Gemessen an drei Positionen a 30.000 $ auf 100.000 $ Konto: Exposure
+    90 % statt 60 %, Sektoranteil 90 % statt 60 %. Das Dach hat damit
+    UNTERSCHAETZT und Kaeufe zugelassen, die es sonst blockiert haette -
+    der genaue Gegensatz zu seinem Grundsatz "im Zweifel wird nicht
+    gehandelt".
+
+    Die Kette geht vom genauesten zum konservativsten Wert:
+
+        market_value          was der Broker selbst ausweist
+        qty * current_price   selbst gerechnet
+        qty * avg_entry       Einstand - eine Untergrenze, aber ein Wert
+
+    Erst wenn auch die Menge fehlt, ist nichts bestimmbar. Dann kommt
+    `None` zurueck - und der Aufrufer MUSS das zaehlen, statt es zu
+    ueberspringen.
+    """
+    def _zahl(feld) -> float | None:
+        try:
+            wert = zeile.get(feld) if hasattr(zeile, "get") else zeile[feld]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if wert is None:
+            return None
+        try:
+            f = float(wert)
+        except (TypeError, ValueError):
+            return None
+        return f if pd.notna(f) else None
+
+    mv = _zahl("market_value")
+    if mv is not None:
+        return abs(mv)
+
+    qty = _zahl("qty")
+    if qty is None:
+        return None
+    for feld in ("current_price", "avg_entry"):
+        kurs = _zahl(feld)
+        if kurs is not None:
+            return abs(qty * kurs)
+    return None
+
+
 def _kennzahlen(konto: dict, positionen: pd.DataFrame,
                 store: Store) -> dict:
     """Sammelt alles, was die Regeln brauchen - an genau einer Stelle."""
@@ -107,12 +164,18 @@ def _kennzahlen(konto: dict, positionen: pd.DataFrame,
     letzte = float(konto.get("last_equity") or equity)
 
     pos_wert = 0.0
+    n_unbewertbar = 0
+    unbewertbar: list[str] = []
     if positionen is not None and not positionen.empty:
-        for _, r in positionen.iterrows():
-            try:
-                pos_wert += abs(float(r["qty"]) * float(r.get("current_price") or 0))
-            except (TypeError, ValueError):
+        for sym, r in positionen.iterrows():
+            wert = positionswert(r)
+            if wert is None:
+                # NICHT ueberspringen: Eine Position, die niemand bewerten
+                # kann, ist kein Grund, sie aus dem Risiko herauszurechnen.
+                n_unbewertbar += 1
+                unbewertbar.append(str(sym))
                 continue
+            pos_wert += wert
 
     einzahlungen = store.einzahlungen_summe()
 
@@ -138,6 +201,8 @@ def _kennzahlen(konto: dict, positionen: pd.DataFrame,
         "positionswert": pos_wert,
         "exposure": (pos_wert / equity) if equity > 0 else 0.0,
         "n_positionen": 0 if positionen is None else len(positionen),
+        "n_unbewertbar": n_unbewertbar,
+        "unbewertbar": unbewertbar,
         "einzahlungen": einzahlungen,
         "hoechststand_bereinigt": hoechst_bereinigt + einzahlungen,
         "drawdown_pct": drawdown,
@@ -226,6 +291,23 @@ def pruefe_order(
     if int(sperre.get("aktiv") or 0) == 1:
         return Freigabe(False, [f"Sperre aktiv: {sperre.get('grund')}"], k)
 
+    # Unbewertbare Positionen zuerst: Alle folgenden Grenzen rechnen mit
+    # `positionswert` - fehlt der fuer eine Position, ist JEDE dieser
+    # Zahlen zu niedrig. Weiterzukaufen hiesse, auf einer Rechnung zu
+    # handeln, von der man weiss, dass sie unvollstaendig ist (§G18).
+    #
+    # Der Grundsatz steht im Modul-Docstring: "Fällt die Risikopruefung
+    # selbst aus, wird nicht gehandelt." Bisher galt er nur fuer eine
+    # geworfene Ausnahme, nicht fuer eine still unvollstaendige Zahl.
+    if k.get("n_unbewertbar"):
+        namen = ", ".join(k.get("unbewertbar", [])[:5])
+        gruende.append(
+            f"{k['n_unbewertbar']} Position(en) ohne bestimmbaren Wert "
+            f"({namen}) - Exposure, Cash-Quote und Klumpenkontrolle sind "
+            f"damit zu niedrig gerechnet. Keine Neukaeufe, bis der Broker "
+            f"wieder Kurse liefert (Verkaeufe bleiben erlaubt)."
+        )
+
     if k["tagesverlust_pct"] > grenzen.tagesverlust_pct:
         gruende.append(
             f"Tagesverlust {k['tagesverlust_pct']:.1%} ueber der Grenze "
@@ -277,9 +359,12 @@ def sektor_anteile(positionen: pd.DataFrame, sektoren: dict[str, str],
         return {}
     out: dict[str, float] = {}
     for sym, r in positionen.iterrows():
-        try:
-            wert = abs(float(r["qty"]) * float(r.get("current_price") or 0))
-        except (TypeError, ValueError):
+        wert = positionswert(r)
+        if wert is None:
+            # Dieselbe Regel wie fuer fehlende Sektordaten eine Zeile
+            # tiefer: sichtbar bleiben, nicht stillschweigend
+            # verschwinden. Sonst sieht ein Klumpen wie Streuung aus.
+            out["unbewertbar"] = out.get("unbewertbar", 0.0)
             continue
         sektor = sektoren.get(str(sym), "unbekannt")
         out[sektor] = out.get(sektor, 0.0) + wert / equity

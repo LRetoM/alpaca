@@ -81,12 +81,19 @@ def _tabelle(name: str, faktor: pd.DataFrame,
              fwd: dict[int, pd.DataFrame]) -> pd.DataFrame:
     zeilen = []
     for h in HORIZONTE:
-        k = earnings.kennzahlen(faktor, fwd[h])
+        # `horizont=h` durchreichen: Bei einem 60-Tage-Fenster teilen
+        # benachbarte Tage 59/60 ihres Renditefensters. Der Horizont war
+        # hier immer bekannt - er wurde nur nachtraeglich ins Ergebnis
+        # geschrieben statt in die Rechnung (§G18).
+        k = earnings.kennzahlen(faktor, fwd[h], horizont=h)
         k["horizont"] = h
         zeilen.append(k)
     df = pd.DataFrame(zeilen).set_index("horizont")
-    return df[["n_tage", "n_beobachtungen", "ic", "t",
-               "quintil_spanne", "anteil_positive_tage"]]
+    # `t_roh` steht daneben, nie an der Stelle von `t` - sonst wird der
+    # unkorrigierte Wert als korrigierter gelesen (§G12).
+    spalten = ["n_tage", "n_beobachtungen", "ic", "t", "t_roh",
+               "quintil_spanne", "anteil_positive_tage"]
+    return df[[s for s in spalten if s in df.columns]]
 
 
 def _urteil(tab: pd.DataFrame, zerfall: pd.DataFrame, placebo: dict,

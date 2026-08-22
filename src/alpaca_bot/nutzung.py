@@ -259,13 +259,50 @@ def pruefen(erwartungen=ERWARTUNGEN, *, db: Path | None = None,
                     f"{len(zeilen)} Laeufe, jedes Mal 0 Ergebnisse", e.zweck))
                 continue
 
+            # --- "immer gleich" nur bei NEUEN Daten ---
+            #
+            # Die Signatur ist nach Konvention `"<ergebnis>@<datenstand>"`
+            # (siehe `melden`). Der Teil nach dem @ sagt, auf welchem
+            # Datenstand gerechnet wurde - beim Schattenbetrieb der
+            # juengste Stichtag.
+            #
+            # Damit sind zwei Faelle unterscheidbar, die vorher beide als
+            # "immer gleich" galten:
+            #
+            #   Wochenende   0@2026-08-21, 0@2026-08-21, ...
+            #                Derselbe Datenstand. Die vier Schattenschritte
+            #                sind per Konstruktion idempotent (§G14) - ohne
+            #                neuen Handelstag MUESSEN sie dasselbe liefern.
+            #                Das ist der Normalfall, kein Ausfall.
+            #
+            #   §G14-Fall    19788@2026-08-21, 19788@2026-08-22, ...
+            #                Der Datenstand wandert, das Ergebnis nicht.
+            #                DAS ist der teure Zustand: Es wird gerechnet,
+            #                aber es entsteht keine neue Information.
+            #
+            # Ohne diese Trennung waere der Health-Check an jedem Wochenende
+            # und Feiertag gelb - und eine Warnung, die immer leuchtet, wird
+            # weggeklickt (`docs/LERNTEMPO.md` §5). Dann faellt auch der
+            # echte Stillstand nicht mehr auf.
             signaturen = {z["signatur"] for z in zeilen if z["signatur"]}
-            if (not e.darf_gleich_bleiben and len(zeilen) >= 5
-                    and len(signaturen) == 1):
+            mit_stand = [s for s in signaturen if "@" in s]
+            if mit_stand and len(mit_stand) == len(signaturen):
+                staende = {s.split("@", 1)[1] for s in mit_stand}
+                ergebnisse_sig = {s.split("@", 1)[0] for s in mit_stand}
+                # Der teure Zustand: der Datenstand wandert, das Ergebnis
+                # nicht. Ein einzelner Datenstand heisst dagegen nur, dass
+                # es nichts Neues gab.
+                gleich = len(staende) > 1 and len(ergebnisse_sig) == 1
+            else:
+                # Ohne Datenstand in der Signatur bleibt die alte Regel.
+                gleich = len(signaturen) == 1
+
+            if not e.darf_gleich_bleiben and len(zeilen) >= 5 and gleich:
                 befunde.append(Befund(
                     e.baustein, "immer_gleich",
-                    f"{len(zeilen)} Laeufe, aber immer dasselbe Ergebnis "
-                    f"({next(iter(signaturen))[:40]}) - es entsteht keine "
+                    f"{len(zeilen)} Laeufe ueber mehrere Datenstaende, aber "
+                    f"immer dasselbe Ergebnis "
+                    f"({sorted(signaturen)[0][:40]}) - es entsteht keine "
                     f"neue Information", e.zweck))
                 continue
 

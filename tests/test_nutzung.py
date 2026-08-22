@@ -75,11 +75,18 @@ class TestVierArtenDesStillenAusfalls:
         from alpaca_bot import nutzung
 
         jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        # Ueber MEHRERE Stichtage hinweg dieselbe Zahl - das ist der
+        # Zustand, der Rechenzeit kostet, ohne Information zu erzeugen.
+        # (Acht Laeufe an EINEM Stichtag waeren davon nicht zu
+        # unterscheiden: an einem Wochenende ist genau das der
+        # Normalfall, siehe TestWochenendeIstKeinStillstand.)
+        tage = ["2026-08-21", "2026-08-20", "2026-08-19", "2026-08-18"]
         with nutzung._conn(db) as c:
             for i in range(8):
                 c.execute("INSERT INTO laeufe (baustein, ts, ergebnis, signatur)"
-                          " VALUES ('test.baustein',?,19788,'19788@2026-08-21')",
-                          ((jetzt - dt.timedelta(hours=i)).isoformat(),))
+                          " VALUES ('test.baustein',?,19788,?)",
+                          ((jetzt - dt.timedelta(hours=i)).isoformat(),
+                           f"19788@{tage[i % len(tage)]}"))
         b = nutzung.pruefen(_erwartung(), db=db, jetzt=jetzt)[0]
         assert b.art == "immer_gleich"
         assert "keine neue Information" in b.detail
@@ -270,3 +277,75 @@ class TestFehlerSchlaegtSofortDurch:
         jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
         b = self._mit_laeufen(db, [3, 4, 5], jetzt)
         assert b.ok and b.art == "ok"
+
+
+class TestWochenendeIstKeinStillstand:
+    """"Immer gleich" nur bei NEUEN Daten (§G18).
+
+    **Anlass (22.08.2026, ein Samstag).** Nach dem Dienstneustart meldete
+    der Health-Check GELB:
+
+        Baustein 'schatten.einbuchen': 6 Laeufe, aber immer dasselbe
+        Ergebnis (0@2026-08-21) - es entsteht keine neue Information
+
+    Der letzte Handelstag war Freitag. Die vier Schattenschritte sind
+    seit §G14 **per Konstruktion idempotent** - ohne neuen Handelstag
+    MUESSEN sie dasselbe liefern; genau dafuer wurden sie umgebaut. Der
+    Waechter haette damit an jedem Wochenende und Feiertag gelb
+    geleuchtet, also an rund zwei von sieben Tagen.
+
+    Eine Warnung, die immer leuchtet, wird weggeklickt
+    (`docs/LERNTEMPO.md` §5) - dann faellt auch der echte Stillstand
+    nicht mehr auf.
+
+    Unterschieden wird ueber den Datenstand in der Signatur
+    (`"<ergebnis>@<stichtag>"`): Bleibt der Stichtag stehen, ist Ruhe
+    normal. Wandert er, waehrend das Ergebnis steht, ist es der teure
+    §G14-Zustand.
+    """
+
+    def _laeufe(self, db, signaturen, jetzt):
+        from alpaca_bot import nutzung
+
+        with nutzung._conn(db) as c:
+            for i, sig in enumerate(signaturen):
+                c.execute(
+                    "INSERT INTO laeufe (baustein, ts, ergebnis, signatur)"
+                    " VALUES ('test.baustein',?,0,?)",
+                    ((jetzt - dt.timedelta(hours=i + 1)).isoformat(), sig))
+        return nutzung.pruefen(_erwartung(darf_leer_sein=True), db=db,
+                               jetzt=jetzt)[0]
+
+    def test_gleicher_stichtag_ist_kein_befund(self):
+        """Wochenende: sechs Laeufe, ein Handelstag."""
+        import tempfile, pathlib
+
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        with tempfile.TemporaryDirectory() as d:
+            db = pathlib.Path(d) / "n.sqlite"
+            b = self._laeufe(db, ["0@2026-08-21"] * 6, jetzt)
+        assert b.ok, (
+            f"ohne neuen Handelstag ist Ruhe der Normalfall, war '{b.art}'")
+
+    def test_wandernder_stichtag_bei_gleichem_ergebnis_faellt_auf(self):
+        """Der §G14-Zustand: es wird gerechnet, aber nichts entsteht."""
+        import tempfile, pathlib
+
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        with tempfile.TemporaryDirectory() as d:
+            db = pathlib.Path(d) / "n.sqlite"
+            # Gleiche Signatur, aber ueber mehrere Stichtage hinweg waere
+            # sie verschieden - hier steht sie, obwohl die Tage wandern.
+            b = self._laeufe(db, [f"19788@2026-08-{t}" for t in
+                                  (21, 20, 19, 18, 17, 14)], jetzt)
+        assert not b.ok and b.art == "immer_gleich", b.art
+
+    def test_signatur_ohne_datenstand_verhaelt_sich_wie_bisher(self):
+        """Rueckwaertskompatibel: kein '@' -> alte Regel."""
+        import tempfile, pathlib
+
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        with tempfile.TemporaryDirectory() as d:
+            db = pathlib.Path(d) / "n.sqlite"
+            b = self._laeufe(db, ["immer_dasselbe"] * 6, jetzt)
+        assert b.art == "immer_gleich"

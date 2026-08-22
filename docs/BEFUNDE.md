@@ -1512,7 +1512,7 @@ Zahl (Fund 14).
 
 Geprüft wurden alle 52 Module (28.384 Zeilen zum Prüfzeitpunkt), 375
 öffentliche Funktionen, beide Testschichten, die vier Datenbanken und die
-laufenden Dienste. Am Ende: **312 Tests** (vorher 222), 48
+laufenden Dienste. Am Ende: **332 Tests** (vorher 222), 48
 Selbstprüfungen, **54 von 54 Mutationen gefangen**, beide Dienste mit dem
 neuen Stand neu gestartet.
 
@@ -2107,6 +2107,140 @@ Startwerten, Symbolen und Zeiträumen wiederholen."*
 
 Regression: `tests/test_werkzeuge.py` (16 Tests), drei neue Mutationen —
 **54 von 54 gefangen**.
+
+
+## G18. Drei stille Ausfälle in den Sicherungen selbst (22.08.2026)
+
+**Anlass:** letzte Gegenprüfung, diesmal nach zwei Fehlerklassen
+gesucht, die sich mechanisch finden lassen — vollständig stille
+`except`-Blöcke und verbliebene unkorrigierte t-Werte. 26 stille Blöcke
+gefunden, die meisten bewusst und dokumentiert. **Drei waren es nicht** —
+und ein vierter Fund entstand beim Prüfen selbst.
+
+### Fund 1: Das Risiko-Dach verlor Positionen — Schwere: hoch
+
+`risiko._kennzahlen` und `risiko.sektor_anteile` rechneten:
+
+```python
+abs(float(r["qty"]) * float(r.get("current_price") or 0))
+```
+
+in einem `except (TypeError, ValueError): continue`. Zwei Wege, auf
+denen eine Position **still** aus der Risikorechnung verschwand:
+
+* `current_price` ist `None` — `account.positions()` setzt das Feld
+  ausdrücklich so, wenn Alpaca keinen Kurs liefert (Handelsaussetzung).
+  `or 0` machte daraus den Wert **null**, ganz ohne Exception.
+* `qty` unlesbar — die Zeile fiel per `continue` heraus.
+
+Gemessen an drei Positionen à 30.000 $ auf 100.000 $ Konto:
+
+| | Positionswert | Exposure | Sektoranteil |
+|---|---:|---:|---:|
+| alle Werte lesbar | 90.000 $ | 90 % | 90 % |
+| ein Kurs fehlt | 60.000 $ | **60 %** | **60 %** |
+| eine Menge unlesbar | 60.000 $ | **60 %** | **60 %** |
+
+**Das Dach unterschätzte damit und ließ Käufe zu, die es sonst blockiert
+hätte** — der genaue Gegensatz zu seinem eigenen Grundsatz: *„Fällt die
+Risikoprüfung selbst aus, wird nicht gehandelt. Ein Risiko-Dach, das im
+Zweifel durchlässt, ist keines."*
+
+Besonders unangenehm: `sektor_anteile` schreibt dasselbe Prinzip eine
+Ebene höher schon auf — *„Symbole ohne Sektorangabe zählen unter
+'unbekannt' — sie verschwinden nicht stillschweigend, sonst sähe ein
+Depot ohne Sektordaten wie ein perfekt gestreutes aus."* Für die
+**Zahlen** galt es nicht.
+
+**Behoben:** `risiko.positionswert()` mit Fallback-Kette vom genauesten
+zum konservativsten Wert — `market_value` → `qty·current_price` →
+`qty·avg_entry`. Der Einstand ist eine Untergrenze, aber ein Wert. Erst
+wenn auch die Menge fehlt, ist nichts bestimmbar; dann wird die Position
+**gezählt und benannt** (`n_unbewertbar`, `unbewertbar`) statt
+übersprungen, und `pruefe_order` blockiert Neukäufe — Verkäufe bleiben
+erlaubt, eine Sperre darf nie zur Falle werden.
+
+### Fund 2: Die JSONL-Sicherung konnte still verschwinden
+
+`journal.py` beschreibt die Aufgabenteilung selbst: *„SQLite ist die
+Auswertungsschicht, JSONL die Sicherung — wäre die Datenbank je
+beschädigt, ließe sie sich daraus vollständig rekonstruieren."*
+
+`_write_raw` fing `OSError`/`ValueError` mit `pass` ab. Ein voller
+Datenträger oder eine entzogene Schreibberechtigung wäre erst
+aufgefallen, **wenn man die Sicherung braucht** — §G15 in seiner
+teuersten Form.
+
+**Behoben:** Meldung statt Schweigen, aber nur **einmal je Lauf** (eine
+Meldung je Zeile wäre Lärm, und Lärm wird überlesen — dieselbe Lehre wie
+beim Feld-Wächter §G13). Geworfen wird weiterhin nicht: Der Ausfall der
+Sicherung darf den Handel nicht stoppen.
+
+### Fund 3: Die letzte unkorrigierte t-Wert-Stelle
+
+§G12 hat die Überlappungskorrektur an fünf Stellen eingebaut —
+`statistik`, `research`, `shadow_eval`, `nachbetrachtung`,
+`10_simulate.py`. §G16 Fund 3 fand `hypotheses.py` als sechste.
+**`earnings.py` war die siebte und letzte.**
+
+Das fällt hier ins Gewicht, weil `19_faktor_tests.py` die Kennzahl über
+Horizonte von **1 bis 60 Tagen** abruft. Bei einem 60-Tage-Fenster
+teilen benachbarte Tage 59/60 ihres Renditefensters — der rohe t-Wert
+ist dort weit jenseits von „etwas zu hoch".
+
+Und der Horizont war die ganze Zeit bekannt: `19_faktor_tests.py`
+schrieb ihn **nachträglich ins Ergebnis** (`k["horizont"] = h`), statt
+ihn in die Rechnung zu geben.
+
+**Behoben:** `kennzahlen(..., horizont=)` mit Newey-West, `t_roh`
+daneben, und das Skript reicht `horizont=h` durch.
+
+### Fund 4: Der Wächter hätte an jedem Wochenende gelb geleuchtet
+
+**Gefunden durch die eigene Arbeit.** Nach dem Dienstneustart meldete der
+Health-Check GELB — an einem Samstag:
+
+```
+Baustein 'schatten.einbuchen': 6 Laeufe, aber immer dasselbe
+Ergebnis (0@2026-08-21) - es entsteht keine neue Information
+```
+
+Der letzte Handelstag war Freitag. Die vier Schattenschritte sind seit
+§G14 **per Konstruktion idempotent** — ohne neuen Handelstag *müssen* sie
+dasselbe liefern; genau dafür wurden sie umgebaut. Der Wächter hätte
+damit an jedem Wochenende und Feiertag gelb geleuchtet, also an rund
+**zwei von sieben Tagen**. Und eine Warnung, die immer leuchtet, wird
+weggeklickt (`docs/LERNTEMPO.md` §5).
+
+**Die Unterscheidung steckte längst in den Daten.** Die Signatur ist nach
+Konvention `"<ergebnis>@<datenstand>"`:
+
+| | Signaturen | Urteil |
+|---|---|---|
+| Wochenende | `0@2026-08-21`, `0@2026-08-21`, … | Ruhe, kein Befund |
+| §G14-Zustand | `19788@08-21`, `19788@08-20`, … | **es entsteht nichts** |
+
+Derselbe Datenstand heißt: Es gab nichts Neues. Ein *wandernder*
+Datenstand bei stehendem Ergebnis ist der teure Fall.
+
+**Nebenbefund — der bestehende Test bildete §G14 gar nicht ab.** Er legte
+acht Läufe mit demselben Stichtag an. Genau das ist am Wochenende der
+Normalfall; der Test hätte den echten Zustand nie von der Ruhe getrennt.
+Jetzt wandern die Stichtage.
+
+### Was diese Runde sonst geprüft und für gut befunden hat
+
+* **26 stille `except`-Blöcke** insgesamt — die übrigen 23 sind bewusst
+  und im Code begründet (Quote-Ausfall darf keine Order verhindern,
+  Heartbeat im Fehlerbehandler, Symbol nicht in Bars).
+* `costs.FeeSchedule.is_stale()` wird von `selfcheck.py:310` geprüft —
+  die Gebührensätze veralten nicht unbemerkt.
+* `ratelimit`: Keine Quelle führt zwei zeitbasierte Limits gleichzeitig,
+  der geteilte Ereigniszähler ist damit unkritisch.
+
+Regression: `tests/test_risiko_bewertbarkeit.py` (17 Tests) und vier
+neue Fälle in `tests/test_nutzung.py`, fünf neue Mutationen —
+**59 von 59 gefangen**.
 
 
 ## H. Betrieb — was sich bewährt hat

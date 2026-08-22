@@ -360,11 +360,11 @@ MUTATIONEN = [
     Mutation(
         "Waechter erkennt 'immer dasselbe' nicht mehr",
         "src/alpaca_bot/nutzung.py",
-        "            if (not e.darf_gleich_bleiben and len(zeilen) >= 5\n                    and len(signaturen) == 1):",
+        "            if not e.darf_gleich_bleiben and len(zeilen) >= 5 and gleich:",
         "            if False:",
         "test_nutzung",
-        "Genau der Zustand aus §G14: 19.788 Verifizierungen je Stunde, "
-        "Runde um Runde identisch - es lief, aber es entstand nichts.",
+        "Genau der Zustand aus §G14: dieselbe Zahl ueber mehrere "
+        "Datenstaende hinweg - es lief, aber es entstand nichts.",
     ),
     Mutation(
         "Waechter erkennt 'nie gelaufen' nicht mehr",
@@ -586,6 +586,58 @@ MUTATIONEN = [
         "test_werkzeuge",
         "Ohne Sperrzone lernt das Modell, den Ausbruch an seinen ersten "
         "Tagen zu erkennen - trivial, und zum Handeln zu spaet.",
+    ),
+
+    # --- Risiko-Dach verliert keine Position (§G18) -----------------------
+    Mutation(
+        "Position ohne Kurs zaehlt wieder mit null",
+        "src/alpaca_bot/risiko.py",
+        "    mv = _zahl(\"market_value\")\n    if mv is not None:\n        return abs(mv)",
+        "    mv = None\n    if mv is not None:\n        return abs(mv)",
+        "test_risiko_bewertbarkeit",
+        "Gemessen: Exposure 90 % statt 60 %, Sektoranteil 90 % statt 60 %. "
+        "Das Dach unterschaetzt und laesst Kaeufe zu, die es blockieren "
+        "muesste - der Gegensatz zu 'im Zweifel wird nicht gehandelt'.",
+    ),
+    Mutation(
+        "Unbewertbare Position blockiert keinen Neukauf mehr",
+        "src/alpaca_bot/risiko.py",
+        "    if k.get(\"n_unbewertbar\"):",
+        "    if False:",
+        "test_risiko_bewertbarkeit",
+        "Alle Grenzen rechnen mit `positionswert`. Fehlt der fuer eine "
+        "Position, ist JEDE dieser Zahlen zu niedrig - weiterzukaufen "
+        "hiesse, auf einer wissentlich unvollstaendigen Rechnung zu handeln.",
+    ),
+    Mutation(
+        "Rohprotokoll faellt wieder still aus",
+        "src/alpaca_bot/journal.py",
+        "            if not self._raw_defekt:",
+        "            if False:",
+        "test_risiko_bewertbarkeit",
+        "JSONL ist laut Modul-Docstring die SICHERUNG der Datenbank. Ein "
+        "stiller Ausfall faellt erst auf, wenn man sie braucht.",
+    ),
+    Mutation(
+        "earnings rechnet wieder ohne Ueberlappungskorrektur",
+        "src/alpaca_bot/earnings.py",
+        "    if horizont > 1:\n        t_korr, aufbl = statistik.newey_west_t(ic.to_numpy(), lag=horizont - 1)",
+        "    if False:\n        t_korr, aufbl = statistik.newey_west_t(ic.to_numpy(), lag=horizont - 1)",
+        "test_risiko_bewertbarkeit",
+        "Die letzte Stelle, die §G12 uebersehen hatte. 19_faktor_tests.py "
+        "ruft Horizonte bis 60 Tage ab - dort teilen benachbarte Tage "
+        "59/60 ihres Renditefensters.",
+    ),
+    Mutation(
+        "Waechter meldet Ruhe am Wochenende wieder als Stillstand",
+        "src/alpaca_bot/nutzung.py",
+        "                gleich = len(staende) > 1 and len(ergebnisse_sig) == 1",
+        "                gleich = len(signaturen) == 1",
+        "test_nutzung",
+        "Die vier Schattenschritte sind seit §G14 idempotent - ohne neuen "
+        "Handelstag MUESSEN sie dasselbe liefern. Ohne die Trennung nach "
+        "Datenstand leuchtet der Health-Check an jedem Wochenende gelb, "
+        "und eine Warnung, die immer leuchtet, wird weggeklickt.",
     ),
 ]
 
