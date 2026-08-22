@@ -1036,6 +1036,125 @@ Duplikat von `groupby(sort=True)`.
 
 ---
 
+## G13. Datenklarheit: stumme Felder und vermischte Quellen (22.08.2026)
+
+**Anlass:** die Frage „sind alle Auswertungen legitim?". Drei Funde, alle
+aus derselben Familie — Zahlen, die plausibel aussehen und falsch sind.
+
+### Fund 1: 98,4 % des Live-Journals sind gar nicht live
+
+`decisions` im Live-Journal, nach Quelle aufgeschlüsselt:
+
+| `runs.script` | `strategy` | Zeilen | Zeitraum |
+|---|---|---:|---|
+| `live_trade` | `engine` | **304** | 28.07.–21.08.2026 |
+| `simulate` | `mehrfaktor` | **18.118** | **2021-07-08**–20.08.2026 |
+| `stop_intraday` | `stop_intraday` | 3 | ab 15.08. |
+
+Simulationsläufe schreiben in dasselbe Journal wie der Bot — mit
+**rückdatierten Zeitstempeln bis 2021**. Vier Läufe erzeugten 18.118
+Zeilen, die von echten Entscheidungen nur am Feld `strategy` zu
+unterscheiden sind.
+
+**Die Trennung existierte** (`decision_quality(script=)`), und ihr
+Docstring benannte sogar genau diese Gefahr. **Von vier Aufrufern nutzte
+sie genau einer:**
+
+| Aufrufer | Filter | Folge |
+|---|---|---|
+| `scripts/13_tagesbericht.py` | `script="live_trade"` | richtig |
+| `scripts/07_journal_report.py` | — | beschrieb den Backtest |
+| `src/alpaca_bot/selfcheck.py` | — | beschrieb den Backtest |
+
+Zwei Berichte nannten also die Entscheidungsqualität einer Simulation die
+des Bots. Nebenwirkung: Die Integritätsprüfung mahnte dauerhaft „17.100
+Entscheidungen ohne bewertetes Ergebnis" — fast alles Simulationszeilen,
+die nie eines brauchen. Eine Warnung, die immer leuchtet, wird
+weggeklickt.
+
+**Behoben:** `decision_quality(script=)` hat jetzt die Vorgabe
+`"live_trade"`. Die gefährliche Richtung (`script=None`) verlangt eine
+bewusste Angabe. `integrity_check` zählt nur noch Live-Zeilen — aus
+17.100 wurden **62**.
+
+### Fund 2: `bars_held` ist in 64 % der Trades falsch
+
+| | Trades | `bars_held` | echte Handelstage |
+|---|---:|---|---|
+| Ausstieg **vor** 17.08. | **36** | immer **0** | Median 5 (2–5) |
+| Ausstieg **ab** 17.08. | 20 | 2–5 | **Abweichung 0** |
+
+Der am 15.08. behobene Fehler (§G) wirkt korrekt für neue Trades — aber
+die 36 alten Zeilen behielten ihre falsche Null. Der Median der
+Haltedauer lag dadurch bei **0 statt 5**.
+
+**Eine falsche Zahl ist hier schlimmer als eine fehlende.** Eine Null
+sieht wie eine Messung aus und geht in jeden Mittelwert ein. Ein `NULL`
+wäre aufgefallen.
+
+Die Rekonstruktion ist belastbar, weil sie an echten Daten geprüft ist:
+Für die 20 korrekten Trades reproduziert `np.busday_count(einstieg,
+ausstieg)` den gemessenen Wert mit **Abweichung 0**.
+
+**Werkzeug:** `scripts/25_bars_held_reparieren.py` — Trockenlauf als
+Vorgabe, legt eine Sicherung an und markiert jede berichtigte Zeile in
+`bars_held_quelle` als `rekonstruiert`. Ohne diesen Vermerk wäre später
+nicht mehr unterscheidbar, was Messung und was Nachtrag ist (§G11).
+
+### Fund 3: Der Auswertungskontext hängt nur an `buy`
+
+`regime_markt`, `regime_vola`, `sektor` und `liq_dezil` werden seit dem
+20.08. erfasst — aber nur für Kaufentscheidungen:
+
+| Aktion | Anteil der letzten 60 | Kontext |
+|---|---:|---|
+| `topup` | 41 | **nein** |
+| `buy` | 11 | ja |
+| `sell` | 8 | **nein** |
+
+**`topup` ist die Mehrheit der Kapitalzuteilung** (110 von 304 Live-
+Entscheidungen, bis zu 9 Nachkäufe je Symbol laut §G2). Eine Auswertung
+der Sektorkonzentration übersieht damit den größeren Teil. **Noch nicht
+behoben** — reine Protokollerweiterung, aber sie erfordert einen
+Dienstneustart.
+
+### Der Wächter, der daraus eine Routine macht
+
+Alle drei Funde gehören zu **einem** Muster: ein Feld ist leer, konstant
+oder falsch, nichts stürzt ab, und es fällt nur auf, wenn jemand zufällig
+gezielt nachsieht. So verliefen `bars_held`, `after_10d`, `code_version`
+(66 % der Daten), der Bar-Cache — und jetzt diese drei.
+
+`data_integrity` prüft deshalb ab sofort automatisch:
+
+| Prüfung | fängt |
+|---|---|
+| `check_stumme_felder` | ein Feld **hört auf**, sich zu füllen |
+| `check_bars_held_stimmig` | Werte widersprechen den Datumsangaben |
+| `check_lifecycle_felder` | `after_*` bleiben leer, obwohl fällig |
+| `check_codeversion_zuordnung` | Läufe ohne Versionszuordnung |
+
+**Zwei Fehlversuche beim Bau — beide lehrreich:**
+
+1. Der erste Entwurf prüfte die **Füllquote über die Historie** und
+   schlug sofort bei vier Feldern an, die zwei Tage zuvor eingeführt
+   worden waren. Er hätte ~30 Tage gelb geleuchtet, ohne dass etwas
+   kaputt war. Geprüft wird jetzt die gefährliche Richtung: hört ein
+   Feld **auf**? Ein kleines Fenster (20 Zeilen) stellt die richtige
+   Frage; eine Einführung ist binnen eines Tages wieder sauber.
+2. Der zweite Entwurf warf **alle Aktionsarten in einen Topf** und
+   meldete einen Ausfall bei `buy`, den die vielen `topup`-Zeilen nur
+   vortäuschten. Ein Topf aus ungleichen Dingen erzeugt Fehlalarme *und*
+   verdeckt echte Ausfälle.
+
+Beide Fehlversuche stehen als Testfall in der Suite — sie sind die
+eigentliche Schwierigkeit an dieser Art Wächter.
+
+Regression: `tests/test_datenklarheit.py` (11 Tests). Vier neue
+Mutationen, **28 von 28 gefangen**.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

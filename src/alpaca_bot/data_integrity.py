@@ -332,6 +332,291 @@ def check_lifecycle_coverage(report: IntegrityReport) -> None:
         )
 
 
+# --------------------------------------------------------------------------
+# Stumme Felder
+# --------------------------------------------------------------------------
+# Ein Feld, das angelegt wird und dann immer leer oder immer gleich bleibt,
+# meldet sich nie von selbst. Es sieht in jeder Tabelle plausibel aus - und
+# verfaelscht jede Auswertung, die nach ihm gruppiert.
+#
+# Die Chronik dieses Projekts besteht ueberwiegend aus genau diesem Fehler:
+#
+#     bars_held        in JEDEM Trade 0            (15.08.)
+#     after_10d        nie gefuellt                (15.08.)
+#     code_version     zwei Monate 'unbekannt'     (15.08., 66 % der Daten)
+#     regime_breite    live nie gefuellt           (22.08., dieser Check)
+#     Bar-Cache        nie getroffen               (21.08.)
+#
+# Keiner davon hat einen Fehler ausgeloest. Alle wurden nur gefunden, weil
+# jemand zufaellig gezielt nachsah. Dieser Check macht daraus eine Routine.
+
+SCHWEIGE_TOLERANZ = 0.80
+"""Ab welchem Anteil eines einzigen Wertes ein Feld als 'stumm' gilt."""
+
+
+def _pflichtfelder_aus_gruenden() -> dict[str, str]:
+    """Felder in `decisions.reasons`, die eine Auswertungsachse tragen.
+
+    Der Wert ist die Begruendung - sie steht im Befundtext, damit beim
+    Lesen sofort klar ist, WAS ohne dieses Feld nicht mehr beantwortbar
+    ist. Ein Befund ohne diese Angabe wuerde als Formalie abgetan.
+    """
+    return {
+        "regime_markt": "in welcher Marktlage die Strategie traegt",
+        "regime_vola": "ob sie von der Marktunruhe abhaengt",
+        "sektor": "ob 15 Positionen in Wahrheit eine Wette sind",
+        "liq_dezil": "ob der Vorsprung nur bei illiquiden Werten entsteht",
+    }
+
+
+def check_stumme_felder(j: Journal, report: IntegrityReport,
+                        fenster: int = 400, juengste: int = 20) -> None:
+    """Felder, die gefuellt sein sollten - und die aufgehoert haben, es zu sein.
+
+    **Warum nicht schlicht die Fuellquote?** Ein erster Entwurf am
+    22.08.2026 meldete genau das - und schlug sofort bei vier Feldern an,
+    die zwei Tage zuvor eingefuehrt worden waren. Ueber die Historie
+    gerechnet waren sie zwangslaeufig zu 93 % leer. Der Check haette
+    ~30 Tage lang gelb geleuchtet, ohne dass irgendetwas kaputt war.
+    Eine Warnung, die immer leuchtet, wird weggeklickt - und dann faellt
+    auch die echte nicht mehr auf.
+
+    Geprueft wird deshalb die gefaehrliche Richtung: ein Feld, das
+    frueher Werte hatte und in den JUENGSTEN Entscheidungen keine mehr.
+    Das ist die Signatur jedes stummen Ausfalls dieses Projekts - der
+    Code lief weiter, nur das Feld blieb leer.
+
+    **`juengste` ist bewusst klein (20).** Ein grosses Fenster reicht ueber
+    den Einfuehrungstag eines Feldes zurueck und meldet die davorliegenden
+    Leerzeilen als Ausfall - der zweite Fehlalarm desselben Vormittags.
+    Ein kleines Fenster stellt die richtige Frage: "sind die ALLERNEUESTEN
+    Entscheidungen vollstaendig?" Faellt ein Feld aus, ist es das binnen
+    eines Tages; wird eines eingefuehrt, ist das Fenster binnen eines Tages
+    wieder sauber.
+    """
+    import json as _json
+
+    report.checks.append("Auswertungsfelder hoeren nicht auf, sich zu fuellen")
+
+    # NUR Live-Entscheidungen. Simulationslaeufe schreiben in dieselbe
+    # Tabelle und fuehren die Kontextfelder nicht - ohne diesen Filter
+    # meldete der Check am 22.08.2026 einen Ausfall, wo in Wahrheit
+    # Backtest-Zeilen die Stichprobe fuellten (98,4 % der Tabelle).
+    with sqlite3.connect(JOURNAL_DB) as c:
+        d = pd.read_sql(
+            "SELECT d.action, d.reasons FROM decisions d"
+            " JOIN runs r ON d.run_id = r.run_id"
+            " WHERE r.script = 'live_trade'"
+            " ORDER BY d.ts DESC LIMIT ?",
+            c, params=(fenster,))
+    if len(d) < juengste:
+        return
+
+    # Je AKTIONSART getrennt. Am 22.08.2026 verglich ein erster Entwurf
+    # alle Entscheidungen in einem Topf und meldete "Feld hoert auf" -
+    # in Wahrheit haengt der Kontext nur an `buy`, und `topup` war schlicht
+    # die Mehrheit der Zeilen. Ein Topf aus ungleichen Dingen erzeugt
+    # Fehlalarme UND verdeckt echte Ausfaelle: waere `buy` tatsaechlich
+    # ausgefallen, haetten die vielen `topup`-Zeilen es verwaessert.
+    d = d[d["action"].notna()]
+
+    def hol(roh, schluessel):
+        try:
+            return _json.loads(roh).get(schluessel)
+        except Exception:  # noqa: BLE001 - defektes JSON ist hier kein Absturz
+            return None
+
+    for feld, wofuer in _pflichtfelder_aus_gruenden().items():
+        d = d.assign(_w=d["reasons"].map(lambda r, f=feld: hol(r, f)))
+        traeger = [a for a, g in d.groupby("action") if g["_w"].notna().any()]
+        if not traeger:
+            report.stats[f"Feld {feld}"] = "nie erhoben"
+            continue
+
+        # Nur Aktionsarten pruefen, die das Feld ueberhaupt je getragen
+        # haben. Dass `topup` keinen Sektor mitschreibt, ist eine eigene
+        # Luecke (unten als `check_kontext_abdeckung`) - aber kein Ausfall
+        # eines Feldes, das dort nie erhoben wurde.
+        for aktion in traeger:
+            g = d[d["action"] == aktion]
+            n = min(juengste, len(g))
+            if n < juengste:
+                continue  # zu wenig Verlauf fuer eine Aussage
+            frisch = g["_w"].head(n).dropna()
+            quote = len(frisch) / n
+            report.stats[f"Feld {feld} ({aktion})"] = f"{quote:.0%} der juengsten {n}"
+
+            if quote < 0.9:
+                report.add(
+                    "fehler", f"Feld '{feld}' wird bei '{aktion}' nicht mehr gefuellt",
+                    f"Nur {len(frisch)} von {n} der ALLERJUENGSTEN "
+                    f"'{aktion}'-Entscheidungen tragen einen Wert, obwohl das "
+                    f"Feld dort frueher gefuellt wurde. Ein Feld, das aufhoert "
+                    f"- genau so verliefen `bars_held`, `after_10d` und "
+                    f"`code_version`. Ohne dieses Feld ist nicht mehr "
+                    f"beantwortbar, {wofuer}.",
+                )
+                continue
+            if frisch.nunique() > 1 or aktion != traeger[0]:
+                continue
+            # Kein Fehler: ein Bullenmarkt liefert nur 'bullisch'. Aber es
+            # heisst, dass diese Achse derzeit NICHTS trennt - und das muss
+            # dastehen, bevor jemand danach gruppiert und sich wundert.
+            report.add(
+                "auffaellig", f"Feld '{feld}' ist derzeit konstant",
+                f"Alle {len(frisch)} juengsten Werte sind "
+                f"'{frisch.iloc[0]}'. Das kann richtig sein (eine "
+                f"Marktphase liefert nur einen Wert), taugt aber nicht als "
+                f"Auswertungsachse - ein Vergleich darueber haette nur "
+                f"eine Gruppe.",
+            )
+
+
+def check_lifecycle_felder(report: IntegrityReport) -> None:
+    """`bars_held`, `mae/mfe` und die Nachlauf-Fenster - stumm oder gefuellt?
+
+    Drei der vier hier geprueften Felder waren im August 2026 nachweislich
+    kaputt. Sie sind die Grundlage des Lernberichts und der Frage, ob der
+    Zeitausstieg zu frueh greift.
+    """
+    from .lifecycle import Lifecycle
+
+    report.checks.append("Lebenslauf-Felder sind gefuellt und variieren")
+    t = Lifecycle().table()
+    if t.empty:
+        return
+
+    # Nur abgeschlossene Trades - ein offener hat noch keinen Nachlauf.
+    fertig = t[t["exit_date"].notna()]
+    if fertig.empty:
+        return
+
+    if "bars_held" in fertig.columns:
+        bh = pd.to_numeric(fertig["bars_held"], errors="coerce").dropna()
+        report.stats["bars_held Median"] = (float(bh.median())
+                                            if len(bh) else "leer")
+        if len(bh) and (bh == 0).all():
+            report.add(
+                "fehler", "bars_held ist in jedem Trade 0",
+                f"Alle {len(bh)} abgeschlossenen Trades melden Haltedauer 0. "
+                "Genau dieser Fehler bestand bis zum 15.08.2026 (§G) - er "
+                "macht jede Aussage ueber Haltedauer und Zeitausstieg wertlos.",
+            )
+
+    # after_1d/5d/10d: das Fenster braucht Zeit. Nur Trades bewerten, die
+    # alt genug sind - sonst meldet der Check die normale Wartezeit als Fehler.
+    exit_dt = pd.to_datetime(fertig["exit_date"], format="mixed", utc=True,
+                             errors="coerce")
+    jetzt = pd.Timestamp.now(tz="UTC")
+    for spalte, tage in (("after_1d", 3), ("after_5d", 9), ("after_10d", 16)):
+        if spalte not in fertig.columns:
+            continue
+        reif = fertig[exit_dt < jetzt - pd.Timedelta(days=tage)]
+        if len(reif) < 5:
+            continue
+        gefuellt = pd.to_numeric(reif[spalte], errors="coerce").notna().sum()
+        anteil = gefuellt / len(reif)
+        report.stats[f"{spalte} gefuellt"] = f"{anteil:.0%} ({len(reif)} reif)"
+        if anteil < 0.5:
+            report.add(
+                "auffaellig", f"'{spalte}' bleibt leer",
+                f"Nur {gefuellt} von {len(reif)} faelligen Trades haben einen "
+                f"Wert. `after_10d` war aus genau diesem Grund bis zum "
+                f"15.08.2026 nie gefuellt - `pending_analysis` fragte nur "
+                f"nach `after_5d IS NULL`.",
+            )
+
+
+def check_bars_held_stimmig(report: IntegrityReport) -> None:
+    """Widerspricht `bars_held` den Ein-/Ausstiegsdaten?
+
+    Der schaerfere Nachfolger der reinen "alles null"-Pruefung. Ein Feld
+    muss nicht komplett kaputt sein, um zu luegen - es reicht, wenn ein
+    Teil der Zeilen aus der Zeit vor einer Reparatur stammt.
+
+    Gemessen am 22.08.2026: 36 von 56 abgeschlossenen Trades trugen
+    `bars_held = 0`, obwohl ihre Datumsangaben 2 bis 5 Handelstage
+    hergeben - allesamt Ausstiege VOR dem 17.08., also Rueckstand des am
+    15.08. behobenen Fehlers (§G). Die 20 Trades danach stimmen exakt
+    mit dem Datum ueberein (groesste Abweichung: 0 Tage).
+
+    Die Null ist dabei gefaehrlicher als ein fehlender Wert: Sie sieht
+    wie eine Messung aus und geht in jeden Mittelwert ein. Der Median
+    der Haltedauer lag dadurch bei 0 statt bei 5.
+    """
+    import numpy as np
+
+    from .lifecycle import Lifecycle
+
+    report.checks.append("bars_held deckt sich mit den Ein-/Ausstiegsdaten")
+    t = Lifecycle().table()
+    if t.empty or "bars_held" not in t.columns:
+        return
+    f = t[t["exit_date"].notna()].copy()
+    if f.empty:
+        return
+
+    f["_bh"] = pd.to_numeric(f["bars_held"], errors="coerce")
+    ein = pd.to_datetime(f["entry_date"], format="mixed", utc=True, errors="coerce")
+    aus = pd.to_datetime(f["exit_date"], format="mixed", utc=True, errors="coerce")
+    gueltig = ein.notna() & aus.notna() & f["_bh"].notna()
+    if not gueltig.any():
+        return
+
+    f = f[gueltig]
+    erwartet = pd.Series(
+        [np.busday_count(a.date(), b.date())
+         for a, b in zip(ein[gueltig], aus[gueltig])], index=f.index)
+    # Ein Tag Toleranz: Handelsfeiertage kennt `busday_count` nicht.
+    abweichung = (f["_bh"] - erwartet).abs()
+    falsch = f[abweichung > 1]
+
+    report.stats["bars_held stimmig"] = f"{len(f) - len(falsch)}/{len(f)}"
+    if len(falsch):
+        anteil = len(falsch) / len(f)
+        report.add(
+            "fehler", "bars_held widerspricht den Datumsangaben",
+            f"{len(falsch)} von {len(f)} abgeschlossenen Trades "
+            f"({anteil:.0%}). Beispiel: {falsch.iloc[0]['symbol']} meldet "
+            f"{falsch.iloc[0]['_bh']:.0f} Tage, die Daten ergeben "
+            f"{erwartet.loc[falsch.index[0]]:.0f}. Eine falsche Zahl ist "
+            "hier schlimmer als eine fehlende - sie geht in jeden "
+            "Mittelwert ein, ohne aufzufallen (§G, 15.08.2026).",
+        )
+
+
+def check_codeversion_zuordnung(j: Journal, report: IntegrityReport,
+                                letzte_n: int = 200) -> None:
+    """Laesst sich noch sagen, welcher Codestand die Daten erzeugt hat?
+
+    `shadow.code_version()` lieferte nach dem Umzug der Datenbanken zwei
+    Monate lang stumm 'unbekannt' - fuer 66 % aller Vorhersagen (§G5).
+    Ein Versionsvergleich ist auf solchen Daten unmoeglich.
+    """
+    report.checks.append("Laeufe tragen eine erkennbare Codeversion")
+    with sqlite3.connect(JOURNAL_DB) as c:
+        try:
+            r = pd.read_sql(
+                "SELECT code_version FROM runs ORDER BY started_at DESC LIMIT ?",
+                c, params=(letzte_n,))
+        except Exception:  # noqa: BLE001 - alte Journale ohne die Spalte
+            return
+    if r.empty:
+        return
+
+    unbekannt = r["code_version"].isna() | r["code_version"].isin(
+        ["", "unbekannt", "unknown"])
+    anteil = float(unbekannt.mean())
+    report.stats["Laeufe ohne Codeversion"] = f"{anteil:.0%}"
+    if anteil > 0.2:
+        report.add(
+            "auffaellig", "Codeversion fehlt haeufig",
+            f"{anteil:.0%} der letzten {len(r)} Laeufe ohne Versionszuordnung. "
+            "Fuer diese Daten laesst sich nicht mehr sagen, welcher Codestand "
+            "sie erzeugt hat (§G5).",
+        )
+
+
 def run_all() -> IntegrityReport:
     """Fuehrt alle Datenintegritaets-Pruefungen aus."""
     report = IntegrityReport()
@@ -345,6 +630,10 @@ def run_all() -> IntegrityReport:
     check_state_vs_broker(report)
     check_extreme_slippage(j, report)
     check_lifecycle_coverage(report)
+    check_stumme_felder(j, report)
+    check_lifecycle_felder(report)
+    check_bars_held_stimmig(report)
+    check_codeversion_zuordnung(j, report)
 
     # journal.py's eigene Vollstaendigkeitspruefung mit einbeziehen
     report.checks.append("Journal-interne Konsistenz (journal.integrity_check)")

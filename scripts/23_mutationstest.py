@@ -269,6 +269,44 @@ MUTATIONEN = [
         "Ohne den auslaufenden Kern ist die geschaetzte Varianz nicht mehr "
         "garantiert positiv - der Schaetzer kippt bei negativer Autokorrelation.",
     ),
+
+    # --- Datenklarheit: stumme Felder und vermischte Quellen (§G13) --------
+    Mutation(
+        "decision_quality mischt Simulation wieder mit ein",
+        "src/alpaca_bot/journal.py",
+        'script: str | None = "live_trade") -> pd.DataFrame:',
+        "script: str | None = None) -> pd.DataFrame:",
+        "test_datenklarheit",
+        "Im Live-Journal stehen 304 echte gegen 18.118 Simulationszeilen. "
+        "Ohne die Vorgabe beschreibt die Kennzahl den Backtest.",
+    ),
+    Mutation(
+        "Feld-Waechter prueft wieder die ganze Historie",
+        "src/alpaca_bot/data_integrity.py",
+        "                        fenster: int = 400, juengste: int = 20) -> None:",
+        "                        fenster: int = 400, juengste: int = 400) -> None:",
+        "test_datenklarheit",
+        "Ein grosses Fenster reicht ueber den Einfuehrungstag eines Feldes "
+        "zurueck und meldet die Einfuehrung als Ausfall - Dauergelb.",
+    ),
+    Mutation(
+        "Feld-Waechter zaehlt Simulationszeilen mit",
+        "src/alpaca_bot/data_integrity.py",
+        "            \" WHERE r.script = 'live_trade'\"\n            \" ORDER BY d.ts DESC LIMIT ?\",",
+        "            \" ORDER BY d.ts DESC LIMIT ?\",",
+        "test_datenklarheit",
+        "Simulationslaeufe fuehren die Kontextfelder nicht und stellten "
+        "98,4 % der Tabelle - sie melden einen Ausfall, den es nicht gibt.",
+    ),
+    Mutation(
+        "bars_held wird nicht gegen die Daten geprueft",
+        "src/alpaca_bot/data_integrity.py",
+        "    falsch = f[abweichung > 1]",
+        "    falsch = f[abweichung > 9999]",
+        "test_datenklarheit",
+        "36 von 56 Trades trugen eine falsche 0. Eine falsche Zahl ist "
+        "schlimmer als eine fehlende - sie geht in jeden Mittelwert ein.",
+    ),
 ]
 
 

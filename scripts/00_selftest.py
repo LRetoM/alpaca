@@ -270,8 +270,15 @@ def main() -> int:
     n_out = j.evaluate_outcomes(make_price_lookup(bars), horizons=(1, 5))
     check("Ergebnisse werden Entscheidungen zugeordnet", n_out > 0,
           f"{n_out} Bewertungen")
+    # `script` ausdruecklich mitgeben: Seit dem 22.08.2026 liefert
+    # `decision_quality` per Vorgabe NUR den Live-Bot (§G13). Dass dieser
+    # Lauf hier unter "selbsttest" laeuft und ohne das Argument leer
+    # zurueckkaeme, ist genau die gewollte Wirkung - die Zeile darunter
+    # prueft beide Richtungen.
     check("Entscheidungsqualitaet je Begruendung auswertbar",
-          not j.decision_quality(5).empty)
+          not j.decision_quality(5, script="selbsttest").empty)
+    check("Fremde Laeufe bleiben aus der Auswertung",
+          j.decision_quality(5).empty and j.decision_quality(5, script=None).shape[0] > 0)
     check("Slippage wird gemessen", not j.slippage_report().empty,
           f"{j.slippage_report()['mittel'].iloc[0]:.1f} bps")
     check("Integritaetspruefung meldet keine Luecke", len(j.integrity_check()) == 0)

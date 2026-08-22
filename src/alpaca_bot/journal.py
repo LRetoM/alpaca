@@ -286,12 +286,32 @@ class Journal:
         return written
 
     def decision_quality(self, horizon: int = 5,
-                         script: str | None = None) -> pd.DataFrame:
+                         script: str | None = "live_trade") -> pd.DataFrame:
         """Welche Begruendung hat sich tatsaechlich bewaehrt?
 
         Die wichtigste Auswertung im ganzen System. Sie beantwortet nicht
         "hat der Bot Geld verdient", sondern "welcher Teil seiner Logik
         war richtig" - und nur das laesst sich gezielt verbessern.
+
+        **`script` ist per Vorgabe `"live_trade"`** - also nur der echte
+        Bot. Bis zum 22.08.2026 war die Vorgabe `None` (alles), und die
+        Trennung musste jeder Aufrufer selbst mitgeben. Von vier
+        Aufrufern tat das genau einer:
+
+            scripts/13_tagesbericht.py   script="live_trade"   richtig
+            scripts/07_journal_report.py  -                    gemischt
+            src/alpaca_bot/selfcheck.py   -                    gemischt
+
+        Im Live-Journal standen zu dem Zeitpunkt 304 echte
+        Entscheidungen und 18.118 aus Simulationslaeufen, teils mit
+        Zeitstempeln bis 2021 zurueck. **98,4 % der Zeilen waren
+        Simulation** - die beiden ungefilterten Berichte beschrieben
+        damit praktisch ausschliesslich den Backtest und nannten es die
+        Entscheidungsqualitaet des Bots.
+
+        Die gefaehrliche Richtung braucht deshalb jetzt eine bewusste
+        Angabe: `script=None` liefert weiterhin alles, aber wer es
+        schreibt, hat es gewollt.
         """
         # `script` trennt Live-Betrieb von Simulation. Ohne diese Trennung
         # mischt die Auswertung tausende Backtest-Entscheidungen mit den
@@ -437,9 +457,17 @@ class Journal:
             ).fetchone()[0]
             if n_failed:
                 problems.append(f"{n_failed} Lauf/Laeufe mit Fehler beendet.")
+            # Nur LIVE-Entscheidungen. Simulationslaeufe schreiben
+            # zehntausende Zeilen in dieselbe Tabelle; sie brauchen keine
+            # `outcomes` und wuerden diese Warnung dauerhaft leuchten
+            # lassen (gemessen 22.08.2026: 17.100 davon 18.118 aus
+            # Simulationen). Eine Warnung, die immer leuchtet, wird
+            # weggeklickt - und dann faellt die echte nicht mehr auf.
             n_no_outcome = c.execute(
-                "SELECT COUNT(*) FROM decisions WHERE decision_id NOT IN"
-                " (SELECT decision_id FROM outcomes)"
+                "SELECT COUNT(*) FROM decisions d"
+                " JOIN runs r ON d.run_id = r.run_id"
+                " WHERE r.script = 'live_trade'"
+                "   AND d.decision_id NOT IN (SELECT decision_id FROM outcomes)"
             ).fetchone()[0]
             if n_no_outcome:
                 problems.append(
