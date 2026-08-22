@@ -98,7 +98,12 @@ def main() -> int:
     print("\n" + "=" * 78)
     print("  SCHRITT 3: FAKTOREN MESSEN")
     print("=" * 78)
-    results = research.measure_factors(bars, horizons=tuple(args.horizons))
+    # `mit_panels`: `select_factors` braucht die Faktorwerte fuer den
+    # Korrelationsfilter. Ohne sie waehlt es die Top-N nach t-Wert und
+    # meldet, dass nicht gefiltert wurde (§G16) - fuenf korrelierte
+    # Faktoren sind aber nicht fuenfmal so viel Signal (BEFUNDE §A).
+    results, panels = research.measure_factors(
+        bars, horizons=tuple(args.horizons), mit_panels=True)
     if results.empty:
         print("  Keine auswertbaren Ergebnisse.")
         return 1
@@ -119,7 +124,8 @@ def main() -> int:
     results = results.assign(_t=t_korr)
 
     for h in args.horizons:
-        chosen = research.select_factors(results, horizon=h, min_t=3.0)
+        chosen = research.select_factors(results, horizon=h, min_t=3.0,
+                                         factor_data=panels)
         sub = results[(results["horizon"] == h) & (results["_t"] >= 3.0)]
         inverted = sub[sub["ic_mean"] < 0]["factor"].tolist()
         print(f"\n  Horizont {h} Tage:")
@@ -152,7 +158,9 @@ def main() -> int:
     # Messlauf, den niemand wiederholen konnte, ohne die Funktion von Hand
     # zu rufen. Genau die Fehlerklasse aus §G15 - gebaut, laeuft nie.
     kern = sorted({f for h in args.horizons
-                   for f in research.select_factors(results, horizon=h, min_t=3.0)})
+                   for f in research.select_factors(results, horizon=h,
+                                                    min_t=3.0,
+                                                    factor_data=panels)})
     if kern:
         print("\n" + "=" * 78)
         print("  SCHRITT 5: HAELT DAS VORZEICHEN UEBER DIE JAHRE?")

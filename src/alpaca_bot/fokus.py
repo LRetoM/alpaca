@@ -30,8 +30,11 @@ sind beide gemessen:
     quadratisch von der Schwelle abhaengt, verteuert jede unbedachte
     Anmeldung *jede laufende Messung*.
   * **Die Breite.** `IR = IC * sqrt(BR)`: Mehr Symbole je Tag heben den
-    Informationsgehalt eines Tages. Das Universum haette 2.189 Symbole
-    ueber 1 Mio. $/Tag, der Bot handelt 1.200 (BEFUNDE §H).
+    Informationsgehalt eines Tages. Das Universum umfasst mehr Symbole,
+    als der Bot handelt - beide Zahlen liest `_breite()` aus ihren
+    Quellen (`universum.csv` und die Voreinstellung von `12_daemon.py`)
+    statt sie hier abzuschreiben. Genau daran ist die frueher hier
+    stehende Zahl gedriftet: 2.189 gegen tatsaechlich 2.168 (§G16).
 
 **Was dieses Modul nicht kann.** Es sagt, wann eine Frage entscheidbar
 ist - nicht, ob die Antwort gefaellt. Und es rechnet mit dem *bisher

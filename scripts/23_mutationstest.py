@@ -523,6 +523,39 @@ MUTATIONEN = [
         "kumulierte Quote MUSS wachsen und die Schwelle zwangslaeufig "
         "reissen. Derselbe Fehlversuch wie bei check_stumme_felder (§G13).",
     ),
+    Mutation(
+        "Tagesbericht mittelt die Slippage wieder ueber Symbole",
+        "src/alpaca_bot/costs.py",
+        "        actual, n, ebene = float(w.median()), len(w), \"Orders\"",
+        "        actual, n, ebene = float(journal_df[\"mittel\"].mean()), len(w), \"Orders\"",
+        "test_kostenkontrolle",
+        "BETRIEBSPLAN §5.2 nennt Abschnitt [3] des Tagesberichts als das, "
+        "was alle 1-2 Wochen zu lesen ist - mit der Erwartung 'Median'. "
+        "Der Mittelwert meldete dort '83,6 bps besser als angenommen', "
+        "wo der Median +0,0 sagt.",
+    ),
+
+    # --- Faktorauswahl: das Versprechen der Signatur (§G16) ---------------
+    Mutation(
+        "Korrelationsfilter faellt wieder aus der Faktorauswahl",
+        "src/alpaca_bot/research.py",
+        "        if redundant is None:\n            gewaehlt.append(kandidat)",
+        "        if True:\n            gewaehlt.append(kandidat)",
+        "test_faktorauswahl",
+        "IR = IC*sqrt(BR) setzt UNABHAENGIGE Signale voraus. Fuenf "
+        "korrelierte Faktoren liefern nicht die Breite von fuenf - das "
+        "Projekt schreibt die Redundanz seiner Bausteine an drei Stellen "
+        "auf, gefiltert wurde nie.",
+    ),
+    Mutation(
+        "Fehlender Korrelationsfilter wird nicht mehr gemeldet",
+        "src/alpaca_bot/research.py",
+        '        print("  [select_factors] OHNE Korrelationsfilter: `factor_data` "',
+        '        _ = ("  [select_factors] OHNE Korrelationsfilter: `factor_data` "',
+        "test_faktorauswahl",
+        "Ein still entfallener Filter laesst eine ungefilterte Auswahl fuer "
+        "geprueft halten - genau so ist dieser Fund entstanden.",
+    ),
 ]
 
 

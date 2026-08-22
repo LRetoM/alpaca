@@ -163,7 +163,8 @@ def measure_factors(
     horizons: tuple[int, ...] = (3, 5, 10, 20),
     min_symbols_per_day: int = 30,
     verbose: bool = True,
-) -> pd.DataFrame:
+    mit_panels: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Misst alle Kandidaten-Faktoren ueber das gesamte Universum.
 
     Args:
@@ -171,9 +172,15 @@ def measure_factors(
         horizons: Prognosehorizonte in Handelstagen.
         min_symbols_per_day: Tage mit weniger Symbolen werden verworfen -
             eine Rangkorrelation ueber 5 Werte ist reines Rauschen.
+        mit_panels: gibt zusaetzlich die berechneten Faktorwerte je Symbol
+            zurueck. `select_factors` braucht sie fuer den
+            Korrelationsfilter - ohne sie kann er nicht arbeiten und muss
+            es melden (§G16). Sie hier mitzugeben kostet nichts: Sie
+            entstehen ohnehin, wurden bisher nur verworfen.
 
     Returns:
         Eine Zeile je (Faktor, Horizont), sortiert nach Aussagekraft.
+        Bei `mit_panels=True` zusaetzlich das Dictionary Symbol -> Panel.
     """
     symbols = bars.index.get_level_values("symbol").unique()
     if verbose:
@@ -198,7 +205,7 @@ def measure_factors(
             print(f"      {i:,}/{len(symbols):,} Symbole ...")
 
     if not factor_frames:
-        return pd.DataFrame()
+        return (pd.DataFrame(), {}) if mit_panels else pd.DataFrame()
 
     factor_names = list(next(iter(factor_frames.values())).columns)
     if verbose:
@@ -245,14 +252,16 @@ def measure_factors(
             print(f"      Horizont {h} Tage fertig")
 
     if not results:
-        return pd.DataFrame()
+        return (pd.DataFrame(), factor_frames) if mit_panels else pd.DataFrame()
 
     df = pd.DataFrame([{**r.__dict__, "verdict": r.verdict} for r in results])
     # Nach dem KORRIGIERTEN Wert sortieren. Die Rangliste ist das, was
     # gelesen wird; stuende oben, was nur unkorrigiert gross aussieht,
     # waere die Korrektur folgenlos.
     schluessel = df["t_korrigiert"].fillna(df["t_stat"]).abs()
-    return df.reindex(schluessel.sort_values(ascending=False).index).reset_index(drop=True)
+    sortiert = df.reindex(
+        schluessel.sort_values(ascending=False).index).reset_index(drop=True)
+    return (sortiert, factor_frames) if mit_panels else sortiert
 
 
 def _daily_cross_sectional_ic(
@@ -453,11 +462,14 @@ def summarize(results: pd.DataFrame, top: int = 25) -> str:
 
 def select_factors(
     results: pd.DataFrame, horizon: int, min_t: float = 3.0, max_factors: int = 6,
-    max_correlation: float = 0.7, factor_data: dict[str, pd.DataFrame] | None = None
+    max_correlation: float | None = 0.7,
+    factor_data: dict[str, pd.DataFrame] | None = None,
 ) -> list[str]:
     """Waehlt die tragfaehigen Faktoren fuer einen Horizont aus.
 
-    Kriterien: ausreichend stabil (|t| >= min_t) und positiv rangierend.
+    Kriterien: ausreichend stabil (|t| >= min_t), positiv rangierend und
+    **nicht redundant zu einem bereits gewaehlten Faktor**.
+
     Negative Faktoren werden NICHT einfach invertiert - ein Vorzeichen,
     das nur auf dieser Stichprobe stimmt, ist Data-Mining. Wer invertiert,
     muss die Hypothese vorher aufschreiben.
@@ -466,9 +478,201 @@ def select_factors(
     der aus einer Messung eine Strategie wird - genau hier hat der
     unkorrigierte Wert am 16.08.2026 Faktoren durchgelassen, die die
     Schwelle nach Korrektur nicht halten (`docs/BEFUNDE.md` §G12).
+
+    **Der Korrelationsfilter (§G16).** `max_correlation` und
+    `factor_data` standen bis zum 22.08.2026 in der Signatur und wurden
+    im Rumpf **an keiner Stelle** benutzt - dieselbe Fehlerklasse wie
+    `hypotheses.historientest(horizont)`. Ausgewaehlt wurden schlicht die
+    Top-N nach t-Wert.
+
+    Das wiegt hier besonders, weil das Projekt die Redundanz seiner
+    eigenen Faktoren an drei Stellen aufschreibt - `research.py`
+    ("moeglichst wenig korrelierter Anzeichen"), `ReversalWeights`
+    ("messen im Kern dasselbe ... fuenf Messungen desselben Effekts sind
+    nicht fuenfmal so viel Signal") und BEFUNDE §A. Der Mechanismus, der
+    genau das verhindern soll, war nicht implementiert.
+
+    Und es ist keine Feinheit: `IR = IC * sqrt(BR)` setzt **unabhaengige**
+    Signale voraus. Fuenf korrelierte Faktoren liefern nicht die Breite
+    von fuenf.
+
+    Verfahren: gierig entlang der t-Rangliste. Der staerkste Faktor wird
+    gesetzt; jeder weitere nur, wenn seine |Korrelation| zu ALLEN bereits
+    gewaehlten unter `max_correlation` liegt. Gemessen wird der Betrag -
+    ein invertierter Klon ist genauso redundant wie ein Klon.
+
+    Args:
+        max_correlation: Obergrenze der |Korrelation| zu bereits
+            gewaehlten Faktoren. `None` schaltet den Filter bewusst ab
+            (ohne Warnung).
+        factor_data: Symbol -> DataFrame der Faktorwerte, wie
+            `measure_factors` sie intern haelt. Fehlt es, kann nicht
+            gefiltert werden - dann wird das **gemeldet**, statt still
+            durchzulassen.
     """
     sub = results[results["horizon"] == horizon].copy()
     t = sub["t_korrigiert"].fillna(sub["t_stat"]) if "t_korrigiert" in sub else sub["t_stat"]
     sub = sub[(t >= min_t) & (sub["ic_mean"] > 0)]
     sub = sub.reindex(t[t.index.isin(sub.index)].sort_values(ascending=False).index)
-    return sub["factor"].head(max_factors).tolist()
+    rangliste = sub["factor"].tolist()
+
+    if max_correlation is None:
+        return rangliste[:max_factors]
+
+    if not factor_data:
+        # Ein entfallener Filter muss sichtbar sein. Stillschweigen hiesse,
+        # eine ungefilterte Auswahl fuer geprueft zu halten - und genau so
+        # ist dieser Fund entstanden.
+        print("  [select_factors] OHNE Korrelationsfilter: `factor_data` "
+              "fehlt. Die Auswahl kann redundante Faktoren enthalten, die "
+              "dieselbe Information doppelt zaehlen (BEFUNDE §A).")
+        return rangliste[:max_factors]
+
+    korr = _faktor_korrelationen(rangliste, factor_data)
+    gewaehlt: list[str] = []
+    verworfen: list[tuple[str, str, float]] = []
+    for kandidat in rangliste:
+        if len(gewaehlt) >= max_factors:
+            break
+        redundant = None
+        for schon in gewaehlt:
+            c = korr.get((kandidat, schon))
+            if c is not None and abs(c) > max_correlation:
+                redundant = (schon, c)
+                break
+        if redundant is None:
+            gewaehlt.append(kandidat)
+        else:
+            verworfen.append((kandidat, redundant[0], redundant[1]))
+
+    if verworfen:
+        print(f"  [select_factors] {len(verworfen)} Faktor(en) als redundant "
+              f"verworfen (|r| > {max_correlation}):")
+        for k, wegen, c in verworfen:
+            print(f"      {k:<20} r={c:+.2f} zu {wegen}")
+
+    # Die effektive Breite MUSS danebenstehen. Der Paarfilter allein
+    # taeuscht: Die vier Score-Bausteine liegen paarweise alle unter 0,7
+    # und tragen gemeinsam trotzdem nur 1,53 unabhaengige Signale (§G16).
+    if len(gewaehlt) > 1:
+        eff = effektive_breite(gewaehlt, factor_data)
+        if np.isfinite(eff):
+            print(f"  [select_factors] effektive Breite: {eff:.2f} von "
+                  f"{len(gewaehlt)} Faktoren."
+                  + ("  Die Auswahl misst weitgehend dasselbe - die "
+                     "Gewichtung glaettet, sie addiert keine unabhaengige "
+                     "Information (BEFUNDE §A)."
+                     if eff < len(gewaehlt) * 0.6 else ""))
+    return gewaehlt
+
+
+def effektive_breite(
+    faktoren: list[str], factor_data: dict[str, pd.DataFrame],
+    gewichte: dict[str, float] | None = None,
+) -> float:
+    """Wie viele UNABHAENGIGE Signale stecken wirklich in dieser Menge?
+
+    **Warum paarweise Korrelation nicht reicht.** Vier Faktoren koennen
+    paarweise alle unter 0,7 liegen und gemeinsam trotzdem fast dasselbe
+    messen. Gemessen am 22.08.2026 an den vier Bausteinen, die
+    tatsaechlich in den Score eingehen (198.038 Beobachtungen, 396
+    Symbole):
+
+                     f_rueckgang  f_rsi2  f_ausverkauf  f_band_unten
+        f_rueckgang         1.00    0.69          0.57          0.50
+        f_rsi2              0.69    1.00          0.42          0.49
+        f_ausverkauf        0.57    0.42          1.00          0.32
+        f_band_unten        0.50    0.49          0.32          1.00
+
+    Kein einziges Paar ueber 0,7 - `select_factors` haette nichts
+    verworfen. Die effektive Breite liegt aber bei **1,53 von 4**.
+
+    Damit ist BEFUNDE §A erstmals mit einer Zahl belegt: "Die Summe ist
+    NICHT fuenfmal so viel Signal" - sie ist rund anderthalbmal so viel.
+
+    **Rechnung:** `1 / (w' R w)` mit normierten Gewichten `w` und der
+    Korrelationsmatrix `R`. Bei perfekter Unabhaengigkeit ergibt das die
+    Zahl der Faktoren, bei identischen Faktoren 1,0. Es ist dieselbe
+    Groesse, die in der Portfoliotheorie als "effektive Zahl von
+    Wetten" gefuehrt wird.
+
+    **Was die Zahl NICHT sagt:** Sie ist kein Urteil ueber die
+    Strategie. Die Breite im Sinne von `IR = IC * sqrt(BR)` kommt aus
+    den SYMBOLEN (1.200 je Tag), nicht aus den Faktoren. Eine niedrige
+    effektive Faktorbreite heisst nur: Die Gewichtung glaettet, sie
+    addiert keine unabhaengige Information - genau das, was
+    `ReversalWeights` im eigenen Docstring bereits behauptet.
+
+    Args:
+        gewichte: Faktorgewichte. Fehlen sie, zaehlt jeder Faktor gleich.
+    """
+    faktoren = [f for f in faktoren]
+    if not faktoren:
+        return float("nan")
+    if len(faktoren) == 1:
+        return 1.0
+
+    korr = _faktor_korrelationen(faktoren, factor_data)
+    n = len(faktoren)
+    R = np.eye(n)
+    for i, a in enumerate(faktoren):
+        for j, b in enumerate(faktoren):
+            if i != j:
+                c = korr.get((a, b))
+                R[i, j] = c if c is not None else 0.0
+
+    if gewichte:
+        w = np.array([max(0.0, float(gewichte.get(f, 0.0))) for f in faktoren])
+    else:
+        w = np.ones(n)
+    if w.sum() <= 0:
+        return float("nan")
+    w = w / w.sum()
+
+    var = float(w @ R @ w)
+    if var <= 0:
+        return float("nan")
+    # Auf [1, n] begrenzen: Numerisches Rauschen in R kann den Quotienten
+    # minimal darueber treiben, und eine Breite ueber der Faktorzahl waere
+    # eine Aussage, die es nicht gibt.
+    return float(min(max(1.0 / var, 1.0), float(n)))
+
+
+def _faktor_korrelationen(
+    faktoren: list[str], factor_data: dict[str, pd.DataFrame]
+) -> dict[tuple[str, str], float]:
+    """Paarweise Korrelation zweier Faktoren ueber ALLE Symbole und Tage.
+
+    Bewusst ueber den gepoolten Datensatz statt je Symbol: Gefragt ist,
+    ob zwei Faktoren dieselbe Information tragen - das ist eine
+    Eigenschaft der Faktoren, nicht eines einzelnen Wertpapiers.
+
+    Symbole mit fehlenden Spalten werden uebersprungen, nicht mit 0
+    gefuellt: Eine erfundene Null wuerde die Korrelation zur Mitte ziehen
+    und redundante Faktoren durchlassen.
+    """
+    reihen: dict[str, list[np.ndarray]] = {f: [] for f in faktoren}
+    for df in factor_data.values():
+        vorhanden = [f for f in faktoren if f in df.columns]
+        if len(vorhanden) < 2:
+            continue
+        teil = df[vorhanden].replace([np.inf, -np.inf], np.nan)
+        for f in vorhanden:
+            reihen[f].append(teil[f].to_numpy(dtype=float))
+
+    gepoolt = {f: np.concatenate(v) for f, v in reihen.items() if v}
+    out: dict[tuple[str, str], float] = {}
+    for i, a in enumerate(faktoren):
+        for b in faktoren[i + 1:]:
+            xa, xb = gepoolt.get(a), gepoolt.get(b)
+            if xa is None or xb is None or len(xa) != len(xb):
+                continue
+            gut = np.isfinite(xa) & np.isfinite(xb)
+            if gut.sum() < 30:
+                continue
+            if xa[gut].std() == 0 or xb[gut].std() == 0:
+                continue
+            c = float(np.corrcoef(xa[gut], xb[gut])[0, 1])
+            if np.isfinite(c):
+                out[(a, b)] = out[(b, a)] = c
+    return out

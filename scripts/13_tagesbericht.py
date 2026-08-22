@@ -108,7 +108,10 @@ def main() -> int:
     else:
         print(slip.to_string())
         print()
-        print(costs.reconcile(args.erwartete_slippage, slip))
+        # Einzelwerte durchreichen: §3.1 misst ueber ORDERS, nicht ueber
+        # Symbole. Ohne sie faellt reconcile auf die groebere Ebene zurueck.
+        print(costs.reconcile(args.erwartete_slippage, slip,
+                              werte=j.slippage_werte()))
 
     # --- 4. Entscheidungsqualitaet ---
     print("\n[4] WELCHE BEGRUENDUNG HAT SICH BEWAEHRT?")

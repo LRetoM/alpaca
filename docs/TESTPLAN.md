@@ -10,11 +10,11 @@
 > (Indikatoren, Backtest, ML, Lookahead). Handelslogik, Risiko-Dach,
 > Protokollierung und Live/Schatten-Konsistenz waren **ungetestet**.
 >
-> **Stand 22.08.2026:** **276 Tests** in 18 Dateien, 48 Selbstprüfungen,
-> 48 von 48 Mutationen gefangen.
+> **Stand 22.08.2026:** **296 Tests** in 19 Dateien, 48 Selbstprüfungen,
+> 51 von 51 Mutationen gefangen.
 >
 > Die Spalte „Tests" in §2 zählt Testfunktionen und summiert sich auf
-> **271**. pytest meldet 276, weil zwei Tests parametrisiert sind
+> **291**. pytest meldet 296, weil zwei Tests parametrisiert sind
 > (`test_engine_ausstiege.py` über fünf Haltedauern,
 > `test_lernkern.py` über zwei Zeitzonen) und jede Parametrisierung
 > einzeln zählt. Beide Zahlen sind richtig — sie zählen Verschiedenes.
@@ -79,13 +79,14 @@ aus `BEFUNDE.md` §G15/§G16.
 |---|---:|---|
 | `test_ausfuehrung.py` | 30 | Referenzpreis (Quote > 2 % vom letzten Trade → verworfen; **kein** Mittelwert aus echt und 0; `fallback` fliegt aus der Slippage). Intraday-Stop feuert **nicht** auf `fallback`. Wiedereinstiege getrennt von Nachkäufen. Bericht nennt seinen Bezug. **Die vier Abnahmekriterien aus BETRIEBSPLAN §3.3.** |
 | `test_regelabgleich.py` | 7 | **§G16:** Fehler**quote** statt Fehlerzahl entscheidet die Schwere. Der Regelabgleich läuft im Health-Check, nicht nur im Wochenbericht. |
-| `test_kostenkontrolle.py` | 10 | **§G16:** Die Kostenkontrolle misst den **Median über Orders** — dieselbe Kennzahl, die BETRIEBSPLAN §3.1/§8 nennen. Ausreißer kippen das Urteil nicht, bleiben aber sichtbar. Richtung stimmt (negativ = günstiger). Die Kursanpassungsprüfung prüft die **junge Kante**, nicht die Historie. |
+| `test_kostenkontrolle.py` | 14 | **§G16:** Die Kostenkontrolle misst den **Median über Orders** — dieselbe Kennzahl, die BETRIEBSPLAN §3.1/§8 nennen. Ausreißer kippen das Urteil nicht, bleiben aber sichtbar. Richtung stimmt (negativ = günstiger). Die Kursanpassungsprüfung prüft die **junge Kante**, nicht die Historie. |
 
 ### 2.5 Statistik — die schärfste Schicht
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
 | `test_statistik_ueberlappung.py` | 19 | Newey-West-Grundverhalten, `gruppierter_test` mit `horizont`, **gemessene Fehlalarmquote** (39,5 % ohne Korrektur), Faktorauswahl nutzt den korrigierten Wert. |
+| `test_faktorauswahl.py` | 16 | **§G16:** Der Korrelationsfilter, den die Signatur seit jeher versprach, existiert. **Effektive Breite** statt nur paarweiser Korrelation — vier Faktoren können paarweise sauber sein und gemeinsam 1,53 Signale tragen. |
 | `test_hypothesen.py` | 9 | **§G16:** `horizont` ist kein toter Parameter. Der Status hängt am korrigierten t-Wert. Ohne gültigen t-Wert **kein Urteil** (`offen`). Kalibrierung in beide Richtungen. |
 
 ### 2.6 Lernapparat
@@ -122,7 +123,7 @@ Einzeln:
 
 ```
 python scripts/00_selftest.py       # Forschungsschicht (48 Prüfungen)
-.venv/bin/pytest tests/ -q          # Betriebsschicht (276 Tests)
+.venv/bin/pytest tests/ -q          # Betriebsschicht (296 Tests)
 ```
 
 **Alles gehört nach jeder Codeänderung ausgeführt, bevor die Dienste neu

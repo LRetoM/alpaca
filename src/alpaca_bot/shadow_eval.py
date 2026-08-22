@@ -278,9 +278,23 @@ def _monotonie(g: pd.DataFrame) -> float | None:
 # Flotte: gepaarter Vergleich
 # ---------------------------------------------------------------------------
 def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
-                      *, buch: str = "spiegel", schreiben: bool = True,
+                      *, schreiben: bool = True,
                       sperrzone_oeffnen: bool = False) -> dict:
     """Bot A gegen Bot B - ueber die TAGESDIFFERENZ, nicht ueber Gesamtrenditen.
+
+    **Immer auf dem Spiegelbuch.** Bis zum 22.08.2026 nahm diese Funktion
+    einen Parameter `buch="spiegel"` entgegen und benutzte ihn nirgends -
+    gerechnet wurde stets auf `equity_kurve`. `scripts/21_fleet.py` bot
+    ihn als `--buch {spiegel,rangliste}` an und reichte ihn durch: Wer
+    `--buch rangliste` waehlte, bekam still das Spiegelbuch-Ergebnis
+    (§G16).
+
+    Der Parameter ist ersatzlos entfallen, weil er konzeptionell nicht
+    erfuellbar ist: Verglichen werden Equity-Kurven, und ein Depot hat
+    nur das Spiegelbuch. Das Ranglisten-Buch zeichnet Kandidaten ohne
+    Kapitalgrenze auf - es gibt dort keine Kurve, die man vergleichen
+    koennte. Ein Parameter, dessen zweiter Wert unmoeglich ist, gehoert
+    nicht in die Signatur.
 
     Beide Bots sehen dieselben Tage, Symbole und Kurse. Verglichen wird
     deshalb d_t = rendite_A(t) - rendite_B(t); der Marktfaktor kuerzt sich

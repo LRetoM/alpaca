@@ -1505,13 +1505,15 @@ Test von mir (er prüfte, *dass* gemeldet wird, nicht *womit*).
 ## G16. Der Live-Spiegel spiegelt nicht — und vier stille Lücken (22.08.2026)
 
 **Anlass:** eine vollständige Durchsicht des Projekts ohne konkreten
-Verdacht. Zehn Funde, alle aus derselben Familie wie §G15: nichts stürzt
-ab, nichts meldet sich, jede Zahl sieht plausibel aus.
+Verdacht. **Dreizehn Defekte** aus derselben Familie wie §G15 — nichts
+stürzt ab, nichts meldet sich, jede Zahl sieht plausibel aus — und ein
+vierzehnter Eintrag, der kein Defekt ist, sondern eine erstmals gemessene
+Zahl (Fund 14).
 
 Geprüft wurden alle 52 Module (28.384 Zeilen zum Prüfzeitpunkt), 375
 öffentliche Funktionen, beide Testschichten, die vier Datenbanken und die
-laufenden Dienste. Am Ende: **276 Tests** (vorher 222), 48
-Selbstprüfungen, **48 von 48 Mutationen gefangen**, beide Dienste mit dem
+laufenden Dienste. Am Ende: **296 Tests** (vorher 222), 48
+Selbstprüfungen, **51 von 51 Mutationen gefangen**, beide Dienste mit dem
 neuen Stand neu gestartet.
 
 ### Fund 1: `B09_nachkauf` ist kein Live-Spiegel — Schwere: hoch
@@ -1881,6 +1883,119 @@ gegen 15 %; der Historienwert wird zur Einordnung mitgenannt. Aktuell:
 1,2 % an der jungen Kante. Regression: `tests/test_kostenkontrolle.py`
 (10 Tests), drei neue Mutationen — **48 von 48 gefangen**.
 
+### Fund 11: Der Tagesbericht meldete eine erfundene Zahl
+
+Derselbe Mittelwert-Fehler wie Fund 9, an sichtbarerer Stelle.
+`scripts/13_tagesbericht.py` ruft `costs.reconcile()` in Abschnitt
+„[3] AUSFÜHRUNG" — und BETRIEBSPLAN §5.2 nennt genau diesen Abschnitt
+als das, was alle 1–2 Wochen zu lesen ist, mit der ausdrücklichen
+Erwartung *„Slippage-Median"*. Ausgegeben wurde:
+
+```
+angenommen :    3.0 bps
+tatsaechlich:  -80.6 bps
+-> Ausfuehrung ist 83.6 bps besser als angenommen.
+```
+
+`journal_df["mittel"].mean()` mittelt die Symbol-Mittelwerte
+**ungewichtet** — drei kaputte IEX-Quotes tragen darin genauso viel wie
+70 saubere Symbole. Die Aussage „83,6 bps besser" war frei erfunden.
+
+**Behoben:** `reconcile` nimmt die Einzelwerte über den neuen Zugang
+`journal.slippage_werte()` und rechnet den Median über **Orders** — die
+Ebene, die §3.1 meint. Beide teilen sich dieselbe Bereinigung
+(`_slippage_basis`), damit Bericht und Prüfung nie auf verschiedenen
+Grundmengen rechnen. Der Bericht sagt jetzt: `0.0 bps (Median über 162
+Orders)`, mit den 24 Ausreißern daneben.
+
+### Fund 12: Die Faktorauswahl versprach einen Filter, den es nicht gab
+
+`research.select_factors` nahm zwei Parameter entgegen, die im Rumpf
+**an keiner Stelle** benutzt wurden:
+
+```python
+max_correlation: float = 0.7
+factor_data: dict[str, pd.DataFrame] | None = None
+```
+
+Ausgewählt wurden schlicht die Top-N nach t-Wert. Dieselbe Fehlerklasse
+wie Fund 3 (`historientest(horizont)`) — eine Signatur, die eine Prüfung
+verspricht, die nicht stattfindet.
+
+Das wiegt hier besonders, weil das Projekt die Redundanz seiner eigenen
+Faktoren an **drei** Stellen aufschreibt: `research.py` („möglichst wenig
+korrelierter Anzeichen"), `ReversalWeights` („messen im Kern dasselbe …
+fünf Messungen desselben Effekts sind nicht fünfmal so viel Signal") und
+§A. Der Mechanismus, der genau das verhindern soll, war nicht gebaut.
+
+**Behoben:** Gieriger Filter entlang der t-Rangliste, |Korrelation|
+gemessen (ein invertierter Klon ist genauso redundant wie ein Klon).
+`measure_factors(mit_panels=True)` liefert die Faktorwerte, die der
+Filter braucht — sie entstehen ohnehin und wurden bisher verworfen.
+Fehlen sie, wird das **gemeldet** statt still durchzulassen.
+
+### Fund 13: Ein ignoriertes CLI-Argument im Abnahme-Skript
+
+`shadow_eval.vergleich_gepaart` nahm `buch="spiegel"` entgegen und
+benutzte es nie — gerechnet wurde stets auf `equity_kurve`.
+`scripts/21_fleet.py` bot es als `--buch {spiegel,rangliste}` an und
+reichte es durch: **Wer `--buch rangliste` wählte, bekam still das
+Spiegelbuch-Ergebnis.** Das ist das Skript, mit dem am 10.10. abgenommen
+wird.
+
+**Behoben durch Entfernen, nicht durch Implementieren.** Der Parameter
+ist konzeptionell nicht erfüllbar: Verglichen werden Equity-Kurven, und
+ein Depot hat nur das Spiegelbuch. Das Ranglisten-Buch zeichnet
+Kandidaten ohne Kapitalgrenze auf — dort gibt es keine Kurve. Ein
+Parameter, dessen zweiter Wert unmöglich ist, gehört nicht in die
+Signatur.
+
+### Fund 14: Die vier Score-Bausteine tragen 1,53 Signale, nicht 4
+
+**Der aufschlussreichste Fund dieser Runde** — er entstand beim Bau des
+Korrelationsfilters aus Fund 12 und ist kein Defekt, sondern eine
+erstmals gemessene Zahl.
+
+Gemessen an **198.038 echten Beobachtungen** über 396 Symbole, für die
+vier Bausteine, die tatsächlich in den Score eingehen:
+
+| | `f_rueckgang` | `f_rsi2` | `f_ausverkauf` | `f_band_unten` |
+|---|---:|---:|---:|---:|
+| `f_rueckgang` | 1,00 | **0,69** | 0,57 | 0,50 |
+| `f_rsi2` | 0,69 | 1,00 | 0,42 | 0,49 |
+| `f_ausverkauf` | 0,57 | 0,42 | 1,00 | 0,32 |
+| `f_band_unten` | 0,50 | 0,49 | 0,32 | 1,00 |
+
+**Kein einziges Paar liegt über 0,7** — der Paarfilter aus Fund 12 hätte
+nichts verworfen. Die effektive Zahl unabhängiger Bausteine
+(`1/(w'Rw)`, mit den echten Score-Gewichten) liegt aber bei **1,53 von
+4**; ungewichtet bei 1,60.
+
+Damit ist §A erstmals mit einer Zahl belegt. Der Satz *„die Summe ist
+NICHT fünfmal so viel Signal"* stimmt — es ist rund **anderthalbmal** so
+viel.
+
+**Die methodische Lehre ist die wichtigere:** Paarweise Korrelation ist
+das falsche Maß. Vier Faktoren können paarweise alle sauber sein und
+gemeinsam fast dasselbe messen. `select_factors` weist die effektive
+Breite deshalb bei jeder Auswahl mit aus.
+
+**Was das NICHT heißt.** Es ist kein Urteil über die Strategie und kein
+Grund für eine Gewichtsänderung (CLAUDE.md). Die Breite im Sinne von
+`IR = IC·√BR` kommt aus den **Symbolen** (1.200 je Tag), nicht aus den
+Faktoren. Eine niedrige effektive Faktorbreite heißt nur: Die Gewichtung
+glättet, sie addiert keine unabhängige Information — genau das, was
+`ReversalWeights` im eigenen Docstring bereits behauptet hatte, ohne es
+je gemessen zu haben.
+
+Bemerkenswert am Rande: `f_ausverkauf` ist mit 0,32–0,57 der
+unabhängigste Baustein — er trägt die meiste eigenständige Information
+und hat mit 0,25 nur das dritthöchste Gewicht. Eine Beobachtung, keine
+Empfehlung; der Weg zu einer anderen Gewichtung führt über die Flotte.
+
+Regression: `tests/test_faktorauswahl.py` (16 Tests), zwei neue
+Mutationen.
+
 ### Nebenbefund: eine abgeschriebene Zahl war bereits gedriftet
 
 `fokus.hebel()` trug den Satz „Der Bot handelt 1.200 von **2.189**
@@ -1903,7 +2018,7 @@ sich an den Daten **nicht** bestätigt:
   zweier Equity-Tagesrenditen ist ein Horizont-1-Wert — hier zu
   „korrigieren" würde den t-Wert teils *erhöhen*. Bleibt wie es ist.
 * Kein totes Modul: alle 52 Module in `src/alpaca_bot/` sind verdrahtet.
-* Der Mutationstest fing nach der Erweiterung **48 von 48** — darunter
+* Der Mutationstest fing nach der Erweiterung **51 von 51** — darunter
   eine, die einen zu schwachen Test von mir entlarvte (er prüfte den
   `nan`-Wert, aber nicht den daraus folgenden Status).
 

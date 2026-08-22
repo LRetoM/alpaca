@@ -53,7 +53,10 @@ def main() -> int:
     p.add_argument("--achse")
     p.add_argument("--wert")
     p.add_argument("--hypothese", default="")
-    p.add_argument("--buch", default="spiegel", choices=["spiegel", "rangliste"])
+    # `--buch` entfernt (22.08.2026, BEFUNDE §G16): Der gepaarte Vergleich
+    # rechnet auf Equity-Kurven, und die gibt es nur im Spiegelbuch. Das
+    # Argument wurde durchgereicht und von `vergleich_gepaart` ignoriert -
+    # wer "rangliste" waehlte, bekam still das Spiegelbuch.
     args = p.parse_args()
 
     store = ShadowStore()
@@ -107,7 +110,7 @@ def main() -> int:
 
     if args.vergleich:
         a, b = args.vergleich
-        r = shadow_eval.vergleich_gepaart(a, b, store, buch=args.buch)
+        r = shadow_eval.vergleich_gepaart(a, b, store)
         print("=" * 78)
         print(f"  GEPAARTER VERGLEICH: {a} gegen {b}")
         print("=" * 78)

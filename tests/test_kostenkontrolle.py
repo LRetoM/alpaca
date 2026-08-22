@@ -192,3 +192,75 @@ def _fuelle(s, *, alt_quote: float, jung_quote: float,
                     "INSERT INTO shadow_outcomes (pred_id, data_check)"
                     " VALUES (?,?)",
                     (pid, "kurs_angepasst" if i < int(n_je_tag * quote) else "ok"))
+
+
+class TestReconcileImTagesbericht:
+    """`costs.reconcile` - die Zeile, die im Wochenbericht gelesen wird (§G16).
+
+    **Anlass (22.08.2026).** Derselbe Mittelwert-Fehler wie in
+    `shadow._pruefe_kosten`, nur an sichtbarerer Stelle:
+    `scripts/13_tagesbericht.py` ruft `costs.reconcile()` in Abschnitt
+    "[3] AUSFUEHRUNG", und `docs/BETRIEBSPLAN.md` §5.2 nennt genau diesen
+    Abschnitt als das, was alle 1-2 Wochen zu lesen ist -- mit der
+    ausdruecklichen Erwartung "Slippage-**Median**".
+
+    Ausgegeben wurde stattdessen:
+
+        angenommen :    3.0 bps
+        tatsaechlich:  -80.6 bps
+        -> Ausfuehrung ist 83.6 bps besser als angenommen.
+
+    `journal_df["mittel"].mean()` mittelt die Symbol-Mittelwerte
+    ungewichtet. Drei kaputte IEX-Quotes (KGS, SIMO, GNRC) tragen dabei
+    genauso viel wie 70 saubere Symbole. Die Aussage "83,6 bps besser"
+    ist frei erfunden; der Median ueber dieselben 162 Orders ist +0,0.
+
+    Eine falsche Zahl ist hier schlimmer als eine fehlende: Sie steht im
+    Bericht, sieht nach Messung aus und wird zitiert.
+    """
+
+    def test_reconcile_nutzt_den_median_der_orders(self):
+        from alpaca_bot import costs
+
+        werte = pd.Series([0.5] * 160 + [-1647.9, -1583.5])
+        bericht = pd.DataFrame({"n": [162], "mittel": [-19.3],
+                                "median": [0.5], "max": [12.0]},
+                               index=pd.Index(["X"], name="symbol"))
+        text = costs.reconcile(3.0, bericht, werte=werte)
+        assert "+0.5" in text or "0.5" in text, (
+            f"erwartet der Median (0,5), ausgegeben wurde:\n{text}")
+        assert "-19" not in text and "-1647" not in text
+
+    def test_ohne_rohwerte_kein_erfundener_mittelwert(self):
+        """Fehlen die Einzelwerte, darf NICHT auf den Mittelwert
+        ausgewichen werden - dann lieber der Symbol-Median.
+
+        Geprueft wird der RUMPF, nicht die ganze Quelle: Der Docstring
+        zitiert die alte Zeile absichtlich, damit der Fehler dokumentiert
+        bleibt. Ein Test ueber `inspect.getsource()` wuerde daran haengen
+        bleiben - genau das ist beim Schreiben passiert.
+        """
+        from alpaca_bot import costs
+        import inspect
+
+        quelle = inspect.getsource(costs.reconcile)
+        rumpf = quelle.split('"""')[-1]
+        assert 'journal_df["mittel"].mean()' not in rumpf
+        assert ".median()" in rumpf
+
+    def test_meldung_nennt_die_zahl_der_orders(self):
+        from alpaca_bot import costs
+
+        werte = pd.Series([1.0] * 50)
+        bericht = pd.DataFrame({"n": [50], "mittel": [1.0],
+                                "median": [1.0], "max": [3.0]},
+                               index=pd.Index(["X"], name="symbol"))
+        text = costs.reconcile(3.0, bericht, werte=werte)
+        assert "50" in text, "ohne Stichprobengroesse ist die Zahl nicht einzuordnen"
+
+    def test_tagesbericht_reicht_die_rohwerte_durch(self):
+        quelle = __import__("pathlib").Path("scripts/13_tagesbericht.py").read_text()
+        block = quelle[quelle.index("[3] AUSFUEHRUNG"):]
+        assert "slippage_werte" in block[:1200], (
+            "der Bericht muss die Einzelwerte durchreichen, sonst rechnet "
+            "reconcile weiter auf Symbolebene")
