@@ -1876,17 +1876,7 @@ def pruefungen(store: ShadowStore | None = None, *,
     out.append(_pruefe_gegen_depot(s))
 
     # --- 4. Kursanpassung (yfinance auto_adjust) ---
-    o = s.table("shadow_outcomes")
-    if o.empty or "data_check" not in o:
-        out.append(Befund(4, "Kursanpassung", True, "Noch keine Ergebnisse."))
-    else:
-        n_ang = int((o["data_check"] == "kurs_angepasst").sum())
-        anteil = n_ang / max(1, len(o))
-        out.append(Befund(
-            4, "Kursanpassung erkannt", anteil < 0.05,
-            f"{n_ang} von {len(o):,} Ergebnissen mit rueckwirkend geaendertem "
-            f"Kurs ({anteil:.1%}). Gespeicherte Kurse wurden NICHT ueberschrieben."
-        ))
+    out.append(_pruefe_kursanpassung(s))
 
     # --- 5. Kostenkontrolle gegen das echte Depot ---
     out.append(_pruefe_kosten(s))
@@ -1940,7 +1930,106 @@ def pruefungen(store: ShadowStore | None = None, *,
             f"{n_nach} nachgetragene Vorhersage(n). Sie zaehlen in KEINER "
             "Vorwaertsstatistik mit (shadow_eval filtert sie heraus)."
         ))
+
+    # --- 10. Handelt der Spiegel ueberhaupt wie der Live-Bot? ---
+    out.append(_pruefe_handelsrhythmus(s))
     return out
+
+
+LIVE_SPIEGEL_BOT = "B09_nachkauf"
+"""Der Bot, der laut §G6 die Live-Konfiguration traegt.
+
+Feldweise deckungsgleich (gesichert in `tests/test_konsistenz.py`) - was
+NICHT heisst, dass er sich auch gleich VERHAELT. Genau diese Luecke
+prueft `_pruefe_handelsrhythmus`."""
+
+
+def _pruefe_handelsrhythmus(s: ShadowStore) -> Befund:
+    """Deckt sich das Handelsverhalten des Spiegels mit dem echten Bot?
+
+    **Der Unterschied zu Pruefung 3.** Jene vergleicht KURSE (yfinance
+    gegen Alpaca). Diese vergleicht, WAS getan wird - und dort lag ein
+    Fund, den keine Konfigurationspruefung finden konnte (§G16).
+
+    `max_new_positions=3` bedeutet an den zwei Orten Verschiedenes:
+
+        live.run_once   3 Kaeufe je ZYKLUS - der Daemon laeuft alle 15 Min,
+                        also bis zu 26-mal am Handelstag
+        shadow._spiegel 3 Kaeufe je HANDELSTAG - der Tagesbar-Rhythmus
+                        kennt nur einen Durchgang
+
+    Gemessen am 22.08.2026: Der Live-Bot eroeffnete am 28.07. **50
+    Positionen an einem Tag**; das Spiegelbuch schafft konstruktions-
+    bedingt drei. Folge: Live steht bei 15/15 Positionen und 91 %
+    investiert, `B09_nachkauf` bei 11/15 und 64 %.
+
+    Daraus folgt der eigentliche Schaden. `Engine._find_topups` bekommt
+    das von `_find_entries` bereits verplante Kapital abgezogen. Solange
+    Plaetze frei sind, ist dieser Betrag das gesamte freie Kapital -
+    also gibt es **nie** Nachkaeufe. Erst im vollen Depot (`slots = 0`,
+    `entries = []`, `verplant = 0`) entstehen sie. Deshalb:
+
+        Live-Journal   110 topup von 304 Entscheidungen (36 %)
+        Spiegelbuch      0 topup von  51 Kaeufen
+
+    `B09_nachkauf` ist damit ueber seine gesamte Laufzeit **bitgleich mit
+    `B08_voll_investiert`** - seine Achse (`allow_topup`) hat nie
+    gebunden. Er belegt einen Flottenplatz, hebt die Schwelle fuer alle
+    (§B2) und misst nichts. Und `B11_dyn_ausstieg_live` wird laut
+    BETRIEBSPLAN §3.3 gegen genau diesen Bot geprueft.
+
+    **Warum das hier nur gemeldet und nicht behoben wird:** Beides waere
+    eine Aenderung der Handelslogik waehrend einer laufenden Messung -
+    CLAUDE.md verbietet das ausdruecklich. Der Weg fuehrt ueber einen
+    eigenen Flottenbot nach dem 10.10.2026.
+    """
+    try:
+        from .journal import JOURNAL_DB
+
+        with sqlite3.connect(JOURNAL_DB) as c:
+            live = pd.read_sql(
+                "SELECT d.action, COUNT(*) n FROM decisions d"
+                " JOIN runs r ON d.run_id = r.run_id"
+                " WHERE r.script = 'live_trade' AND d.blocked_by IS NULL"
+                " GROUP BY d.action", c)
+    except Exception as e:  # noqa: BLE001
+        return Befund(10, "Handelsrhythmus Live gegen Spiegel", True,
+                      f"nicht durchfuehrbar: {type(e).__name__}: {e}")
+
+    if live.empty:
+        return Befund(10, "Handelsrhythmus Live gegen Spiegel", True,
+                      "Noch keine Live-Entscheidungen.")
+
+    sp = s.table("predictions", "buch = 'spiegel' AND bot_id = ?",
+                 (LIVE_SPIEGEL_BOT,))
+    if sp.empty:
+        return Befund(10, "Handelsrhythmus Live gegen Spiegel", True,
+                      f"{LIVE_SPIEGEL_BOT} hat noch nicht gehandelt.")
+
+    je_live = dict(zip(live["action"], live["n"]))
+    n_live_top = int(je_live.get("topup", 0))
+    n_live_ges = int(sum(je_live.values()))
+    n_sp_top = int((sp["aktion"] == "topup").sum())
+
+    anteil_live = n_live_top / max(1, n_live_ges)
+    # Der Spiegel muss nicht denselben ANTEIL treffen - er sieht andere
+    # Tage. Ein Befund ist erst, dass eine ganze Aktionsart FEHLT,
+    # obwohl sie live ein Drittel ausmacht.
+    ok = not (n_live_top > 0 and n_sp_top == 0 and anteil_live > 0.05)
+
+    return Befund(
+        10, "Handelsrhythmus Live gegen Spiegel", ok,
+        f"Live: {n_live_top} von {n_live_ges} Entscheidungen sind Nachkaeufe "
+        f"({anteil_live:.0%}). {LIVE_SPIEGEL_BOT}: {n_sp_top} von {len(sp)}."
+        + ("" if ok else
+           f"  ABWEICHUNG: Der Spiegel fuehrt eine Aktionsart gar nicht aus, "
+           f"die live ein {anteil_live:.0%}-Anteil ist. Ursache: "
+           f"`max_new_positions` wirkt live je ZYKLUS (bis 26/Tag), im "
+           f"Spiegel je HANDELSTAG - das Spiegeldepot wird nie voll, und "
+           f"Nachkaeufe entstehen nur im vollen Depot (§G16). "
+           f"{LIVE_SPIEGEL_BOT} ist damit KEIN Live-Spiegel, obwohl seine "
+           f"Konfiguration feldweise stimmt.")
+    )
 
 
 def _pruefe_gegen_depot(s: ShadowStore) -> Befund:
@@ -2004,44 +2093,175 @@ def _pruefe_gegen_depot(s: ShadowStore) -> Befund:
                       f"nicht durchfuehrbar: {type(e).__name__}: {e}")
 
 
+ANPASSUNG_GRENZE = 0.15
+"""Ab welchem Anteil rueckwirkend geaenderter Kurse an den JUENGSTEN
+Stichtagen etwas nicht stimmt.
+
+Bewusst grosszuegiger als die frueheren 5 %, aber auf einer ganz anderen
+Grundmenge - siehe `_pruefe_kursanpassung`."""
+
+ANPASSUNG_JUENGSTE_TAGE = 5
+"""Wie viele Stichtage als 'jung' gelten. Klein genug, dass ein Ausfall
+binnen einer Woche auffaellt; gross genug fuer eine Quote."""
+
+SLIPPAGE_GRENZE_BPS = 15.0
+"""Ab welchem Slippage-MEDIAN die Schattenannahme nicht mehr trägt.
+
+Aus `docs/BETRIEBSPLAN.md` §8 uebernommen ("Slippage-Median > 15 bps ueber
+30 Trades -> alle Backtest- und Schattenergebnisse neu bewerten"). §3.1
+nennt zusaetzlich 8 bps als Ziel fuer die Kostentragfaehigkeit; 15 ist die
+Abbruchschwelle und damit die richtige fuer eine Pruefung, die FEHL
+melden darf."""
+
+
+def _pruefe_kursanpassung(s: ShadowStore) -> Befund:
+    """Aendert yfinance Kurse rueckwirkend - und passiert das gerade JETZT?
+
+    **Geprueft wird die junge Kante, nicht die Historie (§G16).** Bis zum
+    22.08.2026 rechnete diese Pruefung den Anteil ueber ALLE Ergebnisse
+    und meldete damit dauerhaft FEHL.
+
+    Der Grund ist strukturell: `auto_adjust=True` passt historische Kurse
+    nach JEDER Dividende und jedem Split rueckwirkend an. Je aelter ein
+    Stichtag, desto mehr solcher Ereignisse liegen dahinter. Gemessen je
+    Stichtag:
+
+        28.07. - 07.08.    6 % bis 25 %   (alt, viele Ereignisse seither)
+        13.08. - 20.08.    0 % bis  4 %   (jung)
+        kumuliert          7,7 %          -> FEHL bei 5 % Schwelle
+
+    Die kumulierte Quote MUSS mit der Zeit wachsen. Eine Schwelle darauf
+    reisst zwangslaeufig, ohne dass etwas kaputt ist - exakt der
+    Fehlversuch, den `data_integrity.check_stumme_felder` schon einmal
+    gemacht hat und den §G13 festhaelt: eine Quote ueber die Historie
+    statt der gefaehrlichen Richtung.
+
+    Gefaehrlich ist der umgekehrte Fall: **frische** Stichtage mit hoher
+    Anpassungsrate. Das hiesse, die Kursquelle aendert Daten, die gerade
+    erst entstanden sind - dann stimmt etwas mit dem Feed nicht, und
+    genau dann sind die juengsten Vorhersagen betroffen.
+
+    Die gespeicherten Kurse werden in keinem Fall ueberschrieben; die
+    Abweichung wird nur vermerkt (`verifizieren`).
+    """
+    o = s.table("shadow_outcomes")
+    p = s.table("predictions")
+    if o.empty or "data_check" not in o or p.empty:
+        return Befund(4, "Kursanpassung", True, "Noch keine Ergebnisse.")
+
+    df = o[["pred_id", "data_check"]].merge(
+        p[["pred_id", "as_of"]], on="pred_id", how="inner")
+    if df.empty:
+        return Befund(4, "Kursanpassung", True, "Noch keine Ergebnisse.")
+
+    df["tag"] = pd.to_datetime(df["as_of"], format="mixed", utc=True).dt.date
+    tage = sorted(df["tag"].unique())
+    jung = set(tage[-ANPASSUNG_JUENGSTE_TAGE:])
+    frisch = df[df["tag"].isin(jung)]
+    if len(frisch) < 20:
+        return Befund(4, "Kursanpassung", True,
+                      f"Erst {len(frisch)} Ergebnis(se) an den juengsten "
+                      f"Stichtagen - zu wenig fuer eine Quote.")
+
+    anteil_jung = float((frisch["data_check"] == "kurs_angepasst").mean())
+    anteil_alt = float((df["data_check"] == "kurs_angepasst").mean())
+    ok = anteil_jung < ANPASSUNG_GRENZE
+
+    # Tausenderpunkte nur auf der ZAHL bilden, nie per `.replace()` ueber
+    # den fertigen Satz - das frisst die Satzkommas gleich mit (beim
+    # Umbau von `fokus.hebel()` am selben Tag genau einmal passiert).
+    n_frisch = f"{len(frisch):,}".replace(",", ".")
+    return Befund(
+        4, "Kursanpassung erkannt", ok,
+        f"{anteil_jung:.1%} der {n_frisch} Ergebnisse an den juengsten "
+        f"{len(jung)} Stichtagen wurden rueckwirkend angepasst "
+        f"(Grenze {ANPASSUNG_GRENZE:.0%}). Ueber die ganze Historie "
+        f"{anteil_alt:.1%} - dort erwartbar, weil jede Dividende die "
+        f"aelteren Kurse mit anpasst. Gespeicherte Kurse wurden NICHT "
+        f"ueberschrieben."
+        + ("" if ok else "  AUFFAELLIG: Auch frische Kurse aendern sich - "
+                         "das deutet auf ein Problem der Kursquelle, nicht "
+                         "auf normale Dividendenanpassung.")
+    )
+
+
 def _pruefe_kosten(s: ShadowStore) -> Befund:
-    """Der Schatten darf nicht guenstiger sein als das echte Depot."""
+    """Der Schatten darf nicht guenstiger sein als das echte Depot.
+
+    **Gemessen wird der MEDIAN, nicht der Mittelwert (§G16).** Bis zum
+    22.08.2026 rechnete diese Pruefung einen n-gewichteten Mittelwert und
+    meldete damit dauerhaft FEHL. An denselben 162 pruefbaren Orders:
+
+        Median   +0,0 bps   -> Kriterium aus BETRIEBSPLAN §3.1 erfuellt
+        Mittel  -71,7 bps   -> Pruefung meldet FEHL
+
+    Die Differenz stammt aus drei Datenfehlern, die dieses Projekt selbst
+    dokumentiert (§G, 04.08.2026): KGS mit -1.648 bps und SIMO mit
+    -1.584 bps sind kaputte IEX-Quotes, keine Ausfuehrungsqualitaet.
+    Genau gegen solche Artefakte ist der Median robust - und genau
+    deshalb nennt der Entscheidungsvertrag ihn, an beiden Stellen
+    (§3.1 und §8).
+
+    Eine Pruefung, die eine andere Kennzahl misst als der Vertrag, den
+    sie ueberwacht, erzeugt einen dauerhaften Fehlalarm in der
+    wichtigsten Zahl des Projekts - und eine Warnung, die immer
+    leuchtet, wird weggeklickt (`docs/LERNTEMPO.md` §5).
+
+    **Zum Vorzeichen:** `journal.order()` rechnet so, dass POSITIV
+    "schlechter als erwartet" heisst (fuer Verkaeufe negiert). Ein
+    negativer Wert ist also guenstige Ausfuehrung - dann ist die
+    Schattenannahme zu vorsichtig, nicht zu optimistisch. Die alte
+    Meldung behauptete unabhaengig vom Vorzeichen das Gegenteil.
+    """
     try:
         from .journal import Journal
 
-        j = Journal().slippage_report()
         angesetzt = 3.0
-        MIN_FUELLUNGEN = 10
-        n_gesamt = int(j["n"].sum()) if not j.empty and "n" in j else 0
+        MIN_FUELLUNGEN = 30   # wie BETRIEBSPLAN §3.1/§8: "ueber 30 Trades"
 
-        if j.empty or n_gesamt < MIN_FUELLUNGEN or not np.isfinite(j["mittel"]).any():
+        # Median ueber die einzelnen ORDERS, nicht ueber Symbol-Mediane.
+        # §3.1 sagt woertlich "ueber 30+ saubere Orders". Ein Median ueber
+        # Symbole gewichtet ein Symbol mit einer Fuellung genauso wie eines
+        # mit sechs - gemessen am 22.08.2026: 73 Symbole, 178 Fuellungen.
+        werte = Journal().slippage_werte().dropna()
+        n_gesamt = len(werte)
+
+        if n_gesamt < MIN_FUELLUNGEN or not np.isfinite(werte).any():
             # Kein messbarer Wert ist KEIN Fehlschlag: Slippage steht erst
             # fest, wenn genug echte Orders mit Fuellpreis UND Referenzkurs
             # vorliegen. Ein "nan" als Verstoss zu melden waere ein Fehlalarm.
-            # Ebenso wenig zaehlt eine handvoll Fuellungen - ein einzelnes
-            # Symbol mit wenigen Trades kann den unbewerteten Durchschnitt
-            # dominieren (siehe die Korrektur unten).
             return Befund(5, "Kostenkontrolle", True,
                           f"Im Depot erst {n_gesamt} Fuellung(en) mit "
                           f"gemessener Slippage - zu wenig fuer eine "
-                          f"belastbare Aussage (Schwelle {MIN_FUELLUNGEN}). "
-                          f"Schattenannahme {angesetzt:.1f} bps bleibt "
-                          "vorlaeufig. Monatlich erneut pruefen.")
+                          f"belastbare Aussage (noetig {MIN_FUELLUNGEN}, "
+                          f"BETRIEBSPLAN §3.1). Schattenannahme "
+                          f"{angesetzt:.1f} bps bleibt vorlaeufig.")
 
-        # Mit n GEWICHTETER Mittelwert - nicht der einfache Mittelwert der
-        # Symbol-Mittelwerte. Sonst wuerde ein Symbol mit 1 Fuellung genauso
-        # stark zaehlen wie eines mit 20, und ein einzelner Ausreisser
-        # koennte das Gesamtbild kippen (beobachtet: AMKR mit n=4 und
-        # -322,9 bps ergab durch ungewichtete Mittelung -161,4 bps und waere
-        # WEGEN des falschen Vorzeichenvergleichs faelschlich als "bestanden"
-        # durchgerutscht).
-        echt = float((j["mittel"] * j["n"]).sum() / j["n"].sum())
-        ok = abs(echt) <= angesetzt * 2
+        echt = float(werte.median())
+        ok = abs(echt) <= SLIPPAGE_GRENZE_BPS
+
+        # Ausreisser bleiben sichtbar - sie sind Information, kein Rauschen.
+        # Ein stiller Median waere die andere Haelfte desselben Fehlers.
+        gross = werte[werte.abs() > 100]
+        zusatz = ""
+        if len(gross):
+            zusatz = (f"  {len(gross)} von {n_gesamt} Order(s) ueber |100| bps "
+                      f"(groesste {gross.abs().max():.0f}) - pruefen, ob "
+                      f"Datenfehler (§G) oder echte Bewegung; der Median "
+                      f"traegt sie nicht mit.")
+
+        richtung = ("" if ok else
+                    ("  Schatten ist zu optimistisch - Annahme anheben."
+                     if echt > 0 else
+                     "  Ausfuehrung ist besser als angenommen - die "
+                     "Schattenannahme ist zu vorsichtig, nicht zu lasch."))
+
         return Befund(
             5, "Kostenkontrolle", ok,
-            f"Depot misst {echt:+.1f} bps Slippage (n-gewichtet, "
-            f"{n_gesamt} Fuellungen), Schatten setzt {angesetzt:.1f} bps an."
-            + ("" if ok else "  Schatten ist zu optimistisch - Annahme anheben.")
+            f"Depot misst {echt:+.1f} bps Slippage (Median ueber "
+            f"{n_gesamt} Orders), Schatten setzt {angesetzt:.1f} bps an. "
+            f"Grenze {SLIPPAGE_GRENZE_BPS:.0f} bps (§8), Ziel < 8 bps "
+            f"(§3.1)." + richtung + zusatz
         )
     except Exception as e:  # noqa: BLE001
         return Befund(5, "Kostenkontrolle", True,

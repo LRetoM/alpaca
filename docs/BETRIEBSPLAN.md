@@ -93,10 +93,33 @@ Position hat 5 Tage erreicht
 | Gemessener Vorsprung | +0,11 % je Trade |
 | Rundlauf-Breakeven bei 5 bps Spread | 0,142 % |
 | **Erforderlich** | Slippage-Median **< 8 bps** über 30+ saubere Orders |
-| Stand heute | 65 prüfbare Orders, **0 Ausreißer** seit dem Quote-Fix |
+| **Stand 22.08.2026** | **+0,0 bps Median über 162 prüfbare Orders** |
 
-**Wenn das nicht erfüllt wird, ist jede andere Verbesserung irrelevant** —
-dann handelt der Bot ein Signal, dessen Vorsprung die Kosten nicht deckt.
+**Die Ausführungsbedingung ist damit erfüllt.** 162 prüfbare Orders
+gegen die geforderten 30, Median +0,0 bps gegen die geforderten < 8.
+Die Ausführung im Papierdepot kostet also praktisch nichts gegenüber dem
+Referenzkurs.
+
+**Was das NICHT heißt.** Die Frage aus der Überschrift ist damit *nicht*
+beantwortet, nur ihre eine Hälfte:
+
+* **Slippage** (Abweichung vom Referenzkurs zum Orderzeitpunkt) ist
+  gemessen und unauffällig.
+* **Spread und Gebühren** fallen im Papierdepot gar nicht erst an
+  (`README`: „Im Paper-Konto fällt nichts davon an — Paper-Ergebnisse
+  sind deshalb systematisch zu gut"). Der Rundlauf-Breakeven von 0,142 %
+  bleibt vollständig bestehen, und der gemessene Vorsprung von +0,11 %
+  liegt weiterhin darunter (§A: „der zentrale Konflikt").
+
+Der Engpass ist also nicht mehr die Ausführungsqualität, sondern
+weiterhin der Vorsprung selbst.
+
+> **Warum diese Zahl vorher falsch aussah:** Die automatische
+> Kostenkontrolle (`shadow.pruefungen()` Nr. 5) rechnete bis zum
+> 22.08.2026 einen **Mittelwert** statt des Medians und meldete
+> −92,0 bps — getrieben von drei kaputten IEX-Quotes (KGS −1.648,
+> SIMO −1.584), die §G bereits als Datenfehler führt. Behoben, siehe
+> `BEFUNDE.md` §G16 Fund 9.
 
 ### 3.2 Die Flotte — Erwartung je Bot
 
@@ -205,6 +228,19 @@ Der Grund für ein Tage-Minimum überhaupt steht in §B1 von
 `docs/BEFUNDE.md`: Maßgeblich ist die Zahl der **Handelstage**, nicht
 der Trades. Elf Tage Betrieb haben nur 8 auswertbare Tage ergeben — zu
 wenig für jede Aussage.
+
+### Die Schwelle steigt vor dem 10.10. — bewusst und vorab festgelegt
+
+**Ergänzung vom 22.08.2026.** Der Musterspeicher legt ab dem 20.
+Schattenhandelstag automatisch Regimeschnitte als Kandidaten an, und
+seit `BEFUNDE.md` §G16 zählt jeder davon korrekt im Versuchszähler.
+Bei vier bis sechs Schnitten hebt das `fleet.schwelle_sigma()` von
+**2,85 auf etwa 2,93** — für alle laufenden Messungen, auch für B11.
+
+Das ist eine bewusste Entscheidung und steht deshalb *vor* dem Termin
+hier. Sie ist **kein Grund**, den Entscheidungsvertrag aus §3.3
+anzupassen. Maßgeblich bleibt der bei der Auswertung abgerufene Wert
+(`python scripts/21_fleet.py`), nie eine abgeschriebene Zahl.
 
 ### Vor dem 10.10. keine neuen Bots anmelden
 

@@ -27,6 +27,14 @@ import pandas as pd
 from .journal import Journal
 from .state import Store
 
+FEHLERQUOTE_VERSTOSS = 0.20
+"""Ab welchem Anteil fehlgeschlagener Laeufe es ein Regelbruch ist.
+
+Darunter `auffaellig`: Einzelne Ausfaelle einer Netz-API sind erwartbar
+(§H: 11 Tage Dauerbetrieb, 1 HTTP 500, automatisch abgefangen) und der
+Daemon ist mit `max_consecutive_errors=10` genau dafuer gebaut. Darueber
+scheitert nicht eine Anfrage, sondern der Betrieb."""
+
 
 @dataclass
 class RuleViolation:
@@ -272,10 +280,37 @@ def check_gaps(j: Journal, report: AuditReport, expected_interval_min: int = 15,
     recent = runs[runs["started_at"] >= since].sort_values("started_at")
     report.stats["Handelslaeufe"] = len(recent)
 
+    # Die QUOTE entscheidet ueber die Schwere, nicht die absolute Zahl.
+    #
+    # Bis zum 22.08.2026 war jeder einzelne fehlgeschlagene Lauf ein
+    # `verstoss`. Real gemessen: 1 von 91 Laeufen endete mit einem HTTP 500
+    # von Alpaca - `docs/BEFUNDE.md` §H fuehrt genau diesen Vorfall als
+    # BESTANDENE Betriebspruefung ("automatisch abgefangen"). Ein
+    # transienter Netzfehler ist kein Regelbruch; der Daemon ist mit
+    # `max_consecutive_errors=10` ausdruecklich dafuer gebaut.
+    #
+    # Warum das zaehlt: Mit diesem Abgleich im Health-Check (BETRIEBSPLAN
+    # §8) haette die Ampel ab sofort dauerhaft ROT gezeigt - und eine
+    # Warnung, die immer leuchtet, wird weggeklickt (`docs/LERNTEMPO.md`
+    # §5). Dann faellt auch der echte Regelbruch nicht mehr auf.
+    #
+    # Ueber der Quote ist es keine Panne mehr, sondern ein Zustand: Dann
+    # scheitert nicht eine Anfrage, sondern der Betrieb.
     failed = recent[recent["status"] == "failed"]
     if len(failed):
-        report.add("verstoss", "Fehlgeschlagene Laeufe",
-                   f"{len(failed)} von {len(recent)} Laeufen mit Fehler beendet.")
+        quote = len(failed) / max(1, len(recent))
+        schwer = quote > FEHLERQUOTE_VERSTOSS
+        report.stats["Fehlgeschlagene Laeufe"] = f"{len(failed)}/{len(recent)} ({quote:.0%})"
+        report.add(
+            "verstoss" if schwer else "auffaellig", "Fehlgeschlagene Laeufe",
+            f"{len(failed)} von {len(recent)} Laeufen mit Fehler beendet "
+            f"({quote:.0%})."
+            + ("  Das ist kein Einzelfall mehr - Ursache klaeren."
+               if schwer else
+               "  Einzelne Ausfaelle einer Netz-API sind erwartbar und "
+               "werden vom Daemon abgefangen (§H); sichtbar bleiben sie "
+               "trotzdem."),
+        )
 
     if len(recent) > 1:
         gaps = recent["started_at"].diff().dropna()

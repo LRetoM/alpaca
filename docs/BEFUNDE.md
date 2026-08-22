@@ -1502,6 +1502,413 @@ Test von mir (er prüfte, *dass* gemeldet wird, nicht *womit*).
 
 ---
 
+## G16. Der Live-Spiegel spiegelt nicht — und vier stille Lücken (22.08.2026)
+
+**Anlass:** eine vollständige Durchsicht des Projekts ohne konkreten
+Verdacht. Zehn Funde, alle aus derselben Familie wie §G15: nichts stürzt
+ab, nichts meldet sich, jede Zahl sieht plausibel aus.
+
+Geprüft wurden alle 52 Module (28.384 Zeilen zum Prüfzeitpunkt), 375
+öffentliche Funktionen, beide Testschichten, die vier Datenbanken und die
+laufenden Dienste. Am Ende: **276 Tests** (vorher 222), 48
+Selbstprüfungen, **48 von 48 Mutationen gefangen**, beide Dienste mit dem
+neuen Stand neu gestartet.
+
+### Fund 1: `B09_nachkauf` ist kein Live-Spiegel — Schwere: hoch
+
+§G6 hat `B09_nachkauf` zur Referenz für „vergleiche gegen den echten
+Live-Bot" erklärt, und `tests/test_konsistenz.py` sichert seither, dass
+seine Konfiguration **feldweise** stimmt. Das war richtig — und reichte
+nicht. Was beide tatsächlich *tun*:
+
+| | Live-Journal | Spiegelbuch `B09` |
+|---|---:|---:|
+| Kaufentscheidungen | 131 | 51 |
+| **Nachkäufe (`topup`)** | **110 (36 %)** | **0** |
+| Positionen | 15 / 15 | 11 / 15 |
+| investiert | 91 % | 64 % |
+
+**Die Ursache ist kein Parameter, sondern der Aufrufrhythmus.**
+`max_new_positions=3` bedeutet an den beiden Orten Verschiedenes:
+
+```
+live.run_once      3 Käufe je ZYKLUS      – Daemon-Takt 15 Min, bis 26/Tag
+shadow._spiegel    3 Käufe je HANDELSTAG  – Tagesbar-Rhythmus, ein Durchgang
+```
+
+Gemessen: Am 28.07.2026 eröffnete der Live-Bot **50 Positionen an einem
+Tag** über 18 Zyklen. Das Spiegelbuch schafft konstruktionsbedingt drei.
+
+**Daran hängt der eigentliche Schaden.** `Engine._find_topups` bekommt
+das von `_find_entries` bereits verplante Kapital abgezogen. Solange
+Plätze frei sind, ist dieser Betrag das *gesamte* freie Kapital — es gibt
+dann **nie** Nachkäufe. Erst im vollen Depot (`slots = 0`,
+`entries = []`, `verplant = 0`) entstehen sie. An der Engine
+nachgestellt:
+
+| Depotstand | Käufe | Nachkäufe |
+|---|---:|---:|
+| 11 / 15 Plätze | 4 | **0** |
+| 15 / 15 Plätze | 0 | **15** |
+
+Live ist voll → 110 Nachkäufe. Der Spiegel wird nie voll → null.
+
+**Zwei Folgen:**
+
+1. `B09_nachkauf` ist über seine gesamte Laufzeit **bitgleich mit
+   `B08_voll_investiert`** (`divergenz()`: 17 Tage, max. Abweichung
+   0,00 bps, `identisch=True`). Seine Achse `allow_topup` hat nie
+   gebunden — derselbe Befund wie B01/B02/B03/B05 in §E. Er belegt einen
+   Flottenplatz und hebt die Schwelle für alle (§B2), ohne etwas zu
+   messen.
+2. `B11_dyn_ausstieg_live` wird laut BETRIEBSPLAN §3.3 gegen genau
+   diesen Bot abgenommen.
+
+**Einordnung — wie schon bei §G6 nicht so schlimm, wie es klingt:** Der
+Vergleich B11 gegen B09 bleibt **intern gültig**. Beide Seiten teilen
+denselben Rhythmus, die eine getestete Achse
+(`zeitausstieg_dynamisch`) ist sauber isoliert. Falsch ist allein die
+Behauptung, das Ergebnis sage etwas über den *tatsächlichen* Live-Bot.
+
+**Nebenbefund:** Der Live-Bot lässt bei jedem Lauf Kapital liegen. Die
+Engine bemisst die Positionsgrößen für *alle* Vorschläge, ausgeführt
+werden nur `max_new_positions`. Im nachgestellten Fall blieben 6.414 $
+von 27.574 $ ungenutzt — und der Nachkauf, der genau das auffangen soll,
+war durch dieselbe Verplanung blockiert.
+
+**Nicht geändert.** Beides ist Handelslogik während einer laufenden
+Messung (CLAUDE.md). Der Weg führt über einen eigenen Flottenbot nach dem
+10.10.2026. **Neu:** `shadow.pruefungen()` hat eine zehnte Prüfung
+(„Handelsrhythmus Live gegen Spiegel"), die die Abweichung bei jedem
+Aufruf ausweist. Regression:
+`tests/test_handelsrhythmus.py` (7 Tests).
+
+### Fund 2: Der Musterspeicher hätte sich ab Tag 20 selbst geflutet
+
+`shadow.lernen` ruft seit §G14 täglich
+`patterns.kandidaten_suchen(anlegen=True)`. `erfassen()` vergab eine
+frische `uuid4` **ohne zu prüfen, ob dieselbe Bedingung schon
+existiert**. Drei Defekte lagen scharf, sobald der Schatten seinen 20.
+Handelstag erreicht (Stand am 22.08.: **19**):
+
+1. **Duplikate.** Gemessen im Regressionstest: **10 Zeilen nach 5
+   Läufen** statt 2. Täglich wären dieselben ~4 Regimeschnitte erneut
+   angelegt worden.
+2. **Wiederbelebung.** Ein als `zerfallen` markiertes Muster wäre am
+   nächsten Tag als frischer `kandidat` zurückgekehrt — der
+   Verfallsmechanismus, also der ausdrückliche Zweck des Moduls, wäre
+   wirkungslos gewesen.
+3. **Ungezählte Versuche.** Jeder Regimeschnitt ist ein Vergleich.
+   `hypotheses.erfassen` hebt dafür seit jeher den Versuchszähler,
+   `patterns.erfassen` nicht. Wer neun Regimezellen prüft, findet in
+   einer garantiert etwas (§B2) — eine Schwelle, die davon nichts weiß,
+   ist zu niedrig.
+
+**Behoben:** `erfassen()` ist idempotent über (`bedingung`, `wirkung`),
+fasst einen vorhandenen Eintrag nicht an und hebt den Versuchszähler
+**nur beim erstmaligen** Anlegen. Regression:
+`tests/test_musterspeicher.py` (17 Tests).
+
+#### Betriebsentscheidung vom 22.08.2026: der Lernlauf legt weiter an
+
+Nach der Reparatur stand die Wahl, das automatische Anlegen bis zum
+10.10. auszusetzen. **Entschieden: es bleibt an** — der Lernapparat läuft
+voll.
+
+Die Folge muss hier stehen, damit sie am Entscheidungstermin niemanden
+überrascht: Sobald der Schatten seinen 20. Handelstag erreicht, legt der
+Lauf die Regimeschnitte als Kandidaten an, und jeder hebt
+`fleet.schwelle_sigma()` **für alle laufenden Messungen, auch
+rückwirkend**. Bei vier bis sechs Schnitten steigt sie von **2,85 auf
+etwa 2,93**.
+
+Das ist methodisch richtig — ein geprüfter Schnitt *ist* ein Versuch
+(§B2), und ihn nicht zu zählen wäre genau die Selbsttäuschung, gegen die
+`fleet` gebaut ist. Es ist zugleich eine reale Verschärfung für
+`B11_dyn_ausstieg_live`, dessen Kriterium 1 an dieser Schwelle hängt
+(BETRIEBSPLAN §3.3).
+
+**Diese Verschärfung ist damit vorab festgelegt und nicht nachträglich
+entstanden.** Sie darf am 10.10. nicht als Argument dienen, den Vertrag
+anzupassen — weder nach oben noch nach unten. Die aktuelle Schwelle ist
+bei jeder Auswertung abrufbar (`python scripts/21_fleet.py`); eine
+abgeschriebene Zahl gilt nicht (§3.2).
+
+### Fund 3: Der letzte unkorrigierte t-Wert setzte einen Status
+
+§G12 hat die Überlappungskorrektur an vier Stellen eingebaut.
+`hypotheses.historientest` blieb übrig — ausgerechnet die Stelle, an der
+aus einer Zahl ein **Urteil** wird:
+
+```python
+status = "im_test" if abs(t) > 2 else "widerlegt"
+```
+
+Bei einem 5-Tage-Fenster liegt die Fehlalarmquote unkorrigiert bei
+**39,5 %** (§G12). Vier von zehn Urteilen wären Rauschen gewesen — in
+beide Richtungen: eine brauchbare Idee verworfen oder eine wertlose in
+den teuren Vorwärtstest geschickt.
+
+Verschärfend: Die Funktion nahm `horizont` als Parameter entgegen und
+benutzte ihn im Rumpf **an keiner Stelle**. Eine Signatur, die eine
+Korrektur verspricht, die es nicht gibt, ist schlimmer als gar keine —
+sie beruhigt beim Lesen.
+
+**Behoben:** Newey-West über die chronologisch sortierte IC-Reihe, `t_roh`
+zum Vergleich daneben, und bei zu kurzer Reihe **kein Urteil** (Status
+`offen`, `hist_t` als NULL) statt eines Ersatzwerts. Regression:
+`tests/test_hypothesen.py` (9 Tests), inklusive Kalibrierung in beide
+Richtungen.
+
+### Fund 4: Ein Abbruchkriterium, das auf einen manuellen Aufruf wartete
+
+BETRIEBSPLAN §8 führt auf: *„Regelabgleich meldet Abweichung → Sofort
+aus — ein Regelbruch ist ein Logikfehler, kein Pech."*
+`audit.run_audit()` wurde von genau einer Stelle gerufen:
+`scripts/13_tagesbericht.py`, laut §5.2 „alle 1–2 Wochen" von Hand. Der
+Health-Check kannte ihn nicht.
+
+**Beim Einbauen der zweite Fund:** Der Abgleich meldete einen
+`VERSTOSS`, weil **1 von 91** Läufen mit einem HTTP 500 von Alpaca
+endete. §H führt genau diesen Vorfall als *bestandene* Betriebsprüfung.
+Unverändert eingebaut hätte die Ampel ab sofort dauerhaft ROT gezeigt —
+und eine Warnung, die immer leuchtet, wird weggeklickt
+(`docs/LERNTEMPO.md` §5).
+
+**Behoben:** Die **Quote** entscheidet über die Schwere
+(`FEHLERQUOTE_VERSTOSS = 0,20`), nicht die absolute Zahl. Der
+Health-Check ruft den Regelabgleich jetzt bei jedem Lauf; ein Verstoß
+färbt ROT, eine Auffälligkeit wird nur genannt. Regression:
+`tests/test_regelabgleich.py` (7 Tests).
+
+### Fund 5: Ein abstürzender Baustein galt als gesund
+
+Im Schatten-Log standen drei
+`sqlite3.OperationalError: unable to open database file` — alle drei
+Schritte eines Durchgangs scheiterten. `16_shadow_daemon.py` fängt das ab
+und meldet `nutzung.melden(baustein, -1, signatur="fehler")`.
+
+Der Wächter aus §G15 erkannte das **nicht**: `darf_leer_sein=True` (für
+alle Schattenschritte gesetzt) überspringt die Leer-Prüfung, `-1` ist
+nicht `0`, und „immer_gleich" braucht **fünf** Läufe. Ein Baustein, der
+bei jedem Aufruf abstürzt, ist der eindeutigste Ausfall überhaupt — und
+wurde bestenfalls als mildeste Kategorie gemeldet, mit dem irreführenden
+Text „es entsteht keine neue Information". Sie entsteht sehr wohl: die
+Information, dass es kaputt ist.
+
+**Behoben:** fünfte Ausfallart `fehlerhaft`, die am **jüngsten** Lauf
+hängt und sofort greift. Am jüngsten, damit ein überstandener Netzausfall
+erledigt ist, sobald wieder etwas durchläuft.
+
+### Fund 6: Das Kriterium, das die Strategie trägt, lief nirgends
+
+§G12 hat den t-Wert der tragenden Faktoren entwertet — `rsi2` (2,70) und
+`reversal_3d` (2,79) halten die Schwelle 2,85 nach Korrektur nicht mehr.
+Was den Befund dennoch trägt, benennt §G12 ausdrücklich:
+
+> `ReversalWeights` nennt als Kriterium ausdrücklich die
+> **Vorzeichenstabilität je Jahr** („100 % positive Jahre") — ein anderes
+> und robusteres Kriterium als der t-Wert, das von dieser Korrektur
+> unberührt bleibt.
+
+`research.measure_stability` und `research.stability_report` messen genau
+das. **Beide wurden von keinem Skript aufgerufen.** `11_factor_lab.py`
+fuhr nur `measure_factors` → `summarize` → `select_factors` — alles am
+t-Wert hängend.
+
+Damit war das Kriterium, auf dem die Strategie steht, aus dem laufenden
+Werkzeug heraus **nicht reproduzierbar**. Die „100 % positive Jahre"
+stammen aus einem Messlauf, den niemand wiederholen konnte, ohne die
+Funktion von Hand zu rufen. Dieselbe Fehlerklasse wie §G15.
+
+**Zweiter Defekt im selben Skript:** Die Zusammenfassung unter der
+Rangliste filterte mit `results["t_stat"] >= 3.0` — dem **rohen** Wert —
+während `select_factors` daneben korrekt `t_korrigiert` prüfte. Zwei
+verschiedene Schwellen in derselben Ausgabe, und die laxere stand in der
+Zeile, die man zitiert („stärkster positiver Faktor").
+
+**Behoben:** `11_factor_lab.py` hat einen fünften Schritt
+(„Hält das Vorzeichen über die Jahre?"), legt `stabilitaet.csv` ab, und
+alle Anzeigen rechnen mit dem korrigierten Wert. Regression:
+`tests/test_musterspeicher.py::TestVorzeichenstabilitaetIstVerdrahtet`.
+
+### Fund 7: 17 durchgeführte Versuche, die niemand mehr sah
+
+`lernkern.sqlite` enthielt die Tabellen `experimente` (17 Zeilen) und
+`ergebnisse` (17) — Reste der Experimentwarteschlange, die beim Bau des
+Nutzungsnachweises überschrieben wurde (§G15 hält den Vorfall selbst
+fest: „Vor jedem `cat >` auf eine existierende Datei gehört ein Blick
+hinein"). Wiederhergestellt wurde damals der **Code**; die **Daten**
+blieben liegen, und kein Modul las sie mehr.
+
+**Was drinstand, bevor gelöscht wurde.** Drei Familien (`merkmal` 7,
+`haltedauer` 5, `bedingung` 5), alle am 22.08.2026 in einem einzigen
+Lauf, alle Status `fertig`, **alle mit `befund = 0`** — kein einziger
+Treffer. Die Schwelle wuchs innerhalb des Laufs von 0,50 auf 2,85; der
+Zähler war also lauf-lokal und von `fleet.n_versuche` getrennt.
+
+Methodisch sind sie überholt: Sie liefen auf **8 bis 14 Handelstagen**.
+Für einen 5-Tage-Horizont ist das laut §G14 zu wenig für einen gültigen
+t-Wert — entsprechend steht bei 13 der 17 Zeilen `t_wert = NULL`, während
+der rohe danebensteht. Genau das Verhalten, das §G14 als richtig
+festgelegt hat.
+
+**Entscheidung (22.08.2026): verworfen.** Sicherung als
+`lernkern.vor_experimente_entfernt_20260822_172234.sqlite`, danach beide
+Tabellen entfernt; `modelle` (die Registry, 3 Zeilen) blieb unberührt.
+Nicht in den Versuchszähler nachgetragen, weil kein Experiment eine
+Aussage getragen hat und die Messmethodik seit §G14 eine andere ist — ein
+Nachtrag hätte die Schwelle für die laufende B11-Messung gehoben, ohne
+dass je etwas gemessen worden wäre.
+
+**Eine Beobachtung daraus ist aufhebenswert — ausdrücklich KEIN Befund:**
+
+| Frage | Tage | t roh | t korr. | Schwelle |
+|---|---:|---:|---:|---:|
+| Sortiert `news_z` die Kandidaten? | 9 | **−3,12** | — | 2,76 |
+| Sortiert `news_5d` die Kandidaten? | 9 | −0,88 | — | 2,83 |
+
+Der korrigierte Wert ist nicht berechenbar (9 Tage), der rohe ist laut
+§G12 nicht zitierfähig. Es ist also **nichts gemessen**. Aufhebenswert
+ist es trotzdem: `signals.ReversalWeights.news` ist der einzige Baustein,
+der **ohne vorherige Messung** eingebaut wurde (03.08.2026, bewusste
+Abweichung von der Projektregel), und er führt seine eigene
+Abbruchbedingung mit — *„Fällt die Auswertung negativ aus, gehört dieser
+Faktor wieder auf 0."* Das Vorzeichen zeigt in diese Richtung.
+
+**Zu prüfen, sobald 20+ auswertbare Handelstage vorliegen** — über das
+Feld `news_aktiv`, das genau für diese Trennung protokolliert wird.
+
+### Fund 8: Die PDT-Gegenprobe ist gebaut und leer
+
+`state.py` führt eine eigene Daytrade-Tabelle, und
+`compliance.day_trades_from_orders` ist ausdrücklich als „Gegenprobe zum
+`daytrade_count` des Brokers" dokumentiert — *„wenn beide auseinander
+laufen, stimmt die eigene Buchführung nicht."*
+
+Gemessen: `day_trades` enthält **0 Zeilen**. `record_day_trade` wird
+nirgends aufgerufen, `day_trades_last` und `day_trades_from_orders`
+ebenfalls nicht. Die Gegenprobe existiert als Code und hat nie
+stattgefunden.
+
+**Derzeit folgenlos:** Die PDT-Regel greift erst unter 25.000 $, das
+Konto steht bei 109.701 $ (§G4 stuft das Risiko entsprechend als
+„gering" ein). **Nicht behoben** — das Füllen der Tabelle gehört in den
+Live-Pfad und damit hinter einen Dienstneustart; als Sicherung wird sie
+erst relevant, wenn das Konto unter die Schwelle fällt. Festgehalten,
+damit sie nicht für vorhanden gehalten wird.
+
+### Fund 9: Die Kostenkontrolle maß eine andere Zahl als der Vertrag
+
+**Der wichtigste Fund mit positivem Ausgang.** `shadow.pruefungen()`
+Nr. 5 meldete dauerhaft FEHL:
+
+> Depot misst −92,0 bps Slippage (n-gewichtet, 178 Füllungen), Schatten
+> setzt 3,0 bps an. **Schatten ist zu optimistisch.**
+
+Beide Teile der Meldung waren falsch.
+
+**Falsche Kennzahl.** Der Entscheidungsvertrag nennt zweimal
+ausdrücklich den **Median** — §3.1 („Slippage-Median < 8 bps über 30+
+saubere Orders") und §8 („Slippage-Median > 15 bps → alle Ergebnisse neu
+bewerten"). Die Prüfung rechnete einen n-gewichteten **Mittelwert**. An
+denselben 162 prüfbaren Orders:
+
+| Kennzahl | Wert | Urteil |
+|---|---:|---|
+| **Median** (Vertrag) | **+0,0 bps** | §3.1 **erfüllt** |
+| Mittelwert (Prüfung) | −71,7 bps | meldet FEHL |
+
+Die Differenz stammt aus Datenfehlern, die dieses Register selbst führt
+(§G, 04.08.2026): **KGS −1.648 bps** und **SIMO −1.584 bps** sind
+kaputte IEX-Quotes, keine Ausführungsqualität. Genau gegen solche
+Artefakte ist der Median robust — und genau deshalb steht er im Vertrag.
+
+**Falsche Ebene.** Der erste Reparaturversuch nahm den Median über die
+**Symbol**-Mediane. Ein Regressionstest hat ihn sofort widerlegt: Bei 73
+Symbolen mit 1 bis 6 Füllungen gewichtet das ein Symbol mit einer Order
+genauso wie eines mit sechs. §3.1 sagt wörtlich „über 30+ saubere
+**Orders**". Behoben über `journal.slippage_werte()`, das sich die
+Bereinigung mit `slippage_report()` teilt — getrennte Filter hätten
+Bericht und Prüfung auf verschiedenen Grundmengen rechnen lassen.
+
+**Falsche Richtung.** Bei der Vorzeichenkonvention aus `journal.order()`
+heißt negativ *günstiger als erwartet*. Der Satz „Schatten ist zu
+optimistisch" beschreibt den umgekehrten Fall.
+
+**Folge für §3.1 — die Kernfrage des Projekts.** Mit der richtigen
+Kennzahl ist die Ausführungsbedingung **erfüllt**: 162 prüfbare Orders
+gegen die geforderten 30, Median +0,0 bps gegen die geforderten < 8. Das
+beantwortet allerdings nur die eine Hälfte: Spread und Gebühren fallen im
+Papierdepot gar nicht erst an, der Rundlauf-Breakeven von 0,142 % bleibt
+vollständig bestehen, und der gemessene Vorsprung von +0,11 % liegt
+weiterhin darunter (§A). Der Engpass ist nicht mehr die Ausführung,
+sondern weiterhin der Vorsprung.
+
+Die 24 Orders über |100| bps bleiben in der Meldung sichtbar — sie sind
+Information, kein Rauschen. Ein stiller Median wäre die andere Hälfte
+desselben Fehlers.
+
+### Fund 10: Die Kursanpassungsprüfung musste zwangsläufig anschlagen
+
+Prüfung 4 meldete FEHL: „1.525 von 19.788 Ergebnissen mit rückwirkend
+geändertem Kurs (7,7 %)" gegen eine Schwelle von 5 %.
+
+Aufgeschlüsselt je Stichtag zeigt sich, dass die Schwelle gar nicht
+halten *kann*:
+
+| Stichtage | Anteil angepasst |
+|---|---:|
+| 28.07. – 07.08. (alt) | 6 % bis **25 %** |
+| 13.08. – 20.08. (jung) | 0 % bis 4 % |
+| kumuliert | 7,7 % → FEHL |
+
+yfinance lädt mit `auto_adjust=True` und passt historische Kurse nach
+**jeder** Dividende und jedem Split rückwirkend an. Je älter ein
+Stichtag, desto mehr solcher Ereignisse liegen dahinter. Die kumulierte
+Quote **muss** also mit der Betriebsdauer wachsen.
+
+Das ist exakt der Fehlversuch, den `data_integrity.check_stumme_felder`
+schon einmal gemacht hat und den §G13 festhält: eine Quote über die
+Historie prüfen statt der gefährlichen Richtung.
+
+Gefährlich ist der umgekehrte Fall — **frische** Stichtage mit hoher
+Anpassungsrate. Das hieße, die Kursquelle ändert Daten, die gerade erst
+entstanden sind, und dann sind die jüngsten Vorhersagen betroffen.
+
+**Behoben:** `_pruefe_kursanpassung` prüft die jüngsten 5 Stichtage
+gegen 15 %; der Historienwert wird zur Einordnung mitgenannt. Aktuell:
+1,2 % an der jungen Kante. Regression: `tests/test_kostenkontrolle.py`
+(10 Tests), drei neue Mutationen — **48 von 48 gefangen**.
+
+### Nebenbefund: eine abgeschriebene Zahl war bereits gedriftet
+
+`fokus.hebel()` trug den Satz „Der Bot handelt 1.200 von **2.189**
+liquiden Symbolen" fest im Code. `universum.csv` enthält **2.168**;
+§G11 Fund 3 nennt ebenfalls 2.168, §H führt 2.189. Dasselbe Prinzip, das
+BETRIEBSPLAN §3.2 für die Signifikanzschwelle festlegt („hier steht
+bewusst keine Zahl"), gilt für den Code. Beide Zahlen kommen jetzt aus
+den Quellen: die gehandelte aus der Voreinstellung von `12_daemon.py`,
+die verfügbare aus `universum.csv`, die Historientage aus `trades.csv`.
+
+### Was die Prüfung NICHT gefunden hat
+
+Damit der Bericht nicht nur aus Funden besteht — diese Vermutungen haben
+sich an den Daten **nicht** bestätigt:
+
+* **`vergleich_gepaart` braucht keine Überlappungskorrektur.** Der
+  Verdacht lag nahe (§G12). Gemessen an allen Bot-Paaren: Die
+  Autokorrelation der Tagesdifferenz `d_t` liegt zwischen −0,16 und
+  +0,18, die Aufblähung zwischen **0,70× und 1,20×**. Die Differenz
+  zweier Equity-Tagesrenditen ist ein Horizont-1-Wert — hier zu
+  „korrigieren" würde den t-Wert teils *erhöhen*. Bleibt wie es ist.
+* Kein totes Modul: alle 52 Module in `src/alpaca_bot/` sind verdrahtet.
+* Der Mutationstest fing nach der Erweiterung **48 von 48** — darunter
+  eine, die einen zu schwachen Test von mir entlarvte (er prüfte den
+  `nan`-Wert, aber nicht den daraus folgenden Status).
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

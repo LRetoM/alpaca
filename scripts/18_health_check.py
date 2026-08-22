@@ -147,6 +147,40 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 - der Nachweis darf nie blockieren
         print(f"  Bausteine       : nicht pruefbar ({type(e).__name__})")
 
+    # --- 3c. Regelabgleich ---
+    # BETRIEBSPLAN §8 fuehrt ihn als Abbruchkriterium: "Regelabgleich
+    # meldet Abweichung -> Sofort aus - ein Regelbruch ist ein Logikfehler,
+    # kein Pech." Bis zum 22.08.2026 lief er trotzdem nur in
+    # `13_tagesbericht.py`, also "alle 1-2 Wochen" von Hand (§5.2). Ein
+    # Abbruchkriterium, das auf einen manuellen Aufruf wartet, ist keines.
+    #
+    # Anders als die Datenintegritaet prueft er nicht die ZAHLEN, sondern
+    # das VERHALTEN: Hat der Bot getan, was seine damals geltenden Regeln
+    # vorsahen? Beides ist noetig - ein Bot kann sauber protokollieren und
+    # trotzdem systematisch etwas anderes tun als geplant.
+    try:
+        from alpaca_bot import audit
+
+        a = audit.run_audit(days=7)
+        n_auff = len(a.findings) - len(a.violations)
+        print(f"  Regelabgleich   : "
+              + ("keine Abweichungen" if not a.findings else
+                 f"{len(a.violations)} Verstoss/Verstoesse, {n_auff} auffaellig"))
+        if not a.clean:
+            ampel = "ROT"
+            for v in a.violations:
+                gruende.append(f"REGELVERSTOSS: {v.rule} - {v.detail[:110]}")
+        else:
+            # Auffaelligkeiten faerben bewusst NICHT: Sie sind
+            # erklaerungsbeduerftig, nicht falsch (z. B. eine Position, die
+            # durch Kursgewinn ueber ihre Einstiegsgrenze gewachsen ist).
+            for f in a.findings:
+                gruende.append(f"Regelabgleich (auffaellig): {f.rule} - "
+                               f"{f.detail[:110]}")
+    except Exception as e:  # noqa: BLE001 - darf die Ampel nicht zerreissen
+        print(f"  Regelabgleich   : nicht pruefbar ({type(e).__name__})")
+        gruende.append(f"Regelabgleich nicht pruefbar: {type(e).__name__}: {e}")
+
     # --- 4. Depot vs. Zustand ---
     try:
         from alpaca_bot import account

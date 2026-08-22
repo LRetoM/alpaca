@@ -206,3 +206,67 @@ class TestProtokollStoertDenBetriebNie:
 
         for e in ERWARTUNGEN:
             assert len(e.zweck) > 15, f"{e.baustein} ohne verstaendlichen Zweck"
+
+
+class TestFehlerSchlaegtSofortDurch:
+    """Die fuenfte Art: der Baustein laeuft und stuerzt jedes Mal ab.
+
+    **Anlass (22.08.2026).** Im Schatten-Log standen drei
+    `sqlite3.OperationalError: unable to open database file` - alle drei
+    Schritte eines Durchgangs scheiterten. `16_shadow_daemon.py` faengt
+    das ab und meldet `nutzung.melden(baustein, -1, signatur="fehler")`.
+
+    Der Waechter erkannte das aber NICHT als Ausfall:
+
+      * `darf_leer_sein=True` (fuer alle Schattenschritte gesetzt)
+        ueberspringt die Leer-Pruefung,
+      * `ergebnis = -1` ist nicht 0, also greift sie ohnehin nicht,
+      * und "immer_gleich" braucht **fuenf** Laeufe.
+
+    Ein Baustein, der bei jedem Aufruf abstuerzt, ist der eindeutigste
+    Ausfall ueberhaupt - und wurde als mildeste Kategorie gemeldet, mit
+    dem irrefuehrenden Text "es entsteht keine neue Information". Er
+    entsteht sehr wohl: die Information, dass es kaputt ist.
+    """
+
+    def _mit_laeufen(self, db, ergebnisse, jetzt):
+        from alpaca_bot import nutzung
+
+        with nutzung._conn(db) as c:
+            for i, e in enumerate(ergebnisse):
+                c.execute(
+                    "INSERT INTO laeufe (baustein, ts, ergebnis, signatur)"
+                    " VALUES ('test.baustein',?,?,?)",
+                    ((jetzt - dt.timedelta(hours=i + 1)).isoformat(), e,
+                     "fehler" if e < 0 else f"s{i}"))
+        return nutzung.pruefen(_erwartung(darf_leer_sein=True), db=db, jetzt=jetzt)[0]
+
+    def test_ein_einziger_fehllauf_wird_gemeldet(self, db):
+        """Nicht erst nach fuenf. Ein Absturz ist sofort eine Aussage."""
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        b = self._mit_laeufen(db, [-1], jetzt)
+        assert b.art == "fehlerhaft", f"erwartet 'fehlerhaft', war '{b.art}'"
+        assert not b.ok
+
+    def test_meldung_nennt_den_fehler_nicht_fehlende_information(self, db):
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        b = self._mit_laeufen(db, [-1, -1, -1], jetzt)
+        assert "fehlgeschlagen" in b.detail.lower() or "fehler" in b.detail.lower()
+        assert "keine neue Information" not in b.detail
+
+    def test_erfolgreicher_lauf_danach_loescht_den_befund(self, db):
+        """Ein alter Fehler, auf den Erfolge folgten, ist erledigt.
+
+        Sonst bliebe der Waechter nach einem einmaligen Netzausfall
+        dauerhaft rot - und eine Warnung, die immer leuchtet, wird
+        weggeklickt (`docs/LERNTEMPO.md` §5).
+        """
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        # Index 0 ist der juengste Lauf (ts = jetzt - 1h).
+        b = self._mit_laeufen(db, [7, 5, -1], jetzt)
+        assert b.ok, f"nach erfolgreichen Laeufen erledigt, war '{b.art}'"
+
+    def test_gesunder_baustein_bleibt_ok(self, db):
+        jetzt = dt.datetime(2026, 8, 22, 12, tzinfo=dt.UTC)
+        b = self._mit_laeufen(db, [3, 4, 5], jetzt)
+        assert b.ok and b.art == "ok"

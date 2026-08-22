@@ -211,6 +211,63 @@ def offene_fragen(store=None) -> list[Frage]:
     return fragen
 
 
+def _dz(n: int) -> str:
+    """Tausenderpunkte - nur auf der Zahl, nicht auf dem Satz.
+
+    Ein `f"...{n:,}...".replace(",", ".")` ueber den ganzen String traf
+    auch die Satzkommas ("sofort da. der Schatten waechst") - beim
+    Umbau am 22.08.2026 genau einmal passiert und im Testlauf sofort
+    aufgefallen.
+    """
+    return f"{n:,}".replace(",", ".")
+
+
+def _breite() -> tuple[int | None, int | None]:
+    """(gehandelte Symbole, verfuegbare Symbole) - aus den QUELLEN gelesen.
+
+    Bis zum 22.08.2026 standen beide Zahlen als Text im Rumpf von
+    `hebel()`: "1.200 von 2.189". Die zweite war zu dem Zeitpunkt bereits
+    falsch - `universum.csv` enthaelt **2.168** Symbole, und §G11 Fund 3
+    nennt ebenfalls 2.168, waehrend §H 2.189 fuehrt. Genau die Drift, vor
+    der `docs/BETRIEBSPLAN.md` §3.2 fuer die Signifikanzschwelle warnt
+    ("eine abgeschriebene Zahl waere nach der naechsten Anmeldung
+    falsch") - hier war sie im Code statt im Dokument.
+
+    Die gehandelte Zahl ist die Voreinstellung von `12_daemon.py`, also
+    das, was der Dienst tatsaechlich startet - dieselbe Quelle, die
+    `tests/test_konsistenz.py` fuer den Universumsvergleich liest. Ein
+    fester Wert hier wuerde still falsch, sobald jemand das Skript
+    aendert.
+    """
+    import ast
+
+    from .config import PROJECT_ROOT
+
+    gehandelt = None
+    try:
+        baum = ast.parse((PROJECT_ROOT / "scripts" / "12_daemon.py")
+                         .read_text(encoding="utf-8"))
+        for k in ast.walk(baum):
+            if (isinstance(k, ast.Call) and isinstance(k.func, ast.Attribute)
+                    and k.func.attr == "add_argument"
+                    and any(isinstance(a, ast.Constant)
+                            and a.value == "--max-symbols" for a in k.args)):
+                for kw in k.keywords:
+                    if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                        gehandelt = int(kw.value.value)
+    except Exception:  # noqa: BLE001 - eine Anzeigezahl darf nie stoppen
+        pass
+
+    verfuegbar = None
+    try:
+        from .universe import UNIVERSE_FILE
+
+        verfuegbar = len(pd.read_csv(UNIVERSE_FILE)["symbol"].dropna().unique())
+    except Exception:  # noqa: BLE001
+        pass
+    return gehandelt, verfuegbar
+
+
 def hebel(store=None) -> list[str]:
     """Was die Wartezeit verkuerzt - mit Zahlen, nicht mit Ratschlaegen."""
     from . import fleet
@@ -235,20 +292,63 @@ def hebel(store=None) -> list[str]:
 
     # --- Hebel 2: die Breite ---------------------------------------------
     # IR = IC * sqrt(BR); Zeitbedarf ~ 1/IR^2, also ~ 1/BR.
-    z.append(
-        f"Breite: Der Bot handelt 1.200 von 2.189 liquiden Symbolen. "
-        f"IR = IC*sqrt(BR) heisst: volle Breite kuerzt den Zeitbedarf auf "
-        f"{1200/2189:.0%} - die Wartezeit faellt fast auf die Haelfte.")
-    z.append(
-        "  -> Aendert die Handelslogik. Reihenfolge: erst Historienlauf, "
-        "dann eigener Flottenbot, fruehestens nach dem 10.10.")
+    gehandelt, verfuegbar = _breite()
+    if gehandelt and verfuegbar and verfuegbar > gehandelt:
+        z.append(
+            f"Breite: Der Bot handelt {_dz(gehandelt)} von "
+            f"{_dz(verfuegbar)} liquiden Symbolen. IR = IC*sqrt(BR) heisst: "
+            f"volle Breite kuerzt den Zeitbedarf auf "
+            f"{gehandelt/verfuegbar:.0%} - die Wartezeit faellt fast auf "
+            f"die Haelfte.")
+        z.append(
+            "  -> Aendert die Handelslogik. Reihenfolge: erst Historienlauf, "
+            "dann eigener Flottenbot, fruehestens nach dem 10.10.")
+    elif gehandelt and verfuegbar:
+        z.append(f"Breite: Der Bot handelt bereits {_dz(gehandelt)} von "
+                 f"{_dz(verfuegbar)} liquiden Symbolen - dieser Hebel ist "
+                 f"ausgeschoepft.")
+    else:
+        z.append("Breite: Universum nicht lesbar - `universum.csv` fehlt. "
+                 "Aufbauen mit: python scripts/11_factor_lab.py")
 
     # --- Hebel 3: die Historie -------------------------------------------
-    z.append(
-        "Historie: 969 Handelstage sind sofort da, der Schatten waechst um "
-        "einen je Tag. Fuer jede Frage, die sich rueckwaerts stellen laesst, "
-        "ist das der Unterschied zwischen Tagen und Jahren.")
+    n_hist = _historientage()
+    if n_hist:
+        z.append(
+            f"Historie: {_dz(n_hist)} Handelstage sind sofort da, der "
+            f"Schatten waechst um einen je Tag. Fuer jede Frage, die sich "
+            f"rueckwaerts stellen laesst, ist das der Unterschied zwischen "
+            f"Tagen und Jahren.")
+    else:
+        z.append(
+            "Historie: Ein Historienlauf beantwortet rueckwaerts in Minuten, "
+            "wofuer der Schatten Wochen braucht - und kostet keinen "
+            "Versuchszaehler. Noch kein Lauf abgelegt: "
+            "python scripts/10_simulate.py")
     return z
+
+
+def _historientage() -> int | None:
+    """Unabhaengige Handelstage des letzten Historienlaufs.
+
+    Aus `trades.csv` gezaehlt, nicht abgeschrieben: Die Zahl ist das
+    Gegenstueck zu den Schattentagen und aendert sich mit jedem neuen
+    Lauf. Sie stand bis zum 22.08.2026 als "969" fest im Text - richtig
+    fuer den Lauf vom 21.08., aber schon beim naechsten falsch.
+    """
+    from .config import RESULTS_DIR
+
+    try:
+        df = pd.read_csv(RESULTS_DIR / "simulation" / "trades.csv")
+    except Exception:  # noqa: BLE001
+        return None
+    for spalte in ("tag", "exit_date", "entry_date"):
+        if spalte in df.columns:
+            tage = pd.to_datetime(df[spalte], format="mixed", utc=True,
+                                  errors="coerce").dt.date
+            n = int(tage.nunique())
+            return n or None
+    return None
 
 
 def bericht(store=None) -> str:

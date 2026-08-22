@@ -367,6 +367,55 @@ class Journal:
         agg = agg[agg["n"] >= 5]
         return agg.sort_values(["grund", "mittel"], ascending=[True, False]).round(4)
 
+    def slippage_werte(self, *, nur_bereinigt: bool = True) -> pd.Series:
+        """Die EINZELNEN Slippage-Werte je Order - nicht je Symbol.
+
+        `slippage_report()` verdichtet auf Symbole. Fuer den Median ist das
+        die falsche Ebene: `docs/BETRIEBSPLAN.md` §3.1 verlangt den
+        "Slippage-Median ueber 30+ saubere **Orders**", nicht ueber
+        Symbole. Der Unterschied ist nicht akademisch - gemessen am
+        22.08.2026 lagen 73 Symbole mit 1 bis 6 Fuellungen vor; ein Median
+        ueber Symbol-Mediane gewichtet ein Symbol mit einer Fuellung
+        genauso wie eines mit sechs (§G16).
+
+        Beide Funktionen teilen sich bewusst dieselbe Bereinigung
+        (`_slippage_basis`): Wuerden sie getrennt filtern, koennten
+        Bericht und Pruefung auf verschiedenen Grundmengen rechnen und
+        widersprechende Zahlen liefern.
+        """
+        o = self._slippage_basis(nur_bereinigt=nur_bereinigt, still=True)
+        return o["slippage_bps"] if not o.empty else pd.Series(dtype=float)
+
+    def _slippage_basis(self, *, nur_bereinigt: bool = True,
+                        still: bool = False) -> pd.DataFrame:
+        """Die bereinigte Ordermenge samt gerechneter Slippage.
+
+        Gemeinsame Grundlage von `slippage_report` und `slippage_werte` -
+        siehe dort, warum die Trennung gefaehrlich waere.
+        """
+        o = self.table("orders", "dry_run = 0 AND fill_price IS NOT NULL")
+        if o.empty:
+            return o
+
+        legacy = o["status"].astype(str).str.endswith(" geschlossen")
+        if nur_bereinigt:
+            fallback = o["referenz_quelle"] == "fallback"
+            ausgeschlossen = legacy | fallback
+            if ausgeschlossen.any() and not still:
+                print(f"  [slippage_report] {int(legacy.sum())} Legacy-Zeile(n) "
+                      f"(vor dem close_position()-Fix) und "
+                      f"{int(fallback.sum())} Zeile(n) ohne echte Quote "
+                      f"ausgeschlossen von {len(o)} gesamt.")
+            o = o[~ausgeschlossen]
+        if o.empty:
+            return o
+
+        o = o.copy()
+        o["slippage_bps"] = (
+            (o["fill_price"] - o["expected_price"]) / o["expected_price"] * 10_000
+        ).where(o["side"] == "buy", lambda s: -s)
+        return o
+
     def slippage_report(self, *, nur_bereinigt: bool = True) -> pd.DataFrame:
         """Erwarteter gegen tatsaechlichen Ausfuehrungspreis.
 
@@ -402,27 +451,9 @@ class Journal:
         aus. `False` zeigt alles - auch die bekannten Ausreisser - fuer die
         Nachvollziehbarkeit.
         """
-        o = self.table("orders", "dry_run = 0 AND fill_price IS NOT NULL")
+        o = self._slippage_basis(nur_bereinigt=nur_bereinigt)
         if o.empty:
             return pd.DataFrame()
-
-        legacy = o["status"].astype(str).str.endswith(" geschlossen")
-
-        if nur_bereinigt:
-            fallback = o["referenz_quelle"] == "fallback"
-            ausgeschlossen = legacy | fallback
-            if ausgeschlossen.any():
-                print(f"  [slippage_report] {int(legacy.sum())} Legacy-Zeile(n) "
-                      f"(vor dem close_position()-Fix) und "
-                      f"{int(fallback.sum())} Zeile(n) ohne echte Quote "
-                      f"ausgeschlossen von {len(o)} gesamt.")
-            o = o[~ausgeschlossen]
-        if o.empty:
-            return pd.DataFrame()
-
-        o["slippage_bps"] = (
-            (o["fill_price"] - o["expected_price"]) / o["expected_price"] * 10_000
-        ).where(o["side"] == "buy", lambda s: -s)
         return (
             o.groupby("symbol")["slippage_bps"]
             .agg(n="size", mittel="mean", median="median", max="max")

@@ -101,34 +101,89 @@ def historientest(hyp_id: str, faktor: pd.DataFrame, renditen: pd.DataFrame,
     Vorwaertszeit. Der Test ist bewusst grosszuegig - er soll aussortieren,
     nicht bestaetigen.
 
+    **Der t-Wert ist um die Ueberlappung korrigiert (§G12).** Bis zum
+    22.08.2026 war er es nicht - und diese Funktion war die letzte Stelle
+    im Projekt, an der ein unkorrigierter Wert einen STATUS setzte:
+
+        status = "im_test" if abs(t) > 2 else "widerlegt"
+
+    Bei einem 5-Tage-Fenster teilen benachbarte Tage vier Fuenftel ihres
+    Renditefensters; die Fehlalarmquote liegt dann bei **39,5 %** statt
+    5 %. Vier von zehn Urteilen waren damit Rauschen - in beide
+    Richtungen: eine brauchbare Idee verworfen oder eine wertlose in den
+    teuren Vorwaertstest geschickt.
+
+    Verschaerfend kam hinzu, dass `horizont` zwar in der Signatur stand,
+    im Rumpf aber **an keiner Stelle** benutzt wurde. Eine Signatur, die
+    eine Korrektur verspricht, die es nicht gibt, ist schlimmer als gar
+    keine - sie beruhigt beim Lesen.
+
     Args:
         faktor: DataFrame (Zeilen = Tage, Spalten = Symbole) mit dem Faktorwert.
         renditen: gleiche Form, mit der Vorwaertsrendite ueber `horizont`.
+        horizont: Laenge des Renditefensters in Handelstagen. Steuert die
+            Ueberlappungskorrektur. 1 = keine Ueberlappung.
+
+    Returns:
+        `t` ist der KORRIGIERTE Wert und die Grundlage des Status.
+        `t_roh` steht zum Vergleich daneben - nie zitieren (§G12).
+        Ist die Reihe zu kurz fuer den Schaetzer, ist `t` NaN und der
+        Status bleibt `offen`; der rohe Wert springt bewusst nicht ein.
     """
+    from . import statistik
+
     s = store or ShadowStore()
     gemeinsam = faktor.index.intersection(renditen.index)
-    ics = []
+    paare = []
     for tag in gemeinsam:
         f = faktor.loc[tag].dropna()
         r = renditen.loc[tag].dropna()
         idx = f.index.intersection(r.index)
         if len(idx) < 10 or f.loc[idx].nunique() < 2:
             continue
-        ics.append(f.loc[idx].corr(r.loc[idx], method="spearman"))
+        paare.append((tag, f.loc[idx].corr(r.loc[idx], method="spearman")))
 
-    ics = pd.Series([x for x in ics if np.isfinite(x)], index=None)
+    # Chronologisch sortieren: `newey_west_t` liest die Autokorrelation aus
+    # der REIHENFOLGE. Eine umsortierte Reihe ergaebe keinen ungenauen,
+    # sondern einen bedeutungslosen Wert.
+    paare.sort(key=lambda x: x[0])
+    ics = pd.Series([x for _, x in paare if np.isfinite(x)])
     if len(ics) < 3:
-        return {"n_tage": len(ics), "ic": np.nan, "t": np.nan}
-    t = ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics)))
+        return {"n_tage": len(ics), "ic": np.nan, "t": np.nan,
+                "t_roh": np.nan, "horizont": horizont}
+
+    t_roh = float(ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics))))
+    if horizont > 1:
+        t_korr, aufbl = statistik.newey_west_t(ics.to_numpy(), lag=horizont - 1)
+    else:
+        t_korr, aufbl = t_roh, 1.0
+
     erg = {"n_tage": int(len(ics)), "ic": round(float(ics.mean()), 5),
-           "t": round(float(t), 2)}
+           "t_roh": round(t_roh, 2), "horizont": horizont}
+    if np.isfinite(t_korr):
+        erg |= {"t": round(float(t_korr), 2), "aufblaehung": round(float(aufbl), 2)}
+    else:
+        # Kein t-Wert ist eine Aussage, kein Formatierungsproblem. Der rohe
+        # waere hier die optimistischste aller Antworten und saehe wie ein
+        # Ergebnis aus (§G14: 14,57 gegen 5,30 roh bei 8 Tagen).
+        erg |= {"t": np.nan, "aufblaehung": np.nan,
+                "hinweis": f"{len(ics)} Tage sind fuer einen "
+                           f"{horizont}-Tage-Horizont zu wenig - kein t-Wert"}
+
+    # Ohne gueltigen t-Wert wird NICHT geurteilt. `offen` heisst "noch
+    # nicht entschieden" und ist ausdruecklich kein Bestehen - dieselbe
+    # Drei-Zustaende-Regel wie in shadow_eval.kriterien_pruefen.
+    if not np.isfinite(erg["t"]):
+        status = "offen"
+    else:
+        status = "im_test" if abs(erg["t"]) > 2 else "widerlegt"
 
     with s._conn() as c:
         c.execute(
             "UPDATE hypothesen SET hist_ic=?, hist_t=?, status=?"
             " WHERE hyp_id=?",
-            (erg["ic"], erg["t"],
-             "im_test" if abs(erg["t"]) > 2 else "widerlegt", hyp_id),
+            (erg["ic"], erg["t"] if np.isfinite(erg["t"]) else None,
+             status, hyp_id),
         )
     return erg
 

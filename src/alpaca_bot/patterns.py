@@ -52,16 +52,64 @@ def erfassen(beschreibung: str, bedingung: str, *, wirkung: str = "ic_5d",
     z. B. ``"regime_vola == 'niedrig'"`` oder ``"score > 0.6"``. Er muss
     maschinenlesbar sein, damit die Verfallspruefung ihn spaeter ohne
     menschliches Zutun wiederholen kann.
+
+    **Idempotent seit dem 22.08.2026.** Existiert (bedingung, wirkung)
+    bereits, wird die vorhandene `muster_id` zurueckgegeben und NICHTS
+    veraendert. Ohne diese Zusicherung waren drei Defekte scharf, sobald
+    der Schatten seinen 20. Handelstag erreicht (`docs/BEFUNDE.md` §G16):
+
+    1. `shadow.lernen` ruft `kandidaten_suchen(anlegen=True)` an JEDEM
+       Handelstag. Bei frischer `uuid4` je Aufruf waere die Tabelle
+       taeglich um dieselben ~4 Regimeschnitte gewachsen - gemessen im
+       Regressionstest: 10 Zeilen nach 5 Laeufen statt 2.
+    2. Ein als `zerfallen` markiertes Muster waere am naechsten Tag als
+       frischer `kandidat` zurueckgekehrt. Der Verfallsmechanismus -
+       der eigentliche Zweck dieses Moduls (siehe Modul-Docstring) -
+       waere damit wirkungslos gewesen.
+    3. Der Status eines bestaetigten Musters waere ueberschrieben worden.
+
+    Deshalb wird ein vorhandener Eintrag hier bewusst NICHT angefasst -
+    weder Status noch Zaehler noch Beschreibung. Wer ein Muster neu
+    bewerten will, nimmt `pruefen()`; das ist der Weg, der die
+    Verfallslogik durchlaeuft.
     """
     s = store or ShadowStore()
-    mid = f"M-{uuid.uuid4().hex[:8]}"
     with s._conn() as c:
+        # Der Schluessel ist (bedingung, wirkung), nicht die Beschreibung:
+        # Der Text ist Prosa und kann sich aendern, die Messvorschrift ist
+        # die Identitaet des Musters. Dieselbe Bedingung auf `ic_5d` und
+        # auf `rendite` sind dagegen zwei verschiedene Aussagen.
+        vorhanden = c.execute(
+            "SELECT muster_id FROM muster WHERE bedingung=? AND wirkung=?",
+            (bedingung, wirkung),
+        ).fetchone()
+        if vorhanden:
+            return str(vorhanden["muster_id"])
+
+        mid = f"M-{uuid.uuid4().hex[:8]}"
         c.execute(
             "INSERT INTO muster (muster_id, beschreibung, bedingung, wirkung,"
             " entdeckt_am, entdeckt_aus, status, fehlschlaege)"
             " VALUES (?,?,?,?,?,?,'kandidat',0)",
             (mid, beschreibung, bedingung, wirkung,
              dt.datetime.now(dt.UTC).isoformat(), entdeckt_aus),
+        )
+        # Jeder Musterschnitt ist ein Versuch und hebt die Schwelle fuer
+        # ALLE - genau wie eine Bot-Anmeldung (fleet.anmelden) und eine
+        # Hypothese (hypotheses.erfassen). Wer neun Regimezellen prueft,
+        # findet in mindestens einer garantiert etwas (§B2); eine Schwelle,
+        # die davon nichts weiss, ist zu niedrig.
+        #
+        # Der Zaehler steigt NUR beim erstmaligen Anlegen. Stuende er
+        # ausserhalb dieser Bedingung, wuerde ihn der taegliche Lauf
+        # unbegrenzt hochtreiben und jede laufende Messung erdrosseln.
+        c.execute(
+            "INSERT INTO versuchszaehler (id, n_bots_gesamt, n_hypothesen,"
+            " aktualisiert) VALUES (1, 0, 1, ?)"
+            " ON CONFLICT(id) DO UPDATE SET"
+            "   n_hypothesen = versuchszaehler.n_hypothesen + 1,"
+            "   aktualisiert = excluded.aktualisiert",
+            (dt.datetime.now(dt.UTC).isoformat(),),
         )
     return mid
 

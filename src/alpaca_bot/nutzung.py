@@ -163,7 +163,8 @@ def melden(baustein: str, ergebnis: int = 0, *, signatur: str = "",
 class Befund:
     baustein: str
     art: str
-    """'nie_gelaufen' | 'zu_selten' | 'immer_leer' | 'immer_gleich' | 'ok'"""
+    """'nie_gelaufen' | 'zu_selten' | 'immer_leer' | 'immer_gleich'
+    | 'fehlerhaft' | 'ok'"""
     detail: str
     zweck: str = ""
 
@@ -175,7 +176,8 @@ class Befund:
         if self.ok:
             return f"  [OK]      {self.baustein:<26} {self.detail}"
         marke = {"nie_gelaufen": "NIE", "zu_selten": "SELTEN",
-                 "immer_leer": "LEER", "immer_gleich": "GLEICH"}[self.art]
+                 "immer_leer": "LEER", "immer_gleich": "GLEICH",
+                 "fehlerhaft": "FEHLER"}[self.art]
         return (f"  [{marke:<7}] {self.baustein:<26} {self.detail}\n"
                 f"              Zweck: {self.zweck}")
 
@@ -224,6 +226,33 @@ def pruefen(erwartungen=ERWARTUNGEN, *, db: Path | None = None,
                 continue
 
             ergebnisse = [z["ergebnis"] or 0 for z in zeilen]
+
+            # --- Der JUENGSTE Lauf ist fehlgeschlagen? Sofort melden. ---
+            #
+            # `melden(..., -1)` ist die Fehlermarke der Aufrufer (siehe
+            # `16_shadow_daemon.py`). Ohne diese Pruefung rutschte ein
+            # dauerhaft abstuerzender Baustein durch: `darf_leer_sein`
+            # ueberspringt die Leer-Pruefung, -1 ist nicht 0, und
+            # "immer_gleich" braucht fuenf Laeufe. Am 22.08.2026 scheiterten
+            # alle drei Schattenschritte eines Durchgangs mit
+            # `unable to open database file` - der Waechter haette das
+            # bestenfalls als "es entsteht keine neue Information"
+            # gemeldet. Sie entsteht sehr wohl: dass es kaputt ist.
+            #
+            # Geprueft wird der JUENGSTE Lauf, nicht die Historie: Ein
+            # ueberstandener Netzausfall ist erledigt, sobald wieder etwas
+            # durchlaeuft. Sonst leuchtete der Waechter nach jedem
+            # transienten Fehler dauerhaft (`docs/LERNTEMPO.md` §5).
+            if ergebnisse[0] < 0:
+                n_fehler = sum(1 for x in ergebnisse if x < 0)
+                befunde.append(Befund(
+                    e.baustein, "fehlerhaft",
+                    f"letzter Lauf fehlgeschlagen ({n_fehler} von "
+                    f"{len(zeilen)} im {e.seit_tagen}-Tage-Fenster). "
+                    f"Hinweis: {zeilen[0]['signatur'] or 'ohne Angabe'}",
+                    e.zweck))
+                continue
+
             if not e.darf_leer_sein and max(ergebnisse) == 0:
                 befunde.append(Befund(
                     e.baustein, "immer_leer",

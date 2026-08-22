@@ -110,9 +110,17 @@ def main() -> int:
     print("\n" + "=" * 78)
     print("  SCHRITT 4: WAS DARF IN DIE STRATEGIE?")
     print("=" * 78)
+    # `t_korr` und NICHT `t_stat`: `select_factors` prueft seit §G12 den
+    # korrigierten Wert, die Anzeige daneben tat es bis zum 22.08.2026
+    # nicht. Zwei verschiedene Schwellen in derselben Ausgabe - und die
+    # laxere stand in der Zeile, die man zitiert.
+    t_korr = (results["t_korrigiert"].fillna(results["t_stat"])
+              if "t_korrigiert" in results else results["t_stat"])
+    results = results.assign(_t=t_korr)
+
     for h in args.horizons:
         chosen = research.select_factors(results, horizon=h, min_t=3.0)
-        sub = results[(results["horizon"] == h) & (results["t_stat"] >= 3.0)]
+        sub = results[(results["horizon"] == h) & (results["_t"] >= 3.0)]
         inverted = sub[sub["ic_mean"] < 0]["factor"].tolist()
         print(f"\n  Horizont {h} Tage:")
         print(f"    tragfaehig  : {', '.join(chosen) if chosen else '(keiner)'}")
@@ -121,15 +129,52 @@ def main() -> int:
             print(f"                  (stabil, aber falsches Vorzeichen - NICHT")
             print(f"                   einfach umdrehen, das waere Data-Mining)")
 
-    results.to_csv(out_dir / "faktoren.csv", index=False)
+    results.drop(columns=["_t"]).to_csv(out_dir / "faktoren.csv", index=False)
     print(f"\n  Gespeichert: {out_dir / 'faktoren.csv'}")
 
-    best = results[results["ic_mean"] > 0].nlargest(1, "t_stat")
+    # --- 5. Vorzeichenstabilitaet je Jahr ---
+    #
+    # **Das eigentlich tragende Kriterium.** §G12 hat gezeigt, dass der
+    # t-Wert bei ueberlappenden Fenstern im Mittel um 1,62 zu hoch
+    # ausfaellt - zwei der in `signals.ReversalWeights` dokumentierten
+    # Bausteine (`rsi2`, `reversal_3d`) halten die heutige Schwelle danach
+    # nicht mehr. Was den Befund dennoch traegt, benennt §G12 ausdruecklich:
+    #
+    #     "`ReversalWeights` nennt als Kriterium ausdruecklich die
+    #      Vorzeichenstabilitaet je Jahr ('100 % positive Jahre') - ein
+    #      anderes und robusteres Kriterium als der t-Wert, das von dieser
+    #      Korrektur unberuehrt bleibt."
+    #
+    # `research.measure_stability` misst genau das - und wurde bis zum
+    # 22.08.2026 von KEINEM Skript aufgerufen (§G16). Das Kriterium, auf
+    # dem die Strategie steht, war damit aus dem laufenden Werkzeug heraus
+    # nicht reproduzierbar: Die "100 % positive Jahre" stammten aus einem
+    # Messlauf, den niemand wiederholen konnte, ohne die Funktion von Hand
+    # zu rufen. Genau die Fehlerklasse aus §G15 - gebaut, laeuft nie.
+    kern = sorted({f for h in args.horizons
+                   for f in research.select_factors(results, horizon=h, min_t=3.0)})
+    if kern:
+        print("\n" + "=" * 78)
+        print("  SCHRITT 5: HAELT DAS VORZEICHEN UEBER DIE JAHRE?")
+        print("=" * 78)
+        stab = research.measure_stability(bars, kern,
+                                          horizon=max(args.horizons))
+        if stab.empty:
+            print("  Zu wenig Historie fuer eine Jahresaufteilung.")
+        else:
+            print()
+            print(research.stability_report(stab))
+            stab.to_csv(out_dir / "stabilitaet.csv", index=False)
+            print(f"\n  Gespeichert: {out_dir / 'stabilitaet.csv'}")
+    else:
+        print("\n  Keine tragfaehigen Faktoren - Stabilitaetspruefung entfaellt.")
+
+    best = results[results["ic_mean"] > 0].nlargest(1, "_t")
     if not best.empty:
         b = best.iloc[0]
         print(f"\n  Staerkster positiver Faktor: {b['factor']} auf {int(b['horizon'])} Tage")
-        print(f"    IC {b['ic_mean']:+.4f} | t {b['t_stat']:+.1f} | "
-              f"Q5-Q1 {b['q5_minus_q1']:+.3%}")
+        print(f"    IC {b['ic_mean']:+.4f} | t korr. {b['_t']:+.1f} "
+              f"(roh {b['t_stat']:+.1f}) | Q5-Q1 {b['q5_minus_q1']:+.3%}")
     else:
         print("\n  KEIN Faktor mit positivem IC und ausreichender Stabilitaet.")
         print("  Dann traegt keine Strategie aus diesen Bausteinen.")

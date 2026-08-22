@@ -393,6 +393,136 @@ MUTATIONEN = [
         "Ein t-Wert von 9,9 aus 19 Handelstagen ist eine Momentaufnahme. "
         "Faellt diese Huerde, wandert sie als Modellversion weiter.",
     ),
+
+    # --- Musterspeicher: der taegliche Lernlauf (§G16) --------------------
+    Mutation(
+        "Musterspeicher legt wieder Duplikate an",
+        "src/alpaca_bot/patterns.py",
+        '        vorhanden = c.execute(\n'
+        '            "SELECT muster_id FROM muster WHERE bedingung=? AND wirkung=?",\n'
+        '            (bedingung, wirkung),\n'
+        '        ).fetchone()\n'
+        '        if vorhanden:\n'
+        '            return str(vorhanden["muster_id"])',
+        '        vorhanden = None',
+        "test_musterspeicher",
+        "`shadow.lernen` ruft `kandidaten_suchen(anlegen=True)` an JEDEM "
+        "Handelstag. Ohne Duplikatschutz waechst die Tabelle taeglich um "
+        "dieselben Regimeschnitte - gemessen: 10 Zeilen nach 5 Laeufen.",
+    ),
+    Mutation(
+        "Zerfallenes Muster wird wiederbelebt",
+        "src/alpaca_bot/patterns.py",
+        '        if vorhanden:\n            return str(vorhanden["muster_id"])',
+        '        if vorhanden and False:\n            return str(vorhanden["muster_id"])',
+        "test_musterspeicher",
+        "Ein als zerfallen markiertes Muster kaeme am naechsten Tag als "
+        "frischer Kandidat zurueck. Damit waere die Verfallspruefung - der "
+        "eigentliche Zweck des Moduls - wirkungslos.",
+    ),
+    Mutation(
+        "Musterschnitt zaehlt nicht als Versuch",
+        "src/alpaca_bot/patterns.py",
+        '        c.execute(\n'
+        '            "INSERT INTO versuchszaehler (id, n_bots_gesamt, n_hypothesen,"\n'
+        '            " aktualisiert) VALUES (1, 0, 1, ?)"',
+        '        c.execute(\n'
+        '            "SELECT 1 WHERE 0"  # (\n'
+        '            " aktualisiert) VALUES (1, 0, 1, ?)"',
+        "test_musterspeicher",
+        "Wer neun Regimezellen prueft, findet in einer garantiert etwas "
+        "(§B2). Eine Schwelle, die davon nichts weiss, ist zu niedrig - "
+        "und `hypotheses.erfassen` zaehlt seit jeher mit.",
+    ),
+
+    # --- Hypothesenregister: der letzte unkorrigierte t-Wert (§G16) -------
+    Mutation(
+        "Historientest rechnet wieder ohne Ueberlappungskorrektur",
+        "src/alpaca_bot/hypotheses.py",
+        "    if horizont > 1:\n"
+        "        t_korr, aufbl = statistik.newey_west_t(ics.to_numpy(), lag=horizont - 1)",
+        "    if False:\n"
+        "        t_korr, aufbl = statistik.newey_west_t(ics.to_numpy(), lag=horizont - 1)",
+        "test_hypothesen",
+        "Bei 5-Tage-Fenstern liegt die Fehlalarmquote unkorrigiert bei "
+        "39,5 % (§G12) - und hier setzt der t-Wert einen STATUS "
+        "(im_test/widerlegt), nicht nur eine Anzeige.",
+    ),
+    Mutation(
+        "Ohne gueltigen t-Wert wird trotzdem geurteilt",
+        "src/alpaca_bot/hypotheses.py",
+        '    if not np.isfinite(erg["t"]):\n        status = "offen"',
+        '    if False:\n        status = "offen"',
+        "test_hypothesen",
+        "Ein entarteter Schaetzer liefert `nan`. Daraus 'widerlegt' zu "
+        "machen verwirft eine Idee auf Basis einer Nichtmessung.",
+    ),
+
+    # --- Regelabgleich als Abbruchkriterium (§G16) ------------------------
+    Mutation(
+        "Regelabgleich faellt aus dem Health-Check",
+        "scripts/18_health_check.py",
+        "        a = audit.run_audit(days=7)",
+        "        a = audit.AuditReport()",
+        "test_regelabgleich",
+        "BETRIEBSPLAN §8 macht ihn zum Abbruchkriterium. Lief er nur im "
+        "Wochenbericht, greift das Kriterium praktisch nie.",
+    ),
+    Mutation(
+        "Einzelner Netzfehler ist wieder ein Regelverstoss",
+        "src/alpaca_bot/audit.py",
+        "        schwer = quote > FEHLERQUOTE_VERSTOSS",
+        "        schwer = len(failed) > 0",
+        "test_regelabgleich",
+        "1 von 91 Laeufen mit HTTP 500 ist der dokumentierte Normalfall "
+        "(§H). Als Verstoss gewertet stuende die Ampel dauerhaft ROT - "
+        "und eine Warnung, die immer leuchtet, wird weggeklickt.",
+    ),
+
+    # --- Nutzungsnachweis: die fuenfte Ausfallart (§G16) ------------------
+    Mutation(
+        "Abstuerzender Baustein gilt wieder als gesund",
+        "src/alpaca_bot/nutzung.py",
+        "            if ergebnisse[0] < 0:",
+        "            if False:",
+        "test_nutzung",
+        "Alle drei Schattenschritte scheiterten am 22.08. mit 'unable to "
+        "open database file'. `darf_leer_sein` und die 5-Lauf-Huerde von "
+        "'immer_gleich' liessen das durch.",
+    ),
+
+    # --- Kostenkontrolle: die Kennzahl des Vertrags (§G16) ----------------
+    Mutation(
+        "Kostenkontrolle rechnet wieder den Mittelwert",
+        "src/alpaca_bot/shadow.py",
+        "        echt = float(werte.median())",
+        "        echt = float(werte.mean())",
+        "test_kostenkontrolle",
+        "BETRIEBSPLAN §3.1 und §8 nennen beide den MEDIAN. Ueber dieselben "
+        "162 Orders: Median +0,0 bps (Kriterium erfuellt), Mittel -71,7 bps "
+        "(Pruefung meldet FEHL) - die Differenz sind drei kaputte "
+        "IEX-Quotes.",
+    ),
+    Mutation(
+        "Slippage-Median wieder ueber Symbole statt Orders",
+        "src/alpaca_bot/shadow.py",
+        "        werte = Journal().slippage_werte().dropna()",
+        "        werte = Journal().slippage_report()['median'].dropna()",
+        "test_kostenkontrolle",
+        "§3.1 sagt 'ueber 30+ saubere Orders'. Ein Median ueber "
+        "Symbol-Mediane gewichtet ein Symbol mit einer Fuellung genauso "
+        "wie eines mit sechs.",
+    ),
+    Mutation(
+        "Kursanpassung prueft wieder die ganze Historie",
+        "src/alpaca_bot/shadow.py",
+        "    anteil_jung = float((frisch[\"data_check\"] == \"kurs_angepasst\").mean())",
+        "    anteil_jung = float((df[\"data_check\"] == \"kurs_angepasst\").mean())",
+        "test_kostenkontrolle",
+        "auto_adjust passt aeltere Kurse nach jeder Dividende an - die "
+        "kumulierte Quote MUSS wachsen und die Schwelle zwangslaeufig "
+        "reissen. Derselbe Fehlversuch wie bei check_stumme_felder (§G13).",
+    ),
 ]
 
 
