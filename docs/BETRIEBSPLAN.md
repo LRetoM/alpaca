@@ -100,50 +100,162 @@ dann handelt der Bot ein Signal, dessen Vorsprung die Kosten nicht deckt.
 
 ### 3.2 Die Flotte — Erwartung je Bot
 
-Schwelle: **t > 2,76** (`fleet.schwelle_sigma`, steigt mit jedem Versuch).
+Schwelle: **`fleet.schwelle_sigma()`** — hier steht bewusst keine Zahl.
+Sie steigt mit jedem je angemeldeten Bot (die Anmeldung von B12 hob sie
+von 2,83 auf 2,85). Eine abgeschriebene Zahl im Dokument wäre nach der
+nächsten Anmeldung falsch und würde die Hürde nachträglich senken.
+Abrufen: `python scripts/21_fleet.py` (weist sie bei jeder Auswertung aus).
+
+**Stand 21.08.2026:** `B01`, `B02`, `B03`, `B05` **stillgelegt** — Befund
+seit 15.08. unverändert (0,0 Differenz zu B00 über 13 Handelstage),
+mehr Zeit ändert daran nichts. Zählen weiter im Versuchszähler.
 
 | Bot | Erwartung | Stand |
 |---|---|---|
-| `B11_dyn_ausstieg_live` | **offen** — hält Gewinner länger, ohne Stagnierende zu binden | neu, 0 Tage |
-| `B04_halten_lang` | wird vermutlich **nichts** zeigen | t = 0,94 |
-| `B07_mehr_positionen` | Verdacht auf **negativ** | t = −2,42 |
-| `B08`/`B09` | offen | t = 0,14 |
-| `B01`/`B02`/`B03`/`B05`/`B06` | **wirkungslos** — Parameter greifen nicht | siehe BEFUNDE §E |
+| `B11_dyn_ausstieg_live` | **offen** — hält Gewinner länger, ohne Stagnierende zu binden | 5 Tage |
+| `B04_halten_lang` | wird vermutlich **nichts** zeigen | t = 0,86, 13 Tage |
+| `B07_mehr_positionen` | Verdacht auf **negativ** | t = −2,63, 12 Tage |
+| `B08`/`B09` | offen | t = 0,65, 12 Tage |
+| `B06_ohne_regime` | **wirkungslos im Bullenmarkt** — läuft weiter, wartet auf Regimewechsel | siehe BEFUNDE §E |
+| `B01`/`B02`/`B03`/`B05` | **stillgelegt** — bestätigt wirkungslos | siehe BEFUNDE §E |
 
-### 3.3 Was „Erfolg" für B10 konkret heißt
+### 3.3 Was „Erfolg" für B11_dyn_ausstieg_live konkret heißt
 
-B10 gilt als **bestanden**, wenn *alle vier* zutreffen:
+Geprüft wird `B11_dyn_ausstieg_live` gegen `B00_basis`. Der Vorgänger
+`B10_dyn_ausstieg` ist seit 16.08. stillgelegt (er hat **null** Ausstiege
+produziert) und zählt nur noch im Versuchszähler mit.
 
-1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B00_basis")` liefert **t > 2,76**
-2. über mindestens **20 Handelstage**
+**Diese vier Kriterien sind der Entscheidungsvertrag.** Sie stehen vorab
+fest und werden nicht nachträglich angepasst — weder nach oben noch nach
+unten. Ein Kommando prüft alle vier:
+
+```
+python scripts/21_fleet.py --kriterien B11_dyn_ausstieg_live
+```
+
+B11 gilt als **bestanden**, wenn *alle vier* zutreffen:
+
+1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B00_basis")` liefert einen
+   t-Wert über **`fleet.schwelle_sigma()`** (keine feste Zahl, siehe §3.2)
+2. über mindestens **20 auswertbare Handelstage** — das sind Tage *nach*
+   Abzug der Sperrzone (`SPERRZONE_ANTEIL = 0,20`). 20 auswertbare Tage
+   entsprechen **25 rohen** Handelstagen.
 3. Anteil verlängerter Positionen liegt zwischen **10 % und 60 %**
    (darunter: Regel greift praktisch nie; darüber: sie ist keine
-   Ausnahme mehr, sondern hebelt den Zeitausstieg aus)
+   Ausnahme mehr, sondern hebelt den Zeitausstieg aus).
+   Nenner sind **nur die Ausstiege, die die Frist erreicht haben**
+   (`bars_held >= max_hold_days`) — eine nach zwei Tagen ausgestoppte
+   Position hatte nie die Gelegenheit, verlängert zu werden.
 4. Die verlängerten Trades sind **nicht** allein durch wenige Ausreißer
    getragen — Median ebenfalls positiv
 
 **Fällt einer der vier durch, bleibt es beim Zeitausstieg nach 5 Tagen.**
 
+**Drei Zustände, nicht zwei.** Jedes Kriterium kann *erfüllt*,
+*durchgefallen* oder **offen** sein. `offen` heißt „noch keine
+Datengrundlage" und ist **kein** Bestehen. Zwei erfüllte und zwei offene
+Kriterien sind kein 2:0.
+
 ---
 
 ## 4. Zeitplan — wie lange laufen lassen
 
+B11 ist seit **18.08.2026** angemeldet. Alle Tagesangaben zählen ab dort.
+
 | Zeitraum | Was passiert | Was NICHT passiert |
 |---|---|---|
-| **jetzt – ca. 12.09.** (≈20 Handelstage) | Beide Bots laufen unverändert. B10 sammelt Daten. | Keine Parameteränderung, keine neue Hypothese |
-| **ca. 12.09.** | Erste Zwischenauswertung | Noch keine Entscheidung |
-| **ca. 10.10.** (≈40 Handelstage) | Entscheidung über B10 | — |
+| **jetzt – ca. 12.09.** (≈19 roh / **15 auswertbar**) | B11 und B00 laufen unverändert und sammeln Daten. | Keine Parameteränderung, keine neue Hypothese, **keine neue Bot-Anmeldung** |
+| **ca. 12.09.** | Erste Zwischenauswertung — **reine Zwischenschau**. Kriterium 2 ist an diesem Tag noch nicht erfüllbar (15 < 20 auswertbare Tage). | **Keine Entscheidung.** Auch kein Abbruch, wenn es schlecht aussieht. |
+| **ca. 10.10.** (≈39 roh / **31 auswertbar**) | Entscheidung über `B11_dyn_ausstieg_live` nach §3.3 | — |
 
-### Warum ~20 Handelstage das Minimum sind
+### Rohe gegen auswertbare Handelstage
 
-Die gepaarte Messung braucht laut `shadow_eval.MIN_TAGE` mindestens 20
-Tage. Der Grund steht in §B1 von `docs/BEFUNDE.md`: Maßgeblich ist die
-Zahl der **Handelstage**, nicht der Trades. Elf Tage Betrieb haben nur
-8 auswertbare Tage ergeben — zu wenig für jede Aussage.
+Das sind zwei verschiedene Zahlen und sie werden leicht verwechselt.
+`vergleich_gepaart` verwirft die **jüngsten 20 %** der Handelstage
+(`SPERRZONE_ANTEIL = 0,20`), damit ein Ergebnis nicht nachträglich auf
+die letzten Tage hin erzählt werden kann. Gezählt wird danach.
 
-**Realistisch:** 40 Tage sind besser als 20. Der Vorteil des gepaarten
-Vergleichs (beide Bots sehen dieselben Tage) senkt die nötige Zeit von
-~9 Monaten auf 6–10 Wochen, aber nicht auf zwei Wochen.
+| roh | auswertbar |
+|---|---|
+| 25 | 20 ← Kriterium 2 aus §3.3 |
+| 39 (Stand 10.10.) | 31 |
+| 75 | 60 ← `shadow_eval.MIN_TAGE` |
+
+### `MIN_TAGE` ist ein Hinweis, kein Veto — Festlegung vom 21.08.2026
+
+`shadow_eval.MIN_TAGE` steht auf **60** und steuert die
+`belastbar`-Flagge in `vergleich_gepaart`. Dieses Dokument behauptete
+bis zum 21.08.2026 an dieser Stelle, die Konstante sei 20. **Das war
+falsch** — sie stand seit dem ersten Schatten-Commit auf 60 (Beleg:
+`docs/BEFUNDE.md` §G10).
+
+Die Folge wäre gewesen: 60 auswertbare Tage erreicht B11 erst am
+**~30.11.2026**. Am 10.10. wäre `belastbar` zwingend `False` gewesen,
+**egal wie gut der t-Wert ist** — der vorab festgelegte Termin hätte
+kein Ergebnis liefern können.
+
+**Festlegung:** Maßgeblich für die Abnahme sind die vier Kriterien aus
+**§3.3**. `MIN_TAGE` bleibt als strengere Hausmarke von
+`vergleich_gepaart` bestehen und wird ausgewiesen, hat aber **kein
+Vetorecht**. Das deckt sich mit dem eigenen Anspruch des Moduls
+(`shadow_eval.py`: „A schlägt B ist nach 6–10 Wochen entscheidbar") —
+60 auswertbare Tage sind 15 Wochen.
+
+Der Grund für ein Tage-Minimum überhaupt steht in §B1 von
+`docs/BEFUNDE.md`: Maßgeblich ist die Zahl der **Handelstage**, nicht
+der Trades. Elf Tage Betrieb haben nur 8 auswertbare Tage ergeben — zu
+wenig für jede Aussage.
+
+### Vor dem 10.10. keine neuen Bots anmelden
+
+Jede Anmeldung hebt `fleet.schwelle_sigma()` für **alle** Bots, auch
+rückwirkend für die laufende Messung (B12 hob sie von 2,83 auf 2,85).
+Ein während der Messung angemeldeter Bot erschwert B11 also die eigene
+Prüfung, ohne selbst etwas beizutragen. Neue Ideen werden bis zum
+10.10. in §7 gesammelt, nicht angemeldet.
+
+### Ideen trotzdem prüfen — der Historienfilter
+
+„Nicht anmelden" heißt nicht „nicht prüfen". Seit 21.08.2026 fährt
+`scripts/10_simulate.py` dieselbe Konfiguration wie der Live-Bot
+(`for_reversal()`, Marktfilter an, 1.200 Symbole — vorher war es eine
+andere Strategie, siehe `docs/BEFUNDE.md` §G11). Damit lässt sich eine
+Idee an Altdaten in Minuten durchspielen, statt Wochen auf eine
+Vorwärtsmessung zu warten:
+
+```
+python scripts/10_simulate.py --min-score 0.45     # eine Achse ändern
+```
+
+**Was das entscheidet — und was nicht.** Der Lauf darf eine Idee
+**verwerfen**. Er darf sie **nicht** abnehmen. Zwei Gründe:
+
+* **Survivorship:** Alpaca kennt nur heute gelistete Symbole. Der
+  Schein-Vorteil liegt bei 2–4 Prozentpunkten pro Jahr — mehr, als die
+  Strategie je verdienen wird. Jedes Ergebnis ist eine **Obergrenze**.
+* **Rückwärts ist kein Vorwärtstest.** Wer die Historie oft genug
+  befragt, findet dort alles.
+
+Reihenfolge also: erst Historienfilter (billig, verwirft viel), was das
+überlebt, kommt nach dem 10.10. als Flottenbot in den Schatten, und erst
+§3.3 nimmt ab. Ein Flottenplatz ist teuer — er hebt `schwelle_sigma` für
+alle. Der Filter sorgt dafür, dass dieser Platz nicht an eine Idee geht,
+die schon an der Vergangenheit scheitert.
+
+**Erste Anwendung (21.08.2026): „einfach länger halten" ist erledigt.**
+Über alle 2.149 Zeitausstiege des Historienlaufs gemessen, was der Kurs
+danach tat — marktbereinigt gegen SPY, gruppiert nach Ausstiegstag:
+nach 1/2/3/5/10 Tagen jeweils −0,09 / −0,16 / −0,13 / −0,09 / −0,05 %,
+kein Horizont über der Schwelle, jeder Punktschätzer negativ
+(`docs/BEFUNDE.md` §G11). Roh sieht es umgekehrt aus (+0,43 % nach 10
+Tagen) — das ist der Markt, nicht die Strategie.
+
+Für die Auswertung am **10.10.** heißt das: eine Verlängerung der
+Haltedauer als solche braucht keinen Flottenplatz mehr.
+`B11_dyn_ausstieg_live` prüft die schärfere Fassung — *signalgesteuert*
+aussteigen statt nach fester Frist — und wird davon **nicht**
+vorentschieden. Die vier Kriterien aus §3.3 bleiben unverändert
+maßgeblich; diese Messung ist Kontext, kein Kriterium.
 
 ---
 
@@ -250,8 +362,8 @@ ist das Risiko-Dach Pflicht.**
 | 1 | Bots laufen lassen, nichts ändern | jetzt – ~12.09. | — |
 | 2 | ~~Risiko-Dach bauen~~ | **erledigt 15.08.** | — |
 | 3 | ~~Kapitalflüsse erfassen~~ | **erledigt 15.08.** | — |
-| 4 | Zwischenauswertung | ~12.09. | ≥20 Handelstage |
-| 5 | Entscheidung über B10 | ~10.10. | ≥40 Handelstage, alle 4 Kriterien aus §3.3 |
+| 4 | Zwischenauswertung (**keine** Entscheidung) | ~12.09. | — |
+| 5 | Entscheidung über `B11_dyn_ausstieg_live` | ~10.10. | alle 4 Kriterien aus §3.3, geprüft mit `--kriterien` |
 | 6 | Echtgeld erwägen | frühestens danach | Slippage-Median < 8 bps **und** Risiko-Dach steht |
 
 **Schritte 2 und 3 sind die einzigen, die jetzt sinnvoll parallel laufen
@@ -268,4 +380,4 @@ laufende Messung deshalb nicht.
 | Regelabgleich meldet Abweichung | Sofort aus — ein Regelbruch ist ein Logikfehler, kein Pech |
 | Slippage-Median > 15 bps über 30 Trades | Alle Backtest- und Schattenergebnisse neu bewerten |
 | Konto-Drawdown > 20 % | **automatische Vollsperre** durch `risiko.py`, Lösen nur von Hand |
-| B10 verlängert > 60 % der Positionen | Regel greift zu oft, Schwelle war falsch kalibriert |
+| `B11_dyn_ausstieg_live` verlängert > 60 % der Positionen | Regel greift zu oft, Schwelle war falsch kalibriert (= §3.3 Kriterium 3) |
