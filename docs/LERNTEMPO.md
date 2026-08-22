@@ -206,6 +206,56 @@ Der Engpass ist auch dort nicht das Verfahren, sondern dieselbe Zahl wie
 
 ---
 
+## 5b. Nachweisen statt hoffen — was jetzt automatisch geprüft wird
+
+Die drei teuersten Fehler dieses Projekts waren keine Rechenfehler,
+sondern **Bausteine, die nie liefen**. Deshalb gibt es jetzt einen
+Nachweis dafür (§G15).
+
+### Ein Kommando für „läuft es, und kommen wir voran?"
+
+```
+python scripts/27_status.py          # Bausteine, Daten, Flotte, Modell
+python scripts/27_status.py --kurz   # nur die Ampeln
+```
+
+Der Health-Check zeigt die Zeile `Bausteine : n/m arbeiten wie geplant`
+mit — ein stillstehender Baustein färbt ihn **gelb**, nicht rot: Er ist
+kein Datenverlust und kein Handelsfehler, er kostet nur Zeit, in der
+nichts gelernt wird.
+
+### Die vier Arten, die er erkennt
+
+| Art | Beispiel aus der Chronik |
+|---|---|
+| nie gelaufen | Musterspeicher, Bar-Cache |
+| immer leer | Cache lief, traf aber nie |
+| **immer gleich** | 19.788 Verifizierungen je Stunde, Runde um Runde identisch |
+| zu selten | ein Schritt, der stumm scheitert |
+
+Die dritte ist die wichtigste: So ein Baustein meldet sich regelmäßig
+**mit Ergebnissen** und sieht in jeder Statistik gesund aus.
+
+### Zwei Fallen beim Bau — beide vermieden
+
+1. Die Meldung saß zuerst nur in `live.run_once`. Der Daemon kehrt bei
+   geschlossener Börse aber zurück, **bevor** `run_once` gerufen wird —
+   der Wächter meldete den laufenden Bot als „nie gelaufen". Ein
+   Wächter, der einen gesunden Bot anschwärzt, verliert genau das
+   Vertrauen, das er herstellen soll.
+2. Die Liste der überwachten Bausteine ist bewusst **kurz**. Eine, die
+   jeden Aufruf überwacht, erzeugt so viele Zeilen, dass niemand mehr
+   hinsieht — und dann fällt auch der echte Ausfall nicht auf.
+
+### Was der Nachweis nicht leistet
+
+Er prüft **Nutzung**, nicht Richtigkeit. Ein Baustein kann täglich
+laufen, wechselnde Ergebnisse liefern und trotzdem falsch rechnen.
+Dagegen helfen `tests/`, `data_integrity.py` und der Mutationstest
+(derzeit 37 von 37 gefangen).
+
+---
+
 ## 6. Reihenfolge der nächsten Schritte
 
 | # | Schritt | Wirkung | Bedingung |
