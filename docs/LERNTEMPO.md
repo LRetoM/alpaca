@@ -146,6 +146,66 @@ keiner.
 
 ---
 
+## 5a. Der 24/7-Betrieb — was er kann und was nicht
+
+Seit dem 22.08.2026 hat der Schattenbetrieb vier statt drei Schritte:
+
+```
+einbuchen -> verifizieren -> entscheiden -> lernen
+```
+
+`lernen` prüft den Musterspeicher, sucht Kandidatenschnitte und meldet
+Zerfall. Er stand vorher nur als Werkzeug bereit und lief nie (§G14).
+
+**Alle vier Schritte sind idempotent.** Ohne neuen Handelstag tun sie
+nichts und kosten Sekundenbruchteile — die Verifizierung fiel von 17 s
+auf 1 s je Durchgang. Das ist die Voraussetzung dafür, häufig zu laufen,
+ohne Rechenzeit und API-Kontingent zu verbrennen.
+
+### Die harte Grenze, die 24/7 nicht verschiebt
+
+Rund um die Uhr zu rechnen erzeugt **keine** zusätzlichen unabhängigen
+Beobachtungen. Neue Information entsteht genau einmal je Handelstag,
+wenn eine neue Tagesbar vorliegt. Alles andere ist Wiederholung.
+
+Was das konkret heißt, mit den heutigen 19 Handelstagen:
+
+| Auswertung | nötig | Stand | frühestens |
+|---|---:|---:|---|
+| gültiger 5-Tage-IC (t-Wert) | 15 Tage | 13 | ~jetzt |
+| Muster als Kandidat anlegen | 20 Tage | 19 | Ende August |
+| Muster **bestätigen** | 60 Tage | 19 | ~November |
+| Flotten-Abnahme §3.3 | 20 auswertbare | 4 | 10.10. |
+
+**Der Lernapparat läuft jetzt korrekt — er hat nur noch fast nichts zu
+lernen.** Das ist kein Mangel, sondern die Disziplin bei der Arbeit.
+
+### Warum das Anschalten ohne §G12 schädlich gewesen wäre
+
+Der Kandidatenlauf lieferte am 22.08. `regime_vola == 'niedrig'` mit
+einem IC von **+0,248 aus zwei Handelstagen** — dem Vierzehnfachen des
+besten je gemessenen Faktors. Mit unkorrigiertem t-Wert wäre so etwas
+als bestätigtes Muster in den Speicher gewandert, dauerhaft und
+automatisch.
+
+**Eine Lernschleife auf falscher Statistik lernt schneller — das Falsche.**
+Bei 5-Tage-Fenstern läge die Fehlalarmquote bei 39,5 %.
+
+### Reinforcement Learning
+
+`src/alpaca_bot/rl/` ist gebaut und benennt selbst die vier Grenzen:
+Datenhunger (DQN braucht Millionen Übergänge; 10 Jahre Tagesdaten sind
+2.500 Schritte je Aktie), Nicht-Stationarität, Auswendiglernen des
+Kurspfads, Zuordnungsproblem bei 95 % Rauschen. Es ist deshalb auf die
+**Positionsgröße** angesetzt statt auf die Richtung, und jede Auswertung
+läuft gegen eine Zufallspolitik.
+
+Der Engpass ist auch dort nicht das Verfahren, sondern dieselbe Zahl wie
+überall: unabhängige Handelstage. Mehr Rechenzeit ersetzt sie nicht —
+**Breite (§3) und ein niedriger Versuchszähler (§2) tun es.**
+
+---
+
 ## 6. Reihenfolge der nächsten Schritte
 
 | # | Schritt | Wirkung | Bedingung |
