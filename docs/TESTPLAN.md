@@ -10,11 +10,11 @@
 > (Indikatoren, Backtest, ML, Lookahead). Handelslogik, Risiko-Dach,
 > Protokollierung und Live/Schatten-Konsistenz waren **ungetestet**.
 >
-> **Stand 22.08.2026:** **296 Tests** in 19 Dateien, 48 Selbstprüfungen,
-> 51 von 51 Mutationen gefangen.
+> **Stand 22.08.2026:** **312 Tests** in 20 Dateien, 48 Selbstprüfungen,
+> 54 von 54 Mutationen gefangen.
 >
 > Die Spalte „Tests" in §2 zählt Testfunktionen und summiert sich auf
-> **291**. pytest meldet 296, weil zwei Tests parametrisiert sind
+> **307**. pytest meldet 312, weil zwei Tests parametrisiert sind
 > (`test_engine_ausstiege.py` über fünf Haltedauern,
 > `test_lernkern.py` über zwei Zeitzonen) und jede Parametrisierung
 > einzeln zählt. Beide Zahlen sind richtig — sie zählen Verschiedenes.
@@ -98,7 +98,18 @@ aus `BEFUNDE.md` §G15/§G16.
 | `test_musterspeicher.py` | 17 | **§G16:** keine Duplikate, Zerfallenes bleibt zerfallen, jeder Schnitt zählt als Versuch. Fokus-Zahlen kommen aus den Quellen. **Vorzeichenstabilität ist verdrahtet.** |
 | `test_nutzung.py` | 17 | Die **fünf** Arten des stillen Ausfalls: nie gelaufen, immer leer, immer gleich, zu selten, **fehlerhaft** (§G16). Ausnahmen sind begründet, das Protokoll stört den Betrieb nie. |
 
-### 2.7 Live/Schatten-Konsistenz — der wichtigste Block
+### 2.7 Werkzeuge — Ereignisstudie und RL
+
+| Datei | Tests | Kernfragen |
+|---|---:|---|
+| `test_werkzeuge.py` | 16 | **§G17:** Sperrzone ist nicht optional (auch im **Standardwert**). Der Timing-Test ist **nicht abschaltbar** — README führt ihn als eine der fünf Sicherungen. Er erkennt echtes Timing (Perzentil 100) und falsches (2). **Fehlalarmquote gemessen: 8,5 %** auf reinem Rauschen. Die RL-Kette läuft durch, ohne Trainingsdaten im Testfenster. |
+
+> Beide Module sind **Werkzeuge, keine Dauerläufer** — wie
+> `03_backtest.py`. Der Nutzungsnachweis überwacht sie bewusst nicht;
+> dass sie nicht im 15-Minuten-Takt laufen, ist ihre Bestimmung, kein
+> Ausfall im Sinne von §G15.
+
+### 2.8 Live/Schatten-Konsistenz — der wichtigste Block
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
@@ -123,7 +134,7 @@ Einzeln:
 
 ```
 python scripts/00_selftest.py       # Forschungsschicht (48 Prüfungen)
-.venv/bin/pytest tests/ -q          # Betriebsschicht (296 Tests)
+.venv/bin/pytest tests/ -q          # Betriebsschicht (312 Tests)
 ```
 
 **Alles gehört nach jeder Codeänderung ausgeführt, bevor die Dienste neu

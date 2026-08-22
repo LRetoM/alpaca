@@ -1512,8 +1512,8 @@ Zahl (Fund 14).
 
 Geprüft wurden alle 52 Module (28.384 Zeilen zum Prüfzeitpunkt), 375
 öffentliche Funktionen, beide Testschichten, die vier Datenbanken und die
-laufenden Dienste. Am Ende: **296 Tests** (vorher 222), 48
-Selbstprüfungen, **51 von 51 Mutationen gefangen**, beide Dienste mit dem
+laufenden Dienste. Am Ende: **312 Tests** (vorher 222), 48
+Selbstprüfungen, **54 von 54 Mutationen gefangen**, beide Dienste mit dem
 neuen Stand neu gestartet.
 
 ### Fund 1: `B09_nachkauf` ist kein Live-Spiegel — Schwere: hoch
@@ -2023,6 +2023,91 @@ sich an den Daten **nicht** bestätigt:
   `nan`-Wert, aber nicht den daraus folgenden Status).
 
 ---
+
+## G17. Die zwei ungeprüften Werkzeuge — geprüft, behalten, abgesichert (22.08.2026)
+
+**Anlass:** Nach §G16 blieben zwei Flächen ohne Testabdeckung übrig —
+`src/alpaca_bot/rl/` (keine einzige Testdatei) und `events.py` (nur
+`00_selftest.py` [6]). Die Frage war: einbinden oder entfernen?
+
+### Die Entscheidung: behalten
+
+Der entscheidende Test war nicht „wird es benutzt", sondern **„läuft es
+noch, und ist es kalibriert?"** Ein Werkzeug, das man nicht starten kann,
+ist toter Code — egal wie gut es aussieht.
+
+| | läuft | methodisch | Abdeckung vorher |
+|---|---|---|---|
+| `events.py` | ja, `00_selftest` [6] grün | Kontrollgruppe **und** Sperrzone | 4 Selbsttest-Prüfungen |
+| `rl/` | ja, Lauf in 5 s | Timing-Test nicht abschaltbar | **keine** |
+
+Beide sind **Werkzeuge, keine Dauerläufer** — wie `03_backtest.py`. Dass
+sie nicht im 15-Minuten-Takt laufen, ist ihre Bestimmung, kein Ausfall
+im Sinne von §G15. Der Nutzungsnachweis überwacht sie deshalb bewusst
+nicht.
+
+Entscheidend für RL: Ein Lauf auf reinem Rauschen meldet korrekt **„KEIN
+nachweisbares Timing-Können"** (Perzentil 17 von geforderten 95). Ein
+Werkzeug, das bei Rauschen schweigt, ist die Voraussetzung dafür, seinem
+Urteil bei echten Daten zu trauen.
+
+Gegen ein Entfernen sprach zusätzlich, dass `README.md` den Timing-Test
+als eine der **fünf Sicherungen** führt und `selfcheck.CHARTER` Regel 7
+ihn verlangt. Der Preis ist sichtbar: `torch` belegt **535 MB von
+1,2 GB** der Umgebung.
+
+### Die eigentliche Lücke war die Absicherung
+
+Der Modul-Docstring behauptet, der Timing-Test sei „fest verdrahtet und
+lässt sich nicht abschalten". Das war eine **Behauptung** — genau die Art
+Zusicherung, die dieses Projekt sonst durch Tests deckt. Nachgeprüft: Sie
+stimmt, es gibt keinen Schalter. Jetzt ist sie auch getestet.
+
+### Erstmals gemessen: die Fehlalarmquote des Timing-Tests
+
+Auf reinem Random Walk, 400 Läufe je Variante:
+
+| Politik | Fehlalarm | Soll |
+|---|---:|---:|
+| träge (15 % Umschichtwahrscheinlichkeit) | **8,5 %** | 5 % |
+| häufig (50 %) | 6,8 % | 5 % |
+
+**Kein Defekt, sondern eine Eigenschaft des Verfahrens.** Zyklisch
+rotierte Kopien einer trägen Positionsfolge sind untereinander
+korreliert — benachbarte Rotationen unterscheiden sich kaum. Die
+Nullverteilung wird zu eng, der echte Wert liegt öfter am Rand.
+Derselbe Mechanismus wie bei den überlappenden Renditefenstern in §G12,
+und in derselben Größenordnung: §G12 nennt für die korrigierte Statistik
+11 % und benennt das ausdrücklich als ehrliche Restunschärfe.
+
+**Eine Ursachenhypothese wurde geprüft und verworfen.**
+`np.diff(e, prepend=0.0)` unterstellt jeder Rotation einen Kaltstart aus
+Position 0, den nur die echte Folge per Konstruktion hat (`env.reset`).
+Der Effekt ist real — im Mittel 2,3 bps einmalig — ändert die
+Fehlalarmquote aber **nicht** (7,8 % mit und ohne). Deshalb wurde dort
+nichts geändert: eine Korrektur ohne gemessene Wirkung wäre Kosmetik.
+
+**Folge für die Nutzung:** Ein einzelner Lauf über Perzentil 95 ist bei
+~8 % Fehlalarmquote kein Nachweis. Genau das sagt `verdict()` bereits —
+*„Schwacher Hinweis auf Timing-Können, nicht belastbar. Mit anderen
+Startwerten, Symbolen und Zeiträumen wiederholen."*
+
+### Zwei eigene Fehler, vom Werkzeug gefangen
+
+1. Der Hellseher-Test war **um einen Tag verschoben**. `total()` rechnet
+   `e * ret` — das Exposure wirkt auf dieselbe Tagesrendite. Falsch
+   ausgerichtet ergab er Perzentil 2 statt 100. Auch das ist ein
+   korrektes Signal, nur das umgekehrte; beide Richtungen sind jetzt
+   Testfälle.
+2. Der Mutationstest entlarvte einen zu schwachen Test von mir — zum
+   zweiten Mal in dieser Sitzung. Meine Sperrzonen-Tests gaben
+   `blackout` explizit an und blieben grün, als die Mutation den
+   **Standardwert** auf 0 setzte. Ein Test, der nur seine eigenen
+   Argumente prüft, prüft die Voreinstellung nicht.
+
+Regression: `tests/test_werkzeuge.py` (16 Tests), drei neue Mutationen —
+**54 von 54 gefangen**.
+
 
 ## H. Betrieb — was sich bewährt hat
 

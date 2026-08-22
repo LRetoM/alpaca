@@ -556,6 +556,37 @@ MUTATIONEN = [
         "Ein still entfallener Filter laesst eine ungefilterte Auswahl fuer "
         "geprueft halten - genau so ist dieser Fund entstanden.",
     ),
+
+    # --- Die zwei Werkzeuge: RL-Timingtest und Sperrzone (§G17) -----------
+    Mutation(
+        "Timing-Test faellt aus der RL-Auswertung",
+        "src/alpaca_bot/rl/train.py",
+        "            timing_skill_test(frame[\"exposure\"], p_test.loc[frame.index])\n            if not frame.empty",
+        "            {\"timing_percentile\": 99.0}\n            if not frame.empty",
+        "test_werkzeuge",
+        "README fuehrt den Timing-Test als eine der FUENF Sicherungen, "
+        "CHARTER Regel 7 verlangt ihn. Ohne ihn haengt das Urteil wieder "
+        "an der Rendite - und die stammt aus der Marktbeteiligung.",
+    ),
+    Mutation(
+        "Timing-Test misst die Ausrichtung nicht mehr",
+        "src/alpaca_bot/rl/train.py",
+        "    actual = total(exp)",
+        "    actual = total(np.roll(exp, 1))",
+        "test_werkzeuge",
+        "Wird das Original selbst verschoben, vergleicht der Test "
+        "Rotationen mit Rotationen - er kann perfektes Timing dann nicht "
+        "mehr von Zufall trennen.",
+    ),
+    Mutation(
+        "Sperrzone vor dem Ereignis faellt weg",
+        "src/alpaca_bot/events.py",
+        "    blackout: int = 5",
+        "    blackout: int = 0",
+        "test_werkzeuge",
+        "Ohne Sperrzone lernt das Modell, den Ausbruch an seinen ersten "
+        "Tagen zu erkennen - trivial, und zum Handeln zu spaet.",
+    ),
 ]
 
 
