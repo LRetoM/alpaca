@@ -160,8 +160,8 @@ MUTATIONEN = [
     Mutation(
         "Statistik zaehlt Einzelwerte statt Gruppen",
         "src/alpaca_bot/statistik.py",
-        "belastbar=bool(abs(t) > 2 and len(m) >= min_gruppen),",
-        "belastbar=bool(abs(t) > 2),",
+        "belastbar=bool(abs(massgeblich) > 2 and len(m) >= min_gruppen),",
+        "belastbar=bool(abs(massgeblich) > 2),",
         "test_ausfuehrung",
         "Ein hoher t-Wert aus fuenf Gruppen ist genauso wenig belastbar "
         "wie ein niedriger aus hundert.",
@@ -221,6 +221,53 @@ MUTATIONEN = [
         "test_konsistenz",
         "Eine Regel, die nicht mitgeschrieben wird, kann der Regelabgleich "
         "spaeter nicht pruefen - sie meldet stumm nichts.",
+    ),
+
+    # --- Ueberlappung zwischen den Handelstagen (§G12) ---------------------
+    Mutation(
+        "Ueberlappungskorrektur abgeschaltet",
+        "src/alpaca_bot/statistik.py",
+        "        t_ueber, aufbl = newey_west_t(m.to_numpy(), lag=horizont - 1)",
+        "        t_ueber, aufbl = t, 1.0",
+        "test_statistik_ueberlappung",
+        "Genau der Zustand vor dem 22.08.2026: der t-Wert faellt um bis zu "
+        "1,8x zu hoch aus, und 6 von 10 Faktoren waeren Fehlbefunde.",
+    ),
+    Mutation(
+        "Urteil haengt am rohen statt am korrigierten t-Wert",
+        "src/alpaca_bot/statistik.py",
+        "    massgeblich = t_ueber if np.isfinite(t_ueber) else t",
+        "    massgeblich = t",
+        "test_statistik_ueberlappung",
+        "Die gefaehrlichste Teilreparatur: die Korrektur wird gerechnet und "
+        "sogar ausgegeben, aber das Urteil 'belastbar' ignoriert sie.",
+    ),
+    Mutation(
+        "Gruppenmittel vor der Korrektur nicht sortiert",
+        "src/alpaca_bot/statistik.py",
+        "    m = m.sort_index()",
+        "    m = m",
+        "test_statistik_ueberlappung",
+        "Newey-West liest die Autokorrelation aus der Reihenfolge. Unsortiert "
+        "verschwindet sie stillschweigend - die Korrektur waere folgenlos.",
+    ),
+    Mutation(
+        "Faktorauswahl prueft wieder den rohen t-Wert",
+        "src/alpaca_bot/research.py",
+        '    t = sub["t_korrigiert"].fillna(sub["t_stat"]) if "t_korrigiert" in sub else sub["t_stat"]',
+        '    t = sub["t_stat"]',
+        "test_statistik_ueberlappung",
+        "Die Stelle, an der aus einer Messung eine Strategie wird - hier hat "
+        "der unkorrigierte Wert die tragenden Faktoren durchgelassen.",
+    ),
+    Mutation(
+        "Bartlett-Gewichte durch volle Gewichte ersetzt",
+        "src/alpaca_bot/statistik.py",
+        "        s += 2.0 * (1.0 - k / (lag + 1.0)) * gk",
+        "        s += 2.0 * gk",
+        "test_statistik_ueberlappung",
+        "Ohne den auslaufenden Kern ist die geschaetzte Varianz nicht mehr "
+        "garantiert positiv - der Schaetzer kippt bei negativer Autokorrelation.",
     ),
 ]
 

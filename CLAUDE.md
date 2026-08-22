@@ -29,6 +29,20 @@ Immer `statistik.gruppierter_test` verwenden; maßgeblich ist die Zahl der
 **Handelstage**, nie die Zahl der Einzelwerte. Der naive t-Wert ist
 bedeutungslos, nicht bloß ungenau.
 
+**Zwei Ebenen, nicht eine.** Mitteln je Handelstag löst nur die
+Überlappung *innerhalb* eines Tages. Reicht das Renditefenster über
+mehrere Tage, überlappen auch die *benachbarten* Tage — dagegen hilft
+Mitteln nicht. Deshalb bei jedem Mehrtages-Horizont `horizont=` mit
+übergeben:
+
+```python
+statistik.gruppierter_test(werte, tage, horizont=5)   # 5-Tage-Fenster
+```
+
+Ohne dieses Argument liegt die Fehlalarmquote nicht bei 5 %, sondern bei
+**39,5 %** (gemessen, `docs/BEFUNDE.md` §G12). Maßgeblich ist dann
+`t_ueberlappung`, nicht `t`.
+
 Aktuelle Signifikanzschwelle: `fleet.schwelle_sigma()` (steigt mit jedem
 weiteren Versuch). Ein t-Wert darunter ist der Normalfall, kein Befund.
 

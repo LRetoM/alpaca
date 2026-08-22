@@ -133,7 +133,14 @@ def zeitausstieg_pruefen(
     fall = t[["symbol", "exit_tag", "return_pct", sp, "markt", "ueberschuss"]].copy()
     fall = fall.dropna(subset=["ueberschuss"]).sort_values("ueberschuss",
                                                            ascending=False)
-    test = gruppierter_test(fall["ueberschuss"], fall["exit_tag"])
+    # `horizont` durchreichen: `ueberschuss` ist die Rendite ueber
+    # `horizont` Tage NACH dem Ausstieg. Zwei an aufeinanderfolgenden
+    # Tagen ausgestiegene Positionen teilen sich damit `horizont - 1`
+    # Tage ihres Nachlauf-Fensters (§G12). Ohne das Argument faellt der
+    # t-Wert hier systematisch zu hoch aus - und dies ist die Zahl, an
+    # der die Frage "haetten wir laenger halten sollen?" haengt.
+    test = gruppierter_test(fall["ueberschuss"], fall["exit_tag"],
+                            horizont=horizont)
     # Nur die Zahlenspalten runden - `exit_tag` ist ein Datum, und
     # DataFrame.round() wuerde darauf nur eine Warnung erzeugen.
     zahlen = fall.select_dtypes(include="number").columns

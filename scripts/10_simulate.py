@@ -92,15 +92,34 @@ def gruppierte_pruefung(trades: pd.DataFrame) -> str:
     t = trades.copy()
     t["tag"] = pd.to_datetime(t["entry_date"]).dt.normalize()
     schwelle = fleet.schwelle_sigma()
+
+    # Der Horizont ist die tatsaechliche Haltedauer: Ein am Montag und ein
+    # am Dienstag eroeffneter Trade ueberlappen sich um `haltedauer - 1`
+    # Tage, ihre Ergebnisse sehen also grossteils denselben Markt (§G12).
+    # Gemessen statt angenommen - `max_hold_days` ist die Obergrenze, nicht
+    # die Wirklichkeit: Stops und Gewinnziele beenden viele Trades frueher.
+    haltedauer = (int(round(float(t["bars_held"].median())))
+                  if "bars_held" in t.columns and t["bars_held"].notna().any()
+                  else 1)
+    haltedauer = max(1, haltedauer)
+
     L = ["", "  GRUPPIERTER TEST (massgeblich, Stichprobe = Handelstage)",
-         f"  Schwelle fleet.schwelle_sigma() = {schwelle}"]
+         f"  Schwelle fleet.schwelle_sigma() = {schwelle}",
+         f"  Ueberlappungskorrektur fuer Horizont {haltedauer} Tage "
+         f"(Median der Haltedauer)"]
 
     def zeile(name: str, r) -> str:
-        urteil = "BEFUND" if abs(r.t) > schwelle else "kein Befund"
-        return (f"    {name:<28} Mittel {r.mittel:+.4%}  t {r.t:>6.2f}  "
-                f"(naiv {r.t_naiv:>6.2f})  Tage {r.n_gruppen:>4}  [{urteil}]")
+        # `t_ueberlappung`, nicht `t` - sonst waere die Korrektur zwar
+        # gerechnet, aber das Urteil daneben faellt weiter unkorrigiert.
+        tw = r.t_ueberlappung
+        urteil = "BEFUND" if abs(tw) > schwelle else "kein Befund"
+        return (f"    {name:<28} Mittel {r.mittel:+.4%}  t {tw:>6.2f}  "
+                f"(roh {r.t:>6.2f}, naiv {r.t_naiv:>6.2f})  "
+                f"Tage {r.n_gruppen:>4}  [{urteil}]")
 
-    L.append(zeile("Rendite je Trade", statistik.gruppierter_test(t["return_pct"], t["tag"])))
+    L.append(zeile("Rendite je Trade",
+                   statistik.gruppierter_test(t["return_pct"], t["tag"],
+                                              horizont=haltedauer)))
 
     # Je Tag: obere gegen untere Score-Haelfte. Der Vergleich passiert
     # INNERHALB eines Tages - damit faellt die gemeinsame Marktbewegung
@@ -116,7 +135,9 @@ def gruppierte_pruefung(trades: pd.DataFrame) -> str:
                           "d": hoch["return_pct"].mean() - tief["return_pct"].mean()})
     if paare:
         p = pd.DataFrame(paare)
-        L.append(zeile("Score hoch minus tief", statistik.gruppierter_test(p["d"], p["tag"])))
+        L.append(zeile("Score hoch minus tief",
+                       statistik.gruppierter_test(p["d"], p["tag"],
+                                                  horizont=haltedauer)))
     else:
         L.append("    Score hoch minus tief        zu wenige Tage mit >= 4 Trades")
 

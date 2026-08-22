@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from . import indicators as ind
+from . import statistik
 
 
 # ---------------------------------------------------------------------------
@@ -121,17 +122,36 @@ class FactorResult:
     """Mittlerer taeglicher Querschnitts-IC."""
     ic_std: float
     t_stat: float
-    """ic_mean / (ic_std / sqrt(n_tage)). |t| > 2 = brauchbar."""
+    """ic_mean / (ic_std / sqrt(n_tage)) - OHNE Ueberlappungskorrektur.
+
+    Steht nur noch zum Vergleich hier. Massgeblich ist `t_korrigiert`;
+    bis zum 22.08.2026 war dieser Wert das Auswahlkriterium, und er faellt
+    systematisch zu hoch aus (`docs/BEFUNDE.md` §G12).
+    """
     n_days: int
     n_obs: int
     hit_rate: float
     """Anteil der Tage mit positivem IC. 0.5 = Zufall."""
     q5_minus_q1: float
     """Renditedifferenz oberstes minus unterstes Quintil."""
+    t_korrigiert: float = float("nan")
+    """t_stat, korrigiert um die Ueberlappung der Renditefenster.
+
+    Bei Horizont `h` teilen sich benachbarte Tages-ICs `h-1` von `h`
+    Tagen ihres Fensters. DAS ist der Wert, gegen den eine Schwelle
+    geprueft wird.
+    """
+    aufblaehung: float = float("nan")
+    """Um welchen Faktor `t_stat` zu hoch war. 1,0 = keine Ueberlappung."""
 
     @property
     def verdict(self) -> str:
-        if abs(self.t_stat) < 2:
+        # Bewusst `t_korrigiert`: das Urteil ist der Ort, an dem der
+        # aufgeblaehte Wert am teuersten waere. Faellt die Korrektur aus
+        # (NaN), gilt der unkorrigierte Wert - aber dann steht in der
+        # Ausgabe auch keine Aufblaehung, das faellt auf.
+        t = self.t_korrigiert if np.isfinite(self.t_korrigiert) else self.t_stat
+        if abs(t) < 2:
             return "Rauschen"
         if self.ic_mean > 0:
             return "NUETZLICH" if self.ic_mean > 0.01 else "schwach positiv"
@@ -204,9 +224,14 @@ def measure_factors(
             if len(ic) < 30:
                 continue
 
+            # Chronologisch - `newey_west_t` liest die Autokorrelation aus
+            # der Reihenfolge, eine unsortierte Reihe ergaebe Unsinn.
+            ic = ic.sort_index()
             arr = ic.to_numpy()
             mean, std = float(arr.mean()), float(arr.std(ddof=1))
             t = mean / (std / np.sqrt(len(arr))) if std > 0 else 0.0
+            t_korr, aufbl = (statistik.newey_west_t(arr, lag=h - 1)
+                             if h > 1 else (float(t), 1.0))
             sp = spread.reindex(ic.index).dropna()
 
             results.append(FactorResult(
@@ -214,6 +239,7 @@ def measure_factors(
                 n_days=len(arr), n_obs=int(n_valid.reindex(ic.index).sum()),
                 hit_rate=float((arr > 0).mean()),
                 q5_minus_q1=float(sp.mean()) if len(sp) else float("nan"),
+                t_korrigiert=float(t_korr), aufblaehung=float(aufbl),
             ))
         if verbose:
             print(f"      Horizont {h} Tage fertig")
@@ -222,7 +248,11 @@ def measure_factors(
         return pd.DataFrame()
 
     df = pd.DataFrame([{**r.__dict__, "verdict": r.verdict} for r in results])
-    return df.reindex(df["t_stat"].abs().sort_values(ascending=False).index).reset_index(drop=True)
+    # Nach dem KORRIGIERTEN Wert sortieren. Die Rangliste ist das, was
+    # gelesen wird; stuende oben, was nur unkorrigiert gross aussieht,
+    # waere die Korrektur folgenlos.
+    schluessel = df["t_korrigiert"].fillna(df["t_stat"]).abs()
+    return df.reindex(schluessel.sort_values(ascending=False).index).reset_index(drop=True)
 
 
 def _daily_cross_sectional_ic(
@@ -385,24 +415,35 @@ def summarize(results: pd.DataFrame, top: int = 25) -> str:
         return "Keine Ergebnisse."
     lines = [
         "=" * 92,
-        "  FAKTOR-RANGLISTE  (taeglicher Querschnitts-IC, sortiert nach |t|)",
+        "  FAKTOR-RANGLISTE  (taeglicher Querschnitts-IC, sortiert nach |t korr.|)",
         "=" * 92,
-        f"  {'Faktor':<20}{'Hor.':>5}{'IC':>9}{'t-Wert':>9}"
-        f"{'Trefferq.':>11}{'Q5-Q1':>9}{'Tage':>7}  Bewertung",
+        f"  {'Faktor':<20}{'Hor.':>5}{'IC':>9}{'t korr.':>9}{'t roh':>8}"
+        f"{'Aufbl.':>8}{'Trefferq.':>10}{'Tage':>7}  Bewertung",
         "  " + "-" * 88,
     ]
     for _, r in results.head(top).iterrows():
+        tk = r.get("t_korrigiert", float("nan"))
+        ab = r.get("aufblaehung", float("nan"))
+        # Alte Ergebnistabellen (vor §G12) haben diese beiden Spalten nicht.
+        # Dann steht hier ein Strich - und NICHT der rohe Wert an der Stelle
+        # des korrigierten, wo er als korrigiert gelesen wuerde.
+        sp_korr = f"{tk:>+9.1f}" if pd.notna(tk) else f"{'-':>9}"
+        sp_aufbl = f"{ab:>7.2f}x" if pd.notna(ab) else f"{'-':>8}"
         lines.append(
             f"  {r['factor']:<20}{int(r['horizon']):>5}{r['ic_mean']:>+9.4f}"
-            f"{r['t_stat']:>+9.1f}{r['hit_rate']:>11.1%}"
-            f"{r['q5_minus_q1']:>+9.3%}{int(r['n_days']):>7}  {r['verdict']}"
+            f"{sp_korr}{r['t_stat']:>+8.1f}{sp_aufbl}"
+            f"{r['hit_rate']:>10.1%}{int(r['n_days']):>7}  {r['verdict']}"
         )
     lines += [
         "",
         "  Lesart:",
         "    IC       mittlere taegliche Rangkorrelation Faktor <-> Folgerendite",
-        "    t-Wert   Stabilitaet ueber die Zeit. |t|>2 brauchbar, |t|>3 solide",
-        "    Q5-Q1    Renditedifferenz oberstes minus unterstes Quintil je Horizont",
+        "    t korr.  MASSGEBLICH. Um die Ueberlappung der Renditefenster",
+        "             bereinigt (Newey-West). |t|>2 brauchbar, |t|>3 solide",
+        "    t roh    ohne diese Bereinigung - nur zum Vergleich, nie zitieren",
+        "    Aufbl.   um welchen Faktor 't roh' zu hoch war. Haengt an der",
+        "             Traegheit des Faktors: 1,0x bei taeglich wechselnden,",
+        "             bis 1,8x bei traegen (§G12)",
         "",
         "  Ein hoher |t| bei winzigem IC ist normal und gut: Der Effekt ist klein,",
         "  aber verlaesslich. Genau darauf baut das Fundamentalgesetz (IR = IC x sqrt(BR)).",
@@ -420,7 +461,14 @@ def select_factors(
     Negative Faktoren werden NICHT einfach invertiert - ein Vorzeichen,
     das nur auf dieser Stichprobe stimmt, ist Data-Mining. Wer invertiert,
     muss die Hypothese vorher aufschreiben.
+
+    Geprueft wird `t_korrigiert`, nicht `t_stat`. Dies ist die Stelle, an
+    der aus einer Messung eine Strategie wird - genau hier hat der
+    unkorrigierte Wert am 16.08.2026 Faktoren durchgelassen, die die
+    Schwelle nach Korrektur nicht halten (`docs/BEFUNDE.md` §G12).
     """
-    sub = results[(results["horizon"] == horizon) & (results["t_stat"] >= min_t)]
-    sub = sub[sub["ic_mean"] > 0].sort_values("t_stat", ascending=False)
+    sub = results[results["horizon"] == horizon].copy()
+    t = sub["t_korrigiert"].fillna(sub["t_stat"]) if "t_korrigiert" in sub else sub["t_stat"]
+    sub = sub[(t >= min_t) & (sub["ic_mean"] > 0)]
+    sub = sub.reindex(t[t.index.isin(sub.index)].sort_values(ascending=False).index)
     return sub["factor"].head(max_factors).tolist()

@@ -18,7 +18,7 @@
 
 | Befund | Zahl | Quelle |
 |---|---|---|
-| Umkehr-Faktoren sind über 9 Jahre stabil | `reversal_3d` IC +0,018, `rsi2` +0,016, `ausverkauf` +0,010 — jeweils 100 % positive Jahre | `signals.ReversalWeights`, Messlauf über 2.162 Symbole |
+| Umkehr-Faktoren sind über 9 Jahre stabil | `reversal_3d` IC +0,018, `rsi2` +0,016, `ausverkauf` +0,010 — jeweils 100 % positive Jahre. **Die t-Werte dieses Laufs sind zu hoch** (§G12); die Vorzeichenstabilität je Jahr ist davon unberührt und trägt den Befund | `signals.ReversalWeights`, Messlauf über 2.162 Symbole |
 | Kein Einzelfaktor im Projekt kam je über IC 0,05 | Bester: 0,018 | `signals.py` |
 | Die fünf Umkehr-Bausteine messen im Kern **dasselbe** | stark korreliert — die Summe ist NICHT fünfmal so viel Signal | `signals.ReversalWeights` |
 | Vorsprung je Trade | **+0,11 %** | `docs/schattenbetrieb.md` |
@@ -58,6 +58,12 @@ geschlossen. „10 von 13 Fällen" sind faktisch **drei** Beobachtungen.
 
 **Regel:** Immer `statistik.gruppierter_test` verwenden. Maßgeblich ist
 die Zahl der **Gruppen** (Handelstage), nie die Zahl der Einzelwerte.
+
+**Und das reicht nicht allein.** Bei einem Renditefenster über mehrere
+Tage überlappen sich zusätzlich die **benachbarten Gruppen** — dagegen
+hilft Mitteln nicht. Dann gehört `horizont=` dazu (§G12). Ohne das
+Argument liegt die Fehlalarmquote bei 5-Tage-Fenstern nicht bei 5 %,
+sondern bei **39,5 %**.
 Der naive t-Wert ist nicht „zu hoch", sondern bedeutungslos — er kann in
 beide Richtungen abweichen (Schatten: 2,63 statt 1,45; Zeitausstieg: 0,17
 statt 1,61).
@@ -880,6 +886,153 @@ Gegen 15 Mutationen geprüft, alle getötet — darunter zwei, die schwächere
 erste Fassungen der Tests überlebt hatten (die Zeichenkette `lauf.json`
 statt des Schreibvorgangs gesucht; `for_reversal()` strukturell statt
 feldweise geprüft).
+
+---
+
+## G12. Die zweite Überlappung: zwischen den Handelstagen (22.08.2026)
+
+**Schwere: hoch.** Betrifft jede Faktormessung des Projekts — auch die,
+auf denen die Strategie selbst steht.
+
+### Was übersehen wurde
+
+§B1 hat die Überlappung **innerhalb** eines Handelstages gelöst: Alle
+Kandidaten eines Tages sehen denselben Markt, also wird je Tag gemittelt.
+Richtig — aber es bleibt eine zweite Ebene:
+
+```
+Tag 1 sagt die Rendite der Tage 1–5 voraus
+Tag 2 sagt die Rendite der Tage 2–6 voraus   <- 4 von 5 Tagen geteilt
+```
+
+Bei einem Horizont von 5 Tagen teilen zwei **benachbarte Tagesmittel**
+vier Fünftel ihres Renditefensters. Sie sind damit ebenso wenig
+unabhängig wie zwei Vorhersagen desselben Tages — nur eine Ebene höher.
+Das Mitteln je Tag beseitigt diese zweite Ebene nicht; es tut dagegen
+buchstäblich nichts.
+
+### Wie groß der Fehler ist
+
+**Der entscheidende Beleg** — 200 Läufe über reines Rauschen, gleitende
+5-Tage-Fenster, **kein echter Effekt vorhanden**. Ein Test bei |t| > 2
+darf in ~5 % der Fälle anschlagen:
+
+| Rechnung | Fehlalarmquote | Soll |
+|---|---:|---:|
+| ohne Korrektur | **39,5 %** | 5 % |
+| mit Korrektur | 11,0 % | 5 % |
+
+**Knapp vier von zehn „Befunden" aus überlappenden Fenstern sind reines
+Rauschen.** Die verbleibenden 11 % sind ehrlich zu nennen: Newey-West
+unterkorrigiert in endlichen Stichproben. Die Korrektur macht den Test
+nicht exakt, sie macht ihn brauchbar.
+
+### Auf echten Daten
+
+Projekteigener Faktor-Scan (`research.candidate_factors`), 1.182 Symbole,
+7 Jahre, 1.561 Handelstage, Horizont 5:
+
+| Faktor | IC | t roh | t korrigiert | Aufblähung | Urteil |
+|---|---:|---:|---:|---:|---|
+| `ausverkauf` | +0,0088 | 4,41 | **3,15** | 1,40× | bleibt Befund |
+| `rsi2` | +0,0145 | 3,94 | **2,70** | 1,46× | **kippt** |
+| `reversal_3d` | +0,0165 | 3,91 | **2,79** | 1,40× | **kippt** |
+| `reversal_2d` | +0,0151 | 3,59 | **2,91** | 1,23× | bleibt Befund |
+| `amihud` | +0,0137 | 3,56 | **1,95** | 1,82× | **kippt** |
+| `mom_252_21` | +0,0193 | 3,52 | **2,02** | 1,74× | **kippt** |
+| `reversal_5d` | +0,0144 | 3,42 | **2,16** | 1,58× | **kippt** |
+| `dist_sma10` | −0,0141 | −3,36 | **−2,04** | 1,64× | **kippt** |
+
+**Über alle 30 Faktoren: naiv 10 „Befunde", korrigiert 4.** Sechs von
+zehn verschwinden. Mittlere Aufblähung 1,62×. (Schwelle 2,85 =
+`fleet.schwelle_sigma()`.)
+
+### Die Aufblähung ist nicht konstant — und das ist der Kern
+
+Sie ist das **Produkt aus zwei Dingen**: der Überlappung der
+Renditefenster **und der Trägheit des Faktors selbst**.
+
+| Faktor | Aufblähung | warum |
+|---|---:|---|
+| `reversal_1d` | **0,96×** | erneuert sich täglich vollständig |
+| `schluss_lage` | 1,02× | dito |
+| `reversal_2d` | 1,23× | kurzes Gedächtnis |
+| `amihud` | **1,82×** | träge, 20-Tage-Fenster |
+| `mom_252_21` | 1,74× | träge, Jahresfenster |
+
+`reversal_1d` ist zugleich der **Kontrollfall**, der den Befund
+absichert: Bei Horizont 1 (keine Überlappung) liegt die Aufblähung bei
+0,99× und die Autokorrelation bei −0,016. Der Effekt entsteht also
+nachweislich durch die Überlappung und nicht durch irgendeine andere
+Eigenschaft der Daten.
+
+**Folge:** Eine pauschale Faustzahl (`t / 1,6`) wäre falsch. Die
+Korrektur muss aus den Daten kommen.
+
+### Warum das teuer ist
+
+Die Kette, über die die Strategie entstanden ist:
+
+```
+scripts/11_factor_lab.py
+  -> research.measure_factors()   t_stat = ic / (std / sqrt(n_tage))   [unkorrigiert]
+  -> research.select_factors(min_t=3.0)
+  -> signals.ReversalWeights
+```
+
+**Die tragenden Faktoren der Strategie wurden mit dem aufgeblähten
+t-Wert ausgewählt.** Zwei der in `ReversalWeights` dokumentierten
+Bausteine (`rsi2`, `reversal_3d`) halten die heutige Schwelle nach
+Korrektur nicht mehr.
+
+### Was das NICHT heißt
+
+- **Die Strategie ist damit nicht widerlegt.** `ReversalWeights` nennt
+  als Kriterium ausdrücklich die **Vorzeichenstabilität je Jahr**
+  („100 % positive Jahre") — ein anderes und robusteres Kriterium als
+  der t-Wert, das von dieser Korrektur unberührt bleibt.
+- **Kein Parameter wird deshalb geändert** (CLAUDE.md). Der Befund
+  senkt die *Beweislast-Erfüllung* der Vergangenheit, er ist kein
+  Handelssignal.
+- Die Zahlen in §A stammen aus einem anderen Lauf (2.162 Symbole,
+  9 Jahre) und sind hier nicht direkt nachgerechnet. Die Richtung des
+  Fehlers gilt trotzdem: sie sind zu optimistisch.
+
+### Das Wissen war bereits im Projekt vorhanden
+
+Der unangenehmste Teil. `scripts/24_kandidaten_test.py:91` gruppiert
+ausdrücklich nach **Monat**, mit genau dieser Begründung im Kommentar:
+
+> „Jeder Tag ist EINE Beobachtung – deshalb hier der Monat als Gruppe,
+> sonst wären aufeinanderfolgende Tage wieder überlappend."
+
+Dort war es also gelöst. Nur `research.py` — das Werkzeug, das die
+tragenden Faktoren ausgewählt hat — tat es nicht. **Es war kein
+Wissenslücke, sondern eine Inkonsistenz.** Damit gilt umgekehrt: die
+18 Faktorkandidaten vom 16.08. (§C) wurden korrekt gemessen und bleiben
+widerlegt.
+
+### Behoben
+
+- `statistik.newey_west_t()` — Bartlett-Kern, gegen den analytisch
+  herleitbaren Sollwert geprüft (für ein gleitendes q-Tage-Mittel ist
+  `LRV/gamma_0 = 1 + 2·Σ((q−k)/q)²`, bei q=5 also 3,40 → 1,844×).
+- `statistik.gruppierter_test(..., horizont=)` — Vorgabe 1 (unverändert
+  rückwärtskompatibel). `belastbar` hängt am **korrigierten** Wert.
+- `research.FactorResult.t_korrigiert` / `.aufblaehung`; `verdict`,
+  `select_factors` und die Sortierung der Rangliste nutzen den
+  korrigierten Wert. Alte Ergebnistabellen ohne die Spalten zeigen einen
+  Strich, nie den rohen Wert an der Stelle des korrigierten.
+- `nachbetrachtung.zeitausstieg_pruefen` reicht seinen `horizont` durch.
+- `scripts/10_simulate.py` korrigiert über die **gemessene** mediane
+  Haltedauer, nicht über `max_hold_days` (Stops beenden viele Trades
+  früher).
+
+Regression: `tests/test_statistik_ueberlappung.py` (19 Tests). Fünf neue
+Mutationen in `scripts/23_mutationstest.py`, **24 von 24 gefangen** —
+zwei davon erst nach Nachbesserung: der Bartlett-Kern war nur gegen
+„größer als 1" geprüft, und die Sortierzusicherung war ein wirkungsloses
+Duplikat von `groupby(sort=True)`.
 
 ---
 
