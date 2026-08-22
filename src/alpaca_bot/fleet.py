@@ -284,6 +284,19 @@ def alle_bots(store: ShadowStore | None = None) -> pd.DataFrame:
     return _store(store).table("bots")
 
 
+def bot(bot_id: str, store: ShadowStore | None = None) -> Bot | None:
+    """Ein einzelner Bot samt Konfiguration - auch ein stillgelegter.
+
+    `aktive_bots` filtert auf status='laeuft'. Eine Auswertung muss aber
+    auch die Konfiguration eines stillgelegten Bots noch lesen koennen,
+    sonst waere dessen Historie nachtraeglich nicht mehr interpretierbar.
+    """
+    s = _store(store)
+    with s._conn() as c:
+        row = c.execute("SELECT * FROM bots WHERE bot_id=?", (bot_id,)).fetchone()
+    return _bot_aus_zeile(row) if row else None
+
+
 def n_versuche(store: ShadowStore | None = None) -> int:
     """Anzahl ALLER je gestarteten Versuche - Grundlage der Schwelle."""
     s = _store(store)

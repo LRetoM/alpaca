@@ -15,6 +15,7 @@ weist die daraus folgende Zufallsschwelle bei jeder Auswertung aus.
     python scripts/21_fleet.py --startaufstellung     # die 7 Bots aus §5.3
     python scripts/21_fleet.py --divergenz            # wirkungslose Varianten finden
     python scripts/21_fleet.py --vergleich B00_basis B01_stop_eng
+    python scripts/21_fleet.py --kriterien B11_dyn_ausstieg_live  # Abnahme §3.3
     python scripts/21_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos"
     python scripts/21_fleet.py --anmelden MEIN_BOT --achse stop_atr --wert 2.5 \\
         --hypothese "Begruendung mit mindestens 20 Zeichen"
@@ -40,6 +41,10 @@ def main() -> int:
                    help="Gepaarter Vergleich zweier Bots")
     p.add_argument("--attribution", nargs=2, metavar=("BOT_A", "BOT_B"),
                    help="Woran lag der Unterschied?")
+    p.add_argument("--kriterien", metavar="BOT_ID",
+                   help="Die vier Abnahmekriterien aus BETRIEBSPLAN §3.3")
+    p.add_argument("--basis", default="B00_basis",
+                   help="Vergleichsbot fuer --kriterien (Standard: B00_basis)")
     p.add_argument("--stilllegen", metavar="BOT_ID")
     p.add_argument("--grund", default="")
     p.add_argument("--anmelden", metavar="BOT_ID")
@@ -112,6 +117,13 @@ def main() -> int:
             print()
             print("  NICHT BELASTBAR. Entweder liegt |t| unter der Zufallsschwelle,")
             print(f"  oder es sind weniger als {shadow_eval.MIN_TAGE} Handelstage.")
+            print("  `MIN_TAGE` ist die strengere Hausmarke dieser Funktion. Fuer")
+            print("  die Abnahme einer Aenderung gilt BETRIEBSPLAN §3.3:")
+            print(f"      python scripts/21_fleet.py --kriterien {a}")
+        return 0
+
+    if args.kriterien:
+        print(shadow_eval.kriterien_text(args.kriterien, args.basis, store))
         return 0
 
     if args.attribution:

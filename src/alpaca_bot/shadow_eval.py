@@ -292,6 +292,152 @@ def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
     return erg
 
 
+# Bandbreite fuer die Verlaengerungsquote aus BETRIEBSPLAN §3.3 Kriterium 3.
+VERLAENGERUNG_MIN = 0.10
+VERLAENGERUNG_MAX = 0.60
+KRITERIUM_MIN_TAGE = 20
+
+
+def kriterien_pruefen(bot_id: str, basis_bot: str = "B00_basis",
+                      store: ShadowStore | None = None) -> dict:
+    """Prueft die vier vorab festgelegten Kriterien aus BETRIEBSPLAN §3.3.
+
+    Diese vier Kriterien sind der ENTSCHEIDUNGSVERTRAG - so am 21.08.2026
+    festgelegt (siehe BEFUNDE §G10). `MIN_TAGE` (60) ist eine davon
+    getrennte, strengere Hausmarke von `vergleich_gepaart`; sie ist ein
+    Hinweis, kein Veto. Ohne diese Trennung waere der Termin nicht
+    einhaltbar: 60 nutzbare Tage erreicht ein am 18.08. gestarteter Bot
+    erst Ende November.
+
+    Ein Kriterium hat drei moegliche Zustaende, nicht zwei:
+
+        True   erfuellt
+        False  durchgefallen -> laut §3.3 bleibt es beim Zeitausstieg
+        None   noch nicht entscheidbar (zu wenig Daten)
+
+    `None` darf NIE als Bestehen durchgehen. Genau diese Verwechslung
+    macht aus einem unfertigen Versuch ein Ergebnis.
+
+    Kriterium 3 und 4 fragen nach "verlaengerten" Positionen. Die Engine
+    fuehrt `verlaengert` nur als lokale Variable; sie protokolliert das
+    Merkmal zwar abgeleitet als `nach_verlaengerung` in den
+    Entscheidungsgruenden (`engine.py:815`), aber `shadow_exits` hat gar
+    keine Spalte fuer Gruende. Hier wird deshalb dieselbe Formel noch
+    einmal gebildet - `bars_held > max_hold_days`, wortgleich zur Engine.
+    Der Nenner ist bewusst NICHT die Zahl aller Ausstiege, sondern nur
+    derer, die die Frist ueberhaupt erreicht haben: eine nach zwei Tagen
+    ausgestoppte Position hatte nie die Gelegenheit, verlaengert zu
+    werden, und wuerde die Quote sonst kuenstlich druecken.
+    """
+    from . import fleet
+
+    s = store or ShadowStore()
+    erg: dict = {"bot": bot_id, "basis": basis_bot}
+
+    v = vergleich_gepaart(bot_id, basis_bot, s, schreiben=False)
+    t = v.get("t_wert")
+    schwelle = fleet.schwelle_sigma(s)
+    n_tage = int(v.get("n_tage", 0))
+
+    erg["1_t_ueber_schwelle"] = {
+        "wert": t, "soll": f"> {schwelle}",
+        "erfuellt": None if t is None else bool(t > schwelle),
+    }
+    erg["2_genug_tage"] = {
+        # Nicht schlicht "nach Sperrzone": `vergleich_gepaart` zieht die
+        # Sperrzone erst ab 5 Tagen ab (sonst bliebe von einer
+        # Dreitagesreihe nichts uebrig). Unter 5 Tagen ist `n_tage` also
+        # roh - eine Beschriftung, die das verschweigt, behauptet eine
+        # Bereinigung, die nicht stattgefunden hat.
+        "wert": n_tage,
+        "soll": f">= {KRITERIUM_MIN_TAGE} (Sperrzone ab 5 Tagen abgezogen)",
+        "erfuellt": n_tage >= KRITERIUM_MIN_TAGE,
+    }
+
+    b = fleet.bot(bot_id, s)
+    frist = b.config.max_hold_days if b else None
+    # §3.3 nimmt den DYNAMISCHEN Ausstieg ab. Ein Bot mit
+    # `zeitausstieg_dynamisch=False` verkauft exakt bei `max_hold_days` und
+    # kann konstruktionsbedingt nie verlaengern - fuer ihn ist die Quote
+    # nicht "0 % und damit durchgefallen", sondern gar keine Frage. Ohne
+    # diese Trennung meldete die Pruefung am 21.08.2026 fuer
+    # B04_halten_lang "DURCHGEFALLEN, ist: 0.0". Falsche Aussage, und die
+    # gefaehrliche Richtung: sie sieht nach Messergebnis aus.
+    dynamisch = bool(b.config.zeitausstieg_dynamisch) if b else False
+    ex = s.table("shadow_exits")
+    ex = ex[ex["bot_id"] == bot_id] if not ex.empty else ex
+
+    if b is None or not dynamisch or ex.empty:
+        erreicht = verlaengert = pd.DataFrame()
+    else:
+        erreicht = ex[ex["bars_held"] >= frist]
+        verlaengert = ex[ex["bars_held"] > frist]
+
+    nicht_anwendbar = "entfaellt: Bot hat keinen dynamischen Ausstieg"
+    quote = len(verlaengert) / len(erreicht) if len(erreicht) else None
+    erg["3_verlaengerungsquote"] = {
+        "wert": round(quote, 3) if quote is not None else None,
+        "soll": (f"{VERLAENGERUNG_MIN:.0%} - {VERLAENGERUNG_MAX:.0%}"
+                 if dynamisch else nicht_anwendbar),
+        "n_erreicht_frist": len(erreicht), "n_verlaengert": len(verlaengert),
+        "erfuellt": None if quote is None
+        else bool(VERLAENGERUNG_MIN <= quote <= VERLAENGERUNG_MAX),
+    }
+
+    # Kriterium 4 haengt an Kriterium 3: ohne verlaengerte Trades gibt es
+    # keinen Median, und "kein Median" ist nicht dasselbe wie "negativ".
+    median = (float(verlaengert["return_pct"].median())
+              if len(verlaengert) else None)
+    erg["4_median_positiv"] = {
+        "wert": round(median, 5) if median is not None else None,
+        "soll": "> 0" if dynamisch else nicht_anwendbar,
+        "n": len(verlaengert),
+        "erfuellt": None if median is None else bool(median > 0),
+    }
+
+    zustaende = [erg[k]["erfuellt"] for k in erg if k[0].isdigit()]
+    erg["bestanden"] = all(z is True for z in zustaende)
+    erg["entscheidbar"] = None not in zustaende
+    erg["hinweis_min_tage"] = (
+        f"{n_tage} von {MIN_TAGE} Tagen der strengeren Hausmarke "
+        f"(`MIN_TAGE`) - laut §3.3 kein Veto."
+        if n_tage < MIN_TAGE else ""
+    )
+    return erg
+
+
+def kriterien_text(bot_id: str, basis_bot: str = "B00_basis",
+                   store: ShadowStore | None = None) -> str:
+    """Die vier Kriterien als lesbare Abnahmeliste."""
+    k = kriterien_pruefen(bot_id, basis_bot, store)
+    zeichen = {True: "ERFUELLT   ", False: "DURCHGEFALLEN", None: "offen      "}
+    L = ["=" * 78,
+         f"  KRITERIEN AUS BETRIEBSPLAN §3.3: {k['bot']} gegen {k['basis']}",
+         "=" * 78, ""]
+    titel = {
+        "1_t_ueber_schwelle": "1. t ueber Zufallsschwelle",
+        "2_genug_tage": "2. genug Handelstage",
+        "3_verlaengerungsquote": "3. Verlaengerungsquote in Bandbreite",
+        "4_median_positiv": "4. Median der verlaengerten Trades positiv",
+    }
+    for schluessel, name in titel.items():
+        f = k[schluessel]
+        L.append(f"  [{zeichen[f['erfuellt']]}] {name}")
+        L.append(f"        ist: {f['wert']}   soll: {f['soll']}")
+    L.append("")
+    if not k["entscheidbar"]:
+        L.append("  NOCH NICHT ENTSCHEIDBAR - mindestens ein Kriterium hat")
+        L.append("  keine Datengrundlage. 'offen' ist KEIN Bestehen.")
+    elif k["bestanden"]:
+        L.append("  ALLE VIER ERFUELLT - laut §3.3 bestanden.")
+    else:
+        L.append("  MINDESTENS EINES DURCHGEFALLEN - laut §3.3 bleibt es")
+        L.append("  beim Zeitausstieg nach `max_hold_days`.")
+    if k["hinweis_min_tage"]:
+        L += ["", "  " + k["hinweis_min_tage"]]
+    return "\n".join(L)
+
+
 def divergenz(store: ShadowStore | None = None) -> pd.DataFrame:
     """Unterscheiden sich die Bots ueberhaupt? (Plan §12.2, vorwaerts)
 
@@ -423,7 +569,9 @@ def bericht(store: ShadowStore | None = None, *, buch: str = "rangliste",
     L += ["", "-" * 78, f"  Zufallsschwelle bei {fleet.n_versuche(s)} Versuchen: "
           f"|t| > {fleet.schwelle_sigma(s)}"]
     if n_tage < MIN_TAGE:
-        L += [f"  ACHTUNG: {n_tage} von {MIN_TAGE} noetigen Handelstagen.",
-              "  Jeder Befund ist eine Momentaufnahme und rechtfertigt",
-              "  KEINE Regelaenderung."]
+        L += [f"  ACHTUNG: {n_tage} von {MIN_TAGE} Tagen der Hausmarke.",
+              "  Ein hier auffallender Befund ist eine Momentaufnahme und",
+              "  rechtfertigt KEINE Regelaenderung. Eine Regelaenderung wird",
+              "  ausschliesslich ueber BETRIEBSPLAN §3.3 abgenommen",
+              "  (`21_fleet.py --kriterien`), nie ueber diesen Bericht."]
     return "\n".join(L)

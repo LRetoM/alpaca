@@ -8,7 +8,8 @@ ENTSCHEIDUNGEN mit echtem Geld, ohne dass eine Zahl auffaellig wird.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -246,3 +247,185 @@ class TestWiedereinstiege:
         ])
         w = wiedereinstiege(o, sperrfrist=3)
         assert len(w) == 1 and bool(w.iloc[0]["sperrfrist_verletzt"])
+
+
+class TestBerichtNenntSeinenBezug:
+    """REGRESSION 21.08.2026: `bericht()` ohne `markt` rechnet Rohzahlen,
+    wies das aber nicht aus - die Ueberschrift sagte nur 'falls Markt
+    uebergeben'. Die Tabelle wurde daraufhin als Aussage ueber die
+    AUSSTIEGSREGEL gelesen, obwohl sie im Bullenmarkt vor allem den Markt
+    misst. Der Bericht muss seinen eigenen Bezug immer mitfuehren.
+    """
+
+    def _trades(self):
+        return pd.DataFrame([
+            {"trade_id": "1", "symbol": "A", "exit_reason": "zeitausstieg",
+             "exit_date": "2026-01-06T20:00:00+00:00", "return_pct": 0.01,
+             "after_1d": 0.01, "after_5d": 0.02, "after_10d": 0.03},
+            {"trade_id": "2", "symbol": "B", "exit_reason": "zeitausstieg",
+             "exit_date": "2026-01-06T20:00:00+00:00", "return_pct": 0.02,
+             "after_1d": 0.01, "after_5d": 0.03, "after_10d": 0.01},
+            {"trade_id": "3", "symbol": "C", "exit_reason": "zeitausstieg",
+             "exit_date": "2026-01-13T20:00:00+00:00", "return_pct": -0.01,
+             "after_1d": -0.01, "after_5d": 0.01, "after_10d": 0.02},
+        ])
+
+    def _markt(self):
+        # Steigender Markt: genau der Fall, in dem Rohzahlen luegen.
+        idx = pd.bdate_range("2026-01-02", periods=40)
+        return pd.Series([100.0 * (1.004 ** i) for i in range(40)], index=idx)
+
+    def _bericht(self, **kw):
+        from alpaca_bot import nachbetrachtung as nb
+
+        with patch.object(nb, "Lifecycle") as LC, \
+             patch.object(nb, "wiedereinstiege", return_value=pd.DataFrame()):
+            LC.return_value.table.return_value = self._trades()
+            return nb.bericht(**kw)
+
+    def test_ohne_markt_warnt_der_bericht(self):
+        text = self._bericht()
+        assert "OHNE Marktbereinigung" in text
+        assert "ROHRENDITE, Markt NICHT abgezogen" in text
+
+    def test_mit_markt_weist_der_bericht_das_aus(self):
+        text = self._bericht(markt=self._markt())
+        assert "MARKTBEREINIGT" in text
+        assert "Ueberschuss ueber den Markt" in text
+        assert "OHNE Marktbereinigung" not in text
+
+    def test_steigender_markt_senkt_den_nachlauf(self):
+        """Die Kernaussage: marktbereinigt muss kleiner sein als roh."""
+        from alpaca_bot.nachbetrachtung import war_der_ausstieg_richtig
+
+        roh = war_der_ausstieg_richtig(self._trades())
+        bereinigt = war_der_ausstieg_richtig(self._trades(), markt=self._markt())
+        assert bereinigt.loc["zeitausstieg", "danach_5d"] < \
+            roh.loc["zeitausstieg", "danach_5d"]
+
+
+# ------------------------------------------ Kriterien aus BETRIEBSPLAN §3.3
+class TestKriterienPruefen:
+    """Die Abnahme des dynamischen Ausstiegs am 10.10.2026.
+
+    Diese Pruefung entscheidet, ob eine Aenderung an der Handelslogik live
+    geht. Sie muss deshalb gegen genau die Fehler gesichert sein, die aus
+    einem unfertigen Versuch ein Ergebnis machen:
+
+    1. `None` heisst "noch keine Datengrundlage" und darf nie als Bestehen
+       zaehlen. Zwei erfuellte und zwei offene Kriterien sind kein 2:0.
+    2. Der Nenner der Verlaengerungsquote sind nur die Ausstiege, die die
+       Frist ueberhaupt erreicht haben. Rechnet man gegen alle Ausstiege,
+       druecken die frueh ausgestoppten Positionen die Quote unter die
+       Bandbreite - und die Aenderung faellt aus einem Grund durch, der
+       nichts mit ihr zu tun hat.
+    3. REGRESSION 21.08.2026: Fuer B04_halten_lang
+       (`zeitausstieg_dynamisch=False`) meldete die Pruefung "Kriterium 3
+       DURCHGEFALLEN, ist: 0.0". Der Bot verkauft aber konstruktionsbedingt
+       exakt bei `max_hold_days` und kann nie verlaengern - die Quote war
+       gar keine Messung. Eine erfundene Null, die wie ein Befund aussieht.
+    """
+
+    def _exits(self, bars_held, return_pct=0.02):
+        werte = ([return_pct] * len(bars_held)
+                 if not isinstance(return_pct, list) else return_pct)
+        return pd.DataFrame([
+            {"bot_id": "BX", "symbol": f"S{i}", "bars_held": b,
+             "return_pct": r}
+            for i, (b, r) in enumerate(zip(bars_held, werte))
+        ])
+
+    def _pruefen(self, bars_held, *, frist=5, dynamisch=True, t=3.0,
+                 n_tage=25, return_pct=0.02):
+        from alpaca_bot import fleet, shadow_eval
+
+        store = MagicMock()
+        store.table.return_value = self._exits(bars_held, return_pct)
+        b = SimpleNamespace(config=SimpleNamespace(
+            max_hold_days=frist, zeitausstieg_dynamisch=dynamisch))
+
+        with patch.object(shadow_eval, "vergleich_gepaart",
+                          return_value={"t_wert": t, "n_tage": n_tage}), \
+             patch.object(fleet, "schwelle_sigma", return_value=2.85), \
+             patch.object(fleet, "bot", return_value=b):
+            return shadow_eval.kriterien_pruefen("BX", store=store)
+
+    def test_ohne_verlaengerte_trades_kein_bestehen(self):
+        """Kriterium 1 und 2 klar erfuellt - trotzdem nicht bestanden."""
+        k = self._pruefen([1, 2, 3], t=99.0, n_tage=999)
+        assert k["1_t_ueber_schwelle"]["erfuellt"] is True
+        assert k["2_genug_tage"]["erfuellt"] is True
+        assert k["3_verlaengerungsquote"]["erfuellt"] is None
+        assert k["4_median_positiv"]["erfuellt"] is None
+        assert k["bestanden"] is False
+        assert k["entscheidbar"] is False
+
+    def test_nenner_ist_nur_wer_die_frist_erreichte(self):
+        """20 frueh ausgestoppt, 8 an der Frist, 2 verlaengert.
+
+        Richtig: 2/10 = 20 %, in der Bandbreite. Gegen alle 30 Ausstiege
+        gerechnet waeren es 6,7 % - unterhalb der Bandbreite und damit
+        durchgefallen. Genau dieser Unterschied wird hier festgenagelt.
+        """
+        k = self._pruefen([2] * 20 + [5] * 8 + [8] * 2)
+        f = k["3_verlaengerungsquote"]
+        assert f["n_erreicht_frist"] == 10
+        assert f["n_verlaengert"] == 2
+        assert f["wert"] == 0.2
+        assert f["erfuellt"] is True
+
+    def test_quote_ueber_bandbreite_faellt_durch(self):
+        k = self._pruefen([5] + [8] * 9)
+        assert k["3_verlaengerungsquote"]["wert"] == 0.9
+        assert k["3_verlaengerungsquote"]["erfuellt"] is False
+        assert k["bestanden"] is False
+
+    def test_quote_unter_bandbreite_faellt_durch(self):
+        k = self._pruefen([5] * 19 + [8])
+        assert k["3_verlaengerungsquote"]["wert"] == 0.05
+        assert k["3_verlaengerungsquote"]["erfuellt"] is False
+
+    def test_bot_ohne_dynamischen_ausstieg_faellt_nicht_durch(self):
+        """REGRESSION: `entfaellt` statt einer erfundenen Null-Quote."""
+        k = self._pruefen([2, 5, 5, 5], dynamisch=False)
+        for schluessel in ("3_verlaengerungsquote", "4_median_positiv"):
+            assert k[schluessel]["erfuellt"] is None
+            assert k[schluessel]["wert"] is None
+            assert "entfaellt" in k[schluessel]["soll"]
+        assert k["bestanden"] is False
+
+    def test_median_wird_nur_ueber_verlaengerte_gerechnet(self):
+        """Die Verlierer VOR der Frist duerfen den Median nicht kippen."""
+        k = self._pruefen([2, 2, 5, 5, 8, 8],
+                          return_pct=[-0.9, -0.9, -0.9, -0.9, 0.03, 0.05])
+        assert k["4_median_positiv"]["n"] == 2
+        assert k["4_median_positiv"]["wert"] == 0.04
+        assert k["4_median_positiv"]["erfuellt"] is True
+
+    def test_alle_vier_erfuellt_ist_bestanden(self):
+        """Gegenprobe: `bestanden` kann ueberhaupt True werden.
+
+        Ohne diesen Test wuerden alle anderen auch dann gruen bleiben,
+        wenn die Funktion konstant False lieferte.
+        """
+        k = self._pruefen([2] * 10 + [5] * 7 + [8] * 3, t=3.0, n_tage=25)
+        assert k["bestanden"] is True
+        assert k["entscheidbar"] is True
+
+    def test_t_unter_schwelle_faellt_durch(self):
+        k = self._pruefen([2] * 10 + [5] * 7 + [8] * 3, t=2.84)
+        assert k["1_t_ueber_schwelle"]["erfuellt"] is False
+        assert k["bestanden"] is False
+        assert k["entscheidbar"] is True
+
+    def test_min_tage_ist_hinweis_kein_veto(self):
+        """21.08.2026: `MIN_TAGE` (60) darf §3.3 nicht ueberstimmen.
+
+        Bei 25 nutzbaren Tagen liegt der Bot unter der Hausmarke - die
+        Pruefung muss ihn trotzdem bestehen lassen und die Unterschreitung
+        nur benennen. Sonst waere der 10.10. zwingend "nicht belastbar".
+        """
+        k = self._pruefen([2] * 10 + [5] * 7 + [8] * 3, n_tage=25)
+        assert k["bestanden"] is True
+        assert "60" in k["hinweis_min_tage"]
+        assert "kein Veto" in k["hinweis_min_tage"]

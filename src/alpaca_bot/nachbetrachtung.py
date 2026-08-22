@@ -220,7 +220,20 @@ def bericht(markt: pd.Series | None = None) -> str:
         L.append("  Noch keine abgeschlossenen Trades.")
         return "\n".join(L)
 
-    L.append("  Je Ausstiegsgrund (Nachlauf marktbereinigt, falls Markt uebergeben):")
+    # Der Bericht MUSS nennen, in welchem Modus er gerechnet hat. "falls
+    # Markt uebergeben" stand hier frueher - und liess offen, welcher der
+    # beiden Faelle die Tabelle darunter erzeugt hat. Ein Aufruf ohne
+    # `markt` (z. B. aus der Shell) liefert Rohzahlen, die im Bullenmarkt
+    # jeden Ausstieg zu frueh aussehen lassen; genau so wurden sie am
+    # 21.08.2026 einmal fehlgedeutet.
+    if markt is None:
+        L.append("  ACHTUNG: OHNE Marktbereinigung gerechnet. Die Spalten")
+        L.append("  'danach_*' enthalten Rohrenditen - in einem steigenden")
+        L.append("  Markt steigt nach jedem Verkauf fast alles. Erst mit")
+        L.append("  `markt=` sind sie eine Aussage ueber die Ausstiegsregel.")
+    else:
+        L.append("  Je Ausstiegsgrund, Nachlauf MARKTBEREINIGT "
+                 "(Ueberschuss gegen die Marktreihe):")
     L.append("  " + je_grund.to_string().replace("\n", "\n  "))
     L.append("")
 
@@ -232,8 +245,12 @@ def bericht(markt: pd.Series | None = None) -> str:
         L.append("  Noch keine auswertbaren Zeitausstiege.")
     else:
         besser = int((fall["ueberschuss"] > 0).sum())
+        # Diese Zeile wird am haeufigsten zitiert ("18 von 24") - sie muss
+        # ihren eigenen Bezug mitfuehren, sonst wandert sie ohne ihn weiter.
+        bezug = ("Ueberschuss ueber den Markt" if markt is not None
+                 else "ROHRENDITE, Markt NICHT abgezogen")
         L.append(f"  Faelle, in denen Halten besser gewesen waere: "
-                 f"{besser} von {len(fall)}")
+                 f"{besser} von {len(fall)}  ({bezug})")
         L.append("")
         L.append(str(test))
         L.append("")
