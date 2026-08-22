@@ -699,6 +699,7 @@ class Engine:
             gruende["nachkauf"] = True
             gruende["bestand_vorher"] = round(pos.qty * price, 2)
             gruende["gewinn_pct"] = round(pos.unrealized_pct(price), 4)
+            self._mit_kontext(gruende, snapshot, sym)
             out.append(
                 Decision(
                     symbol=sym,
@@ -801,7 +802,7 @@ class Engine:
                         conviction=score,
                         price=price,
                         target_notional=pos.qty * price,
-                        reasons={
+                        reasons=self._mit_kontext({
                             "ausstiegsgrund": reason,
                             "gewinn_pct": round(pnl, 4),
                             "tage_gehalten": pos.bars_held,
@@ -814,10 +815,36 @@ class Engine:
                             # regulaer oder nach Verlaengerung endete.
                             **({"nach_verlaengerung": True}
                                if pos.bars_held > cfg.max_hold_days else {}),
-                        },
+                        }, snapshot, sym),
                     )
                 )
         return out
+
+    @staticmethod
+    def _mit_kontext(gruende: dict, snapshot: MarketSnapshot, sym: str) -> dict:
+        """Haengt Regime, Sektor und Liquiditaetsdezil an eine Begruendung.
+
+        Beeinflusst die Entscheidung NICHT. Sie wird dadurch im Nachhinein
+        zuordenbar: "in welcher Marktlage und bei welcher Werteklasse
+        traegt die Strategie?" - die wichtigste offene Frage des Projekts.
+
+        **Warum als eigene Funktion.** Bis zum 22.08.2026 stand dieser
+        Block nur in der Kaufschleife. `topup` und `sell` bekamen nichts -
+        und `topup` ist mit 110 von 304 Live-Entscheidungen die Mehrheit
+        der Kapitalzuteilung (bis zu 9 Nachkaeufe je Symbol, §G2). Eine
+        Auswertung der Sektorkonzentration uebersah damit den groesseren
+        Teil (§G13 Fund 3). Drei Aufrufstellen mit demselben kopierten
+        Block waeren die naechste Gelegenheit, eine davon zu vergessen.
+
+        `reasons` ist ein freies Dictionary, und
+        `journal.decision_quality()` gruppiert neue Schluessel automatisch
+        nach Wertbaendern - es braucht dafuer keine Schemaaenderung.
+        """
+        for schluessel, wert in (snapshot.kontext.get(sym) or {}).items():
+            gruende[schluessel] = wert
+        for schluessel, wert in (snapshot.regime or {}).items():
+            gruende[schluessel] = wert
+        return gruende
 
     def _traegt_noch(self, pos: Position, price: float, atr: float) -> bool:
         """Laeuft die Position noch, oder stagniert sie nur?
@@ -980,10 +1007,7 @@ class Engine:
             # neue Schluessel automatisch nach Wertbaendern - es braucht
             # dafuer keine Schemaaenderung.
             reasons["kandidaten_gesamt"] = len(candidates)
-            for schluessel, wert in (snapshot.kontext.get(sym) or {}).items():
-                reasons[schluessel] = wert
-            for schluessel, wert in (snapshot.regime or {}).items():
-                reasons[schluessel] = wert
+            self._mit_kontext(reasons, snapshot, sym)
 
             out.append(
                 Decision(

@@ -218,3 +218,63 @@ class TestJournalTrenntLiveVonSimulation:
 
         quelle = inspect.getsource(Journal.decision_quality)
         assert "if script:" in quelle
+
+
+class TestKontextAnAllenEntscheidungsarten:
+    """REGRESSION 22.08.2026 (§G13 Fund 3).
+
+    Der Auswertungskontext hing nur an `buy`. `topup` ist mit 110 von 304
+    Live-Entscheidungen die Mehrheit der Kapitalzuteilung - eine
+    Auswertung der Sektorkonzentration uebersah damit den groesseren
+    Teil.
+    """
+
+    def test_alle_drei_arten_reichen_den_kontext_durch(self):
+        """Der Kern: keine Entscheidungsart darf den Block auslassen.
+
+        Geprueft an der Quelle statt an einem Lauf: Ein Ende-zu-Ende-Test
+        braeuchte fuer `topup` freies Kapital, fuer `sell` eine reife
+        Position und fuer `buy` einen Kandidaten - drei Aufbauten, die
+        leicht am eigentlichen Punkt vorbeigehen. Hier zaehlt, dass jede
+        der drei Stellen dieselbe eine Funktion ruft.
+        """
+        import inspect
+
+        from alpaca_bot.engine import Engine
+
+        for name in ("_find_topups", "_check_exits", "_rank_candidates"):
+            fn = getattr(Engine, name, None)
+            if fn is None:
+                continue
+            assert "_mit_kontext" in inspect.getsource(fn), (
+                f"{name} reicht den Auswertungskontext nicht durch - "
+                "genau die Luecke, die topup und sell hatten")
+
+    def test_kontext_haengt_regime_und_symbolfelder_an(self):
+        from alpaca_bot.engine import Engine
+
+        class FakeSnapshot:
+            kontext = {"AAPL": {"sektor": "Technology", "liq_dezil": 1}}
+            regime = {"regime_markt": "bullisch", "regime_vola": "ruhig"}
+
+        g = Engine._mit_kontext({"ausstiegsgrund": "zeitausstieg"},
+                                FakeSnapshot(), "AAPL")
+        assert g["sektor"] == "Technology"
+        assert g["liq_dezil"] == 1
+        assert g["regime_markt"] == "bullisch"
+        assert g["ausstiegsgrund"] == "zeitausstieg", "Bestehendes bleibt"
+
+    def test_fehlender_kontext_stuerzt_nicht_ab(self):
+        """Ein Protokollfeld darf den Handel nie stoppen.
+
+        Bei einem unbekannten Symbol oder ausgefallener Sektorabfrage
+        muss die Entscheidung trotzdem zustande kommen.
+        """
+        from alpaca_bot.engine import Engine
+
+        class LeererSnapshot:
+            kontext = {}
+            regime = {}
+
+        g = Engine._mit_kontext({"a": 1}, LeererSnapshot(), "UNBEKANNT")
+        assert g == {"a": 1}

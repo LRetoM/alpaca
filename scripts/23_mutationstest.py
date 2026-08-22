@@ -307,6 +307,16 @@ MUTATIONEN = [
         "36 von 56 Trades trugen eine falsche 0. Eine falsche Zahl ist "
         "schlimmer als eine fehlende - sie geht in jeden Mittelwert ein.",
     ),
+
+    Mutation(
+        "Nachkauf verliert den Auswertungskontext",
+        "src/alpaca_bot/engine.py",
+        '            self._mit_kontext(gruende, snapshot, sym)',
+        "            pass",
+        "test_datenklarheit",
+        "topup ist die Mehrheit der Kapitalzuteilung (110 von 304). Ohne "
+        "Kontext uebersieht die Sektorauswertung den groesseren Teil.",
+    ),
 ]
 
 
