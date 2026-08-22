@@ -176,13 +176,20 @@ def build_universe(
 
 def fetch_history(
     symbols: list[str], years: float = 5.0, batch_size: int = 300,
-    verbose: bool = True
+    verbose: bool = True, use_cache: bool = False
 ) -> pd.DataFrame:
     """Laedt die volle Historie fuer viele Symbole in Batches.
 
     Ein einzelner Request ueber tausende Symbole laeuft in Zeitueberschreitungen.
     Batches sind langsamer zu schreiben, aber die einzige Variante, die bei
     dieser Groessenordnung durchlaeuft.
+
+    `use_cache=True` legt jeden Batch als CSV ab. Bei einem Lauf ueber
+    Hunderte Symbole und Jahre ist das der Unterschied zwischen Minuten
+    und Stunden - und die API-Quote teilen sich Live-Bot, Schattenbetrieb
+    und jede Auswertung. Die Batch-Grenzen muessen dafuer stabil bleiben:
+    dieselbe Symbolliste bei gleicher `batch_size` ergibt dieselben
+    Schluessel, eine andere `batch_size` verwirft den Cache.
     """
     from .data import get_bars
 
@@ -191,7 +198,8 @@ def fetch_history(
     for i in range(0, len(symbols), batch_size):
         chunk = symbols[i : i + batch_size]
         try:
-            b = get_bars(chunk, "1D", lookback_days=int(years * 365))
+            b = get_bars(chunk, "1D", lookback_days=int(years * 365),
+                         use_cache=use_cache)
             if not b.empty:
                 frames.append(b)
         except Exception as e:  # noqa: BLE001

@@ -12,6 +12,7 @@ Wichtig beim kostenlosen Alpaca-Plan:
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from typing import Iterable, Sequence
 
 import pandas as pd
@@ -88,6 +89,36 @@ def _as_list(symbols: str | Iterable[str]) -> list[str]:
     return [symbols] if isinstance(symbols, str) else list(symbols)
 
 
+def _cache_key(syms: list[str], tf, start, end) -> str:
+    """Schluessel fuer den Bar-Cache - stabil ueber Prozessgrenzen hinweg.
+
+    Zwei Fehler steckten in der Vorgaengerfassung, und beide machten den
+    Cache zu totem Code (Befund 21.08.2026, `docs/BEFUNDE.md` §G11):
+
+    1. `hash()` auf einen String ist in Python **pro Prozess
+       randomisiert** (PYTHONHASHSEED). Derselbe Abruf bekam bei jedem
+       Programmstart einen anderen Dateinamen - ein Treffer war
+       ausgeschlossen. Deshalb sha256 statt hash().
+    2. `start` ist bei Aufruf mit `lookback_days` ein
+       `datetime.now()`-Wert **mit Mikrosekunden**. Der Schluessel war
+       damit bei jedem Aufruf verschieden, sogar innerhalb eines
+       Prozesses. Deshalb auf den Tag normalisiert.
+
+    Die Tagesgenauigkeit ist fuer Tages-Bars richtig: zwei Abrufe
+    desselben Zeitraums am selben Tag liefern dieselben Daten. Bei
+    Intraday-Zeitraeumen greift `tf` als Unterscheidung mit ein.
+    """
+    def _tag(x) -> str:
+        if x is None:
+            return "None"
+        if isinstance(x, dt.datetime):
+            return x.date().isoformat()
+        return str(x)[:10]
+
+    roh = f"{','.join(sorted(syms))}|{tf}|{_tag(start)}|{_tag(end)}"
+    return hashlib.sha256(roh.encode()).hexdigest()[:32]
+
+
 def get_bars(
     symbols: str | Sequence[str],
     timeframe: str | TimeFrame = "1D",
@@ -116,8 +147,7 @@ def get_bars(
 
     cache_file = None
     if use_cache:
-        key = f"{'_'.join(sorted(syms))[:60]}_{tf}_{start}_{end}".replace(" ", "")
-        cache_file = CACHE_DIR / f"{abs(hash(key))}.csv"
+        cache_file = CACHE_DIR / f"{_cache_key(syms, tf, start, end)}.csv"
         if cache_file.exists():
             df = pd.read_csv(cache_file, parse_dates=["timestamp"])
             return df.set_index(["symbol", "timestamp"]).sort_index()
