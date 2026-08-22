@@ -349,11 +349,49 @@ MUTATIONEN = [
     Mutation(
         "Lernschritt faellt aus dem Dauerbetrieb",
         "scripts/16_shadow_daemon.py",
-        '                     ("gelernt", lernen)):',
-        "                     ):",
+        '                               ("gelernt", lernen, "schatten.lernen")):',
+        "                               ):",
         "test_dauerbetrieb",
         "Genau der Zustand vor dem 22.08.2026: der Musterspeicher war "
         "gebaut, wurde aber nie aufgerufen - Tabelle `muster` leer.",
+    ),
+
+    # --- Nutzungsnachweis (§G15) ------------------------------------------
+    Mutation(
+        "Waechter erkennt 'immer dasselbe' nicht mehr",
+        "src/alpaca_bot/nutzung.py",
+        "            if (not e.darf_gleich_bleiben and len(zeilen) >= 5\n                    and len(signaturen) == 1):",
+        "            if False:",
+        "test_nutzung",
+        "Genau der Zustand aus §G14: 19.788 Verifizierungen je Stunde, "
+        "Runde um Runde identisch - es lief, aber es entstand nichts.",
+    ),
+    Mutation(
+        "Waechter erkennt 'nie gelaufen' nicht mehr",
+        "src/alpaca_bot/nutzung.py",
+        '                        "hat sich noch nie gemeldet - vermutlich nirgends "',
+        '                        "ok - "',
+        "test_nutzung",
+        "Der haeufigste Fall: ein fertiger Baustein ist nirgends verdrahtet "
+        "(Musterspeicher, Bar-Cache).",
+    ),
+    Mutation(
+        "Live-Zyklus meldet seine Nutzung nicht mehr",
+        "src/alpaca_bot/live.py",
+        '                signatur=f"{len(decisions)}e_{executed}a@{snapshot.as_of.date()}")',
+        '                signatur="")',
+        "test_nutzung",
+        "Ohne Stichtag in der Signatur faellt ein Bot, der taeglich "
+        "dieselbe Lage sieht, nicht mehr als 'immer gleich' auf.",
+    ),
+    Mutation(
+        "Abnahme laesst zu wenige Handelstage durch",
+        "src/alpaca_bot/lernkern.py",
+        "        if n_tage < MIN_TAGE_BEWERTUNG:",
+        "        if False:",
+        "test_lernkern",
+        "Ein t-Wert von 9,9 aus 19 Handelstagen ist eine Momentaufnahme. "
+        "Faellt diese Huerde, wandert sie als Modellversion weiter.",
     ),
 ]
 

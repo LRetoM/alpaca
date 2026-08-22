@@ -944,5 +944,16 @@ def run_once(
 
         run.log("abschluss", ausgefuehrt=executed, blockiert=blocked,
                 entscheidungen=len(decisions), abgeschickt=len(done))
+        # Nutzungsmeldung: Die Signatur traegt den Stichtag, damit ein Bot,
+        # der zwar laeuft, aber taeglich dieselbe Lage sieht, als "immer
+        # gleich" auffaellt statt als gesund zu gelten (§G15).
+        try:
+            from . import nutzung
+
+            nutzung.melden(
+                "live.zyklus", len(decisions),
+                signatur=f"{len(decisions)}e_{executed}a@{snapshot.as_of.date()}")
+        except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
+            pass
         return LiveResult(decisions, done, executed, blocked, dry_run,
                           portfolio.equity)

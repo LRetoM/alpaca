@@ -105,12 +105,12 @@ class TestLernschrittImDauerbetrieb:
     def test_daemon_ruft_den_lernschritt(self):
         """Die eigentliche Luecke: gebaut, aber nie aufgerufen."""
         quelle = __import__("pathlib").Path("scripts/16_shadow_daemon.py").read_text()
-        assert '("gelernt", lernen)' in quelle
+        assert '"gelernt", lernen' in quelle
 
     def test_lernen_steht_hinter_den_erzeugenden_schritten(self):
         """Zuerst gerufen saehe es immer den Stand von gestern."""
         quelle = __import__("pathlib").Path("scripts/16_shadow_daemon.py").read_text()
-        assert quelle.index('("entschieden", entscheiden)') < quelle.index('("gelernt", lernen)')
+        assert quelle.index('"entschieden", entscheiden') < quelle.index('"gelernt", lernen')
 
     def test_ohne_neuen_handelstag_passiert_nichts(self, tmp_path, monkeypatch):
         """Idempotenz: zweimal am selben Tag darf nichts kosten."""

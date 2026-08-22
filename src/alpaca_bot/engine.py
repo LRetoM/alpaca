@@ -1007,6 +1007,14 @@ class Engine:
             # neue Schluessel automatisch nach Wertbaendern - es braucht
             # dafuer keine Schemaaenderung.
             reasons["kandidaten_gesamt"] = len(candidates)
+            # `dollar_volume` steht in der Kurszeile und wird oben bereits
+            # fuer die Liquiditaetsschwelle gelesen - nur nie protokolliert.
+            # `shadow.py:1064` erwartet es unter genau diesem Namen und
+            # schrieb deshalb seit jeher NULL: 0 von 12.250 Vorhersagen
+            # hatten eine Liquiditaetsangabe (§G15). Damit war die Frage
+            # "entsteht der Vorsprung nur bei illiquiden Werten?" nicht
+            # beantwortbar - eine der wenigen echten Auswertungsachsen.
+            reasons["dollar_volume"] = round(float(row.get("dollar_volume", 0) or 0), 2)
             self._mit_kontext(reasons, snapshot, sym)
 
             out.append(

@@ -37,6 +37,7 @@ import sys
 import time
 import traceback
 
+from alpaca_bot import nutzung
 from alpaca_bot.engine import EngineConfig
 from alpaca_bot.shadow import (ShadowConfig, ShadowStore, einbuchen, entscheiden,
                                lernen, verifizieren)
@@ -99,20 +100,41 @@ def alle_schritte(cfg: ShadowConfig, store: ShadowStore, *, verbose: bool = True
     API-Kontingent zu verbrennen (§G14).
     """
     ergebnis = {}
-    for name, fn in (("eingebucht", einbuchen),
-                     ("verifiziert", verifizieren),
-                     ("entschieden", entscheiden),
-                     ("gelernt", lernen)):
+    for name, fn, baustein in (("eingebucht", einbuchen, "schatten.einbuchen"),
+                               ("verifiziert", verifizieren, "schatten.verifizieren"),
+                               ("entschieden", entscheiden, "schatten.entscheiden"),
+                               ("gelernt", lernen, "schatten.lernen")):
         if _stop:
             break
+        t0 = time.time()
         try:
             print(f"  [{dt.datetime.now():%H:%M:%S}] {name} ...")
             ergebnis[name] = fn(cfg, store, verbose=verbose)
+            # Die Signatur kennzeichnet das ERGEBNIS, nicht den Lauf: Zahl
+            # plus juengster Stichtag. Bleibt sie ueber viele Runden gleich,
+            # wurde zwar gerechnet, aber nichts Neues gefunden - genau der
+            # Zustand, den der Dauerbetrieb monatelang hatte (§G14).
+            nutzung.melden(baustein, ergebnis[name],
+                           signatur=f"{ergebnis[name]}@{_stichtag(store)}",
+                           dauer_s=round(time.time() - t0, 2))
         except Exception as e:  # noqa: BLE001 - ein Schritt darf die anderen nicht stoppen
             print(f"      FEHLER in '{name}': {type(e).__name__}: {e}")
             traceback.print_exc()
             ergebnis[name] = -1
+            nutzung.melden(baustein, -1, signatur="fehler",
+                           dauer_s=round(time.time() - t0, 2),
+                           hinweis=f"{type(e).__name__}: {e}")
     return ergebnis
+
+
+def _stichtag(store: ShadowStore) -> str:
+    """Juengster Stichtag im Buch - Teil der Nutzungssignatur."""
+    try:
+        with store._conn() as c:
+            return (c.execute("SELECT MAX(as_of) FROM predictions").fetchone()[0]
+                    or "")[:10]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def main() -> int:

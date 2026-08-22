@@ -1281,6 +1281,227 @@ Verfahren, sondern die Zahl unabhängiger Handelstage: derzeit **19**.
 
 ---
 
+## G15. Ein ML-Modell schlaegt den Score nicht (22.08.2026)
+
+**Anlass:** die Forderung nach einem selbstlernenden System, das aus
+allen Daten lernt und dadurch besser wird. Die Frage dahinter ist
+praezise und war bisher unbeantwortet:
+
+> Sortiert ein gelerntes Modell die Kandidaten besser als der
+> handgebaute Score?
+
+**Antwort: nein.** Gemessen ueber 1.186 Symbole, 7 Jahre und **1.101
+unabhaengige Handelstage** - die groesste Stichprobe, die das Projekt
+fuer diese Frage je hatte.
+
+| | IC | t (korr.) | t roh | Dezil-Spreizung | t |
+|---|---:|---:|---:|---:|---:|
+| GBM auf 32 Merkmalen | +0,0041 | 0,71 | 1,10 | **-0,405 %** | **-2,44** |
+| Score (Bot heute) | +0,0089 | 1,40 | 2,21 | -0,140 % | -1,11 |
+
+Beide unter der Schwelle (2,85). **Das Modell ist schlechter als der
+Score**, den es ersetzen sollte.
+
+### Der Nebenbefund ist der wichtigere: die Spreizung ist negativ
+
+Der IC ist bei beiden positiv, die Dezil-Spreizung bei beiden **negativ**.
+Das ist kein Widerspruch, sondern eine Aussage ueber die Struktur: Ueber
+die Mitte des Feldes sortiert der Score schwach richtig, aber das
+**oberste Dezil laeuft schlechter als das unterste** - und genau das
+oberste Dezil kauft der Bot (Top 15 von 1.200).
+
+Damit ist die Beobachtung aus §G11 Fund 6 bestaetigt, diesmal sauber
+gerechnet: Dort zeigte die Score-Tabelle -0,11 % im hoechsten
+Score-Band, wurde aber als "gruppiert t = -0,09, nichts haelt"
+eingeordnet. Je Handelstag als Dezilspreizung gemessen und
+ueberlappungskorrigiert liegt der Wert beim Modell bei **t = -2,44** -
+naeher an der Schwelle als jeder positive Wert des Laufs, nur mit
+falschem Vorzeichen.
+
+**Ein IC allein haette hier in die Irre gefuehrt.** Deshalb weist
+`dataset.guete` beide Zahlen nebeneinander aus.
+
+### Weniger Symbole sahen besser aus - das Muster aus §B4
+
+| Universum | Modell-IC | Score-IC | Urteil |
+|---|---:|---:|---|
+| 300 Symbole | **+0,0146** | +0,0087 | Modell fuehrt |
+| 1.186 Symbole | +0,0041 | +0,0089 | Modell faellt zurueck |
+
+Auf 300 Symbolen schlug das Modell den Score deutlich. Auf dem vollen
+Universum kippt es. Exakt der PEAD-Verlauf aus §B4 (IC 0,032 auf 60
+Symbolen, Zusammenbruch auf 800) - **Probelaeufe auf kleinen Universen
+dienen dem Testen der Mechanik, nie der Bewertung.**
+
+### Was das fuer die Vision "selbstlernendes System" heisst
+
+Es widerlegt nicht das Lernen, sondern eine bestimmte Hoffnung: dass
+*mehr Modell* auf *denselben Daten* einen Vorsprung hebt. Das deckt sich
+mit §C: Der Faktorraum aus Kurs- und Volumendaten ist ausgeschoepft, neue
+Information muesste von **ausserhalb** kommen. Ein GBM auf 32
+OHLCV-Ableitungen ist eine weitere Ableitung desselben Raums.
+
+Der Engpass bleibt der aus §G14 und `docs/LERNTEMPO.md`: unabhaengige
+Handelstage. Gerechnet mit `statistik.noetige_gruppen` braucht ein Effekt
+der Groesse, die dieses Projekt real misst (IC ~0,02), rund **926
+Handelstage**. Der Schatten hatte am 22.08. **19**.
+
+### Die Kette ist kalibriert - beide Richtungen geprueft
+
+Damit das Null-Ergebnis nicht als stumpfes Werkzeug missverstanden wird,
+wurde die Auswertung gegen drei synthetische Panels gefahren:
+
+| eingebauter Effekt | IC | t | Urteil |
+|---|---:|---:|---|
+| keiner (Kontrolle) | -0,0105 | -0,98 | kein Befund |
+| schwach (AR -0,15) | +0,0201 | 1,86 | kein Befund |
+| stark (AR -0,35) | +0,1025 | **11,81** | **BEFUND** |
+
+Sie schweigt bei Rauschen und spricht bei echtem Signal. Nebenbefund:
+Die gemessene Aufblaehung des rohen t-Werts lag bei **1,59x** - eine
+unabhaengige Bestaetigung der 1,62x aus §G12.
+
+Bemerkenswert die mittlere Zeile: Ein Effekt **staerker als jeder je
+real gemessene Faktor** (IC 0,0201 gegen 0,018 in §A) reicht bei 396
+Handelstagen nicht ueber die Schwelle. Das ist der Preis der Ehrlichkeit,
+in einer Zahl.
+
+### Vier Fehler beim Bau - alle aus der Familie "es stuerzt nichts ab"
+
+| # | Fehler | Wirkung |
+|---|---|---|
+| 1 | `market` mit Mitternachts-Stempeln gegen Bars mit 04:00 UTC | `reindex` trifft nie, 3 Merkmale komplett NaN, `dropna` verwirft das **gesamte** Panel. Ausgabe: "0 Zeilen" |
+| 2 | leeres Merkmal wurde stumm verschluckt | man sieht nur "0 Zeilen" und sucht an der falschen Stelle |
+| 3 | `fokus` verglich jeden Bot gegen eine **global** gewaehlte Referenz | B04 vs B09 sind **drei** geaenderte Achsen, nicht eine - exakt §G6 |
+| 4 | `fokus` rechnete aus **13** Handelstagen ein "nie entscheidbar" hoch | glatte Zahl mit Datum, ohne Deckung (§G13) |
+
+Fehler 3 ist der unangenehmste: Das Werkzeug, das die Disziplin des
+Projekts durchsetzen soll, haette den teuersten Fehler des Projekts
+reproduziert. `Bot.basis_bot` existierte die ganze Zeit und wurde
+ignoriert.
+
+Fehler 4 ist die Lehre aus §G13 in neuer Verkleidung: Eine Hochrechnung
+erbt die Unsicherheit ihrer Eingangsgroesse, liefert aber eine glatte
+Zahl. `fokus.MIN_TAGE_HOCHRECHNUNG = 20` verhindert das jetzt -
+darunter steht `offen`, nie `nie`.
+
+### Was gebaut wurde
+
+| Modul | Zweck |
+|---|---|
+| `dataset.py` | Panel (alle Symbole x alle Tage) statt Trade-Datensatz; Label = Ueberschuss gegen den Tagesmedian; Walk-Forward auf der **Tagesachse** mit Embargo |
+| `lernkern.py` | Modellregistry: jede Version mit Trainingszeitraum, Merkmalen, Codeversion und **eingefrorener** Schwelle; Abnahme nur bei nachgewiesener Verbesserung |
+| `fokus.py` | Rangliste offener Fragen nach `noetige_gruppen` - was ist als naechstes ueberhaupt entscheidbar? |
+
+**Warum `ml.walk_forward_predict` nicht benutzt wird:** Es schneidet nach
+Zeilenposition (`.iloc`). Auf einem Panel legt das Zeilen **desselben
+Handelstages** in Trainings- und Testfenster - ein Leck genau der Art,
+gegen die `pit.py` existiert, nur eine Ebene hoeher. Fuer die Zeitreihe
+eines einzelnen Symbols bleibt die Funktion richtig.
+
+Regression: `tests/test_lernkern.py` (23 Tests), darunter je einer fuer
+die vier Fehler oben, der Nachweis, dass kein Handelstag in beiden
+Fenstern liegt, und beide Kalibrierungsrichtungen.
+
+
+---
+
+## G15. Der Nutzungsnachweis — gegen die häufigste Fehlerklasse dieses Projekts
+
+**Anlass:** die Feststellung, dass dreimal innerhalb weniger Tage ein
+fertig gebauter Baustein niemals lief.
+
+### Die Serie
+
+| Datum | Baustein | Zustand | gefunden nach |
+|---|---|---|---|
+| 21.08. | Bar-Cache | `use_cache=True` rief niemand auf | ~3 Wochen |
+| 22.08. | Musterspeicher | Tabelle `muster`: 0 Zeilen | seit Bau |
+| 22.08. | Kontext bei `topup` | hing nur an `buy` | 2 Tage |
+| 22.08. | `liquiditaet` | 0 von 12.250 gefüllt | seit Bau |
+
+Dazu die ältere Chronik: `bars_held` immer 0, `after_10d` nie gefüllt,
+`code_version` zwei Monate `'unbekannt'` (66 % der Daten), 98,4 %
+Simulationszeilen im Live-Journal.
+
+**Das Muster ist immer dasselbe:** Ein Baustein ist gebaut, sieht im Code
+richtig aus und tut nichts. Kein Absturz, keine Meldung. Gefunden wurde
+jeder Fall nur, weil zufällig jemand gezielt nachsah.
+
+### Die vier Arten des stillen Ausfalls
+
+Jede braucht einen eigenen Test, weil keine die andere findet:
+
+| Art | Beispiel |
+|---|---|
+| **nie gelaufen** | Musterspeicher, Bar-Cache — nirgends verdrahtet |
+| **immer leer** | Cache lief, traf aber nie |
+| **immer gleich** | 19.788 Verifizierungen je Stunde, Runde um Runde identisch |
+| **zu selten** | ein Schritt, der stumm scheitert |
+
+Die dritte ist die tückischste: Ein solcher Baustein meldet sich
+regelmäßig **mit Ergebnissen** und sieht in jeder Statistik gesund aus.
+Nur entsteht keine neue Information.
+
+`nutzung.py` prüft alle vier automatisch. Jeder Baustein meldet nach dem
+Lauf, was herauskam — mit einer **Signatur**, die das Ergebnis
+kennzeichnet, nicht den Lauf. Bleibt sie konstant, wurde gerechnet und
+nichts gefunden.
+
+### Was der Nachweis ausdrücklich nicht leistet
+
+Er prüft **Nutzung**, nicht Richtigkeit. Ein Baustein kann täglich laufen,
+wechselnde Ergebnisse liefern und trotzdem falsch rechnen — dagegen helfen
+`tests/`, `data_integrity.py` und der Mutationstest. Hier geht es um die
+davorliegende, banalere Frage: Passiert überhaupt etwas?
+
+### Ein weiterer stiller Ausfall, gefunden beim Bau
+
+`liquiditaet` ist in **0 von 12.250** Schattenvorhersagen gefüllt.
+Ursache: `engine.py` liest `dollar_volume` aus der Kurszeile für die
+Liquiditätsschwelle, schrieb es aber nie in `reasons` — und
+`shadow.py:1064` erwartet es genau dort. Damit war die Frage „entsteht
+der Vorsprung nur bei illiquiden Werten?" nie beantwortbar. **Behoben**
+(reines Protokollfeld).
+
+### Ein Fehler von mir, transparent festgehalten
+
+Beim Bau dieses Nachweises habe ich `src/alpaca_bot/lernkern.py`
+**überschrieben** — die Datei existierte bereits mit einer anderen
+Aufgabe (Modellregistry und Abnahme statt Experimentwarteschlange).
+
+Wiederhergestellt aus drei erhaltenen Quellen: `tests/test_lernkern.py`
+(legt die Schnittstelle fest), `scripts/26_lernkern.py` (den Aufrufweg)
+und dem **Datenbankschema samt zwei Originalzeilen**, das die
+Feldstruktur exakt vorgab. Die beiden trainierten Modelle und ihre
+`.joblib`-Dateien blieben unberührt.
+
+**Lehre:** Vor jedem `cat >` auf eine existierende Datei gehört ein Blick
+hinein. Der Verlust war hier reparabel, weil Tests, CLI und Datenbank die
+Schnittstelle dreifach festhielten — genau die Redundanz, die dieses
+Projekt ohnehin fordert.
+
+### Was der wiederhergestellte Lernkern zeigt
+
+Zwei Läufe lagen bereits in der Registry, beide **abgelehnt**:
+
+| Symbole | Handelstage | IC | t korr. | t roh | Urteil |
+|---:|---:|---:|---:|---:|---|
+| 299 | 1.074 | 0,0146 | 1,91 | 3,10 | abgelehnt |
+| 1.186 | 1.101 | 0,0041 | 0,71 | 1,10 | abgelehnt |
+
+**Der Effekt schrumpft mit der Breite** — dieselbe Signatur wie beim
+PEAD-Test (§B4: großartig auf 60 Symbolen, zusammengebrochen auf 800).
+Ein dritter Lauf über 250 Symbole ergab Modell IC 0,0308 (t 2,70) gegen
+Score IC 0,0184 (t 1,89): Das Modell sortiert besser als der handgebaute
+Score, **aber beide bleiben unter der Schwelle von 2,85.**
+
+Regression: `tests/test_nutzung.py` (10 Tests), vier neue Mutationen,
+**37 von 37 gefangen** — eine davon entlarvte erneut einen zu schwachen
+Test von mir (er prüfte, *dass* gemeldet wird, nicht *womit*).
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
