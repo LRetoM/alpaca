@@ -317,6 +317,44 @@ MUTATIONEN = [
         "topup ist die Mehrheit der Kapitalzuteilung (110 von 304). Ohne "
         "Kontext uebersieht die Sektorauswertung den groesseren Teil.",
     ),
+
+    # --- Dauerbetrieb und Lernschleife (§G14) -----------------------------
+    Mutation(
+        "IC rechnet wieder ohne Ueberlappungskorrektur",
+        "src/alpaca_bot/shadow_eval.py",
+        "        t_korr, aufbl = statistik.newey_west_t(tages_ic.to_numpy(), lag=h - 1)",
+        "        t_korr, aufbl = float(t_roh), 1.0",
+        "test_dauerbetrieb",
+        "Das ist die Kennzahl, nach der die Flotte beurteilt wird. "
+        "Unkorrigiert faellt sie systematisch zu hoch aus (§G12).",
+    ),
+    Mutation(
+        "Entarteter Schaetzer liefert wieder eine Zahl",
+        "src/alpaca_bot/statistik.py",
+        "    if n < 3 * (lag + 1):\n        return float(\"nan\"), float(\"nan\")",
+        "    if n < 0:\n        return float(\"nan\"), float(\"nan\")",
+        "test_dauerbetrieb",
+        "Bei 8 Tagen und 10-Tage-Horizont machte der Schaetzer aus t=5,30 "
+        "ein t=14,57 - kein zu hoher Wert, sondern Unsinn.",
+    ),
+    Mutation(
+        "Musterspeicher rechnet wieder ohne Horizont",
+        "src/alpaca_bot/patterns.py",
+        "    r = gruppierter_test(teil[spalte], teil[\"tag\"], min_gruppen=MIN_TAGE_BESTAETIGUNG,\n                         horizont=h)",
+        "    r = gruppierter_test(teil[spalte], teil[\"tag\"], min_gruppen=MIN_TAGE_BESTAETIGUNG)",
+        "test_dauerbetrieb",
+        "Eine Lernschleife auf unkorrigierten Werten bestaetigt rund 40 % "
+        "Rauschen als Muster - dauerhaft und automatisch.",
+    ),
+    Mutation(
+        "Lernschritt faellt aus dem Dauerbetrieb",
+        "scripts/16_shadow_daemon.py",
+        '                     ("gelernt", lernen)):',
+        "                     ):",
+        "test_dauerbetrieb",
+        "Genau der Zustand vor dem 22.08.2026: der Musterspeicher war "
+        "gebaut, wurde aber nie aufgerufen - Tabelle `muster` leer.",
+    ),
 ]
 
 

@@ -263,6 +263,16 @@ CREATE TABLE IF NOT EXISTS versuchszaehler (
     aktualisiert   TEXT
 );
 
+-- Kleine Schluessel/Wert-Ablage fuer Laufzustaende, die keine eigene
+-- Tabelle rechtfertigen (z. B. bis zu welchem Stichtag der Lernschritt
+-- gelaufen ist). Bewusst getrennt von `scoreboard`, das ein festes
+-- Auswertungsschema hat.
+CREATE TABLE IF NOT EXISTS merker (
+    schluessel  TEXT PRIMARY KEY,
+    wert        TEXT,
+    geaendert   TEXT
+);
+
 -- ---------------------------------------------------------------- Auswertung
 CREATE TABLE IF NOT EXISTS scoreboard (
     kohorte       TEXT NOT NULL,
@@ -570,15 +580,41 @@ class ShadowStore:
         return self.table("predictions", "entry_price IS NULL")
 
     def offene_ergebnisse(self) -> pd.DataFrame:
-        """Eingebuchte Vorhersagen ohne (vollstaendiges) Ergebnis."""
+        """Eingebuchte Vorhersagen ohne (vollstaendiges) Ergebnis.
+
+        Liefert `evaluated_at` mit. Der Zeitstempel ist der Schluessel
+        dazu, im Dauerbetrieb nicht stuendlich dasselbe neu zu rechnen -
+        siehe `verifizieren()`.
+        """
         with self._conn() as c:
             return pd.read_sql_query(
-                "SELECT p.* FROM predictions p"
+                "SELECT p.*, o.evaluated_at AS evaluated_at FROM predictions p"
                 " LEFT JOIN shadow_outcomes o ON p.pred_id = o.pred_id"
                 " WHERE p.entry_price IS NOT NULL"
                 "   AND (o.pred_id IS NULL OR o.fwd_20d IS NULL)",
                 c,
             )
+
+    def letzter_lerntag(self) -> str:
+        """Stichtag, bis zu dem der Lernschritt gelaufen ist ('' = nie).
+
+        Liegt in `scoreboard` als einfaches Schluessel/Wert-Paar, damit
+        dafuer keine eigene Tabelle noetig ist.
+        """
+        with self._conn() as c:
+            try:
+                row = c.execute(
+                    "SELECT wert FROM merker WHERE schluessel='letzter_lerntag'"
+                ).fetchone()
+            except Exception:  # noqa: BLE001 - alte Datenbanken ohne die Tabelle
+                return ""
+        return (row["wert"] if row else "") or ""
+
+    def setze_lerntag(self, tag: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO merker (schluessel, wert, geaendert)"
+                      " VALUES ('letzter_lerntag', ?, ?)",
+                      (tag, dt.datetime.now(dt.UTC).isoformat()))
 
     def save_fill(self, pred_id: str, **vals) -> None:
         sets = ", ".join(f"{k}=?" for k in vals)
@@ -1502,6 +1538,62 @@ def einbuchen(cfg: ShadowConfig, store: ShadowStore | None = None,
 # ---------------------------------------------------------------------------
 # Schritt 3: Verifizieren
 # ---------------------------------------------------------------------------
+def lernen(cfg: ShadowConfig, store: ShadowStore | None = None,
+           *, verbose: bool = True) -> int:
+    """Der Lernschritt: Muster pruefen, Kandidaten suchen, Zerfall melden.
+
+    **Warum das ein eigener Schritt im Dauerbetrieb ist.** Der
+    Musterspeicher (`patterns.py`) war vollstaendig gebaut - mit
+    Verfallspruefung auf ausschliesslich NEUEN Daten, Mindestzahl an
+    Handelstagen und Zerfallsmeldung. Er wurde nur nie aufgerufen: Am
+    22.08.2026 enthielt die Tabelle `muster` **null Zeilen**. Der Daemon
+    kannte nur einbuchen/verifizieren/entscheiden.
+
+    Das ist der Unterschied zwischen "das System koennte lernen" und "das
+    System lernt".
+
+    **Warum er nur bei neuen Daten laeuft.** Zweimal am selben Tag
+    gerechnet liefert er bitgleich dasselbe - er wuerde nur Rechenzeit und
+    Protokollzeilen erzeugen. Gesteuert ueber denselben Gedanken wie der
+    Aktualitaetsfilter in `verifizieren`: Ohne neuen Handelstag gibt es
+    nichts Neues zu lernen.
+
+    **Was er ausdruecklich NICHT tut:** Er aendert keine Handelsregel. Ein
+    bestaetigtes Muster ist eine Beobachtung mit Beleg und Verfallsdatum,
+    kein Signal. Der Weg von dort in die Handelslogik fuehrt weiterhin
+    ueber eine Voranmeldung in der Flotte (CLAUDE.md).
+    """
+    from . import patterns
+
+    store = store or ShadowStore()
+    letzter = store.letzter_lerntag()
+    with store._conn() as c:
+        row = c.execute("SELECT MAX(as_of) FROM predictions").fetchone()
+    neuester = (row[0] or "")[:10]
+    if not neuester:
+        return 0
+    if letzter == neuester:
+        if verbose:
+            print(f"      kein neuer Handelstag seit {letzter} - nichts zu lernen")
+        return 0
+
+    run_id = store.start_run("lernen")
+    try:
+        gepruefte = patterns.pruefen(store, verbose=verbose)
+        kandidaten = patterns.kandidaten_suchen(store, anlegen=True, verbose=verbose)
+        store.setze_lerntag(neuester)
+        n = len(gepruefte) + len(kandidaten)
+        if verbose:
+            zerfallen = (gepruefte["status"] == "zerfallen").sum() if not gepruefte.empty else 0
+            print(f"      {len(gepruefte)} Muster geprueft, {zerfallen} zerfallen, "
+                  f"{len(kandidaten)} Kandidatenschnitte")
+        store.finish_run(run_id, "ok")
+        return int(n)
+    except Exception as e:  # noqa: BLE001
+        store.finish_run(run_id, "fehler", f"{type(e).__name__}: {e}")
+        raise
+
+
 def verifizieren(cfg: ShadowConfig, store: ShadowStore | None = None,
                  *, verbose: bool = True) -> int:
     """Was ist tatsaechlich daraus geworden?
@@ -1532,6 +1624,42 @@ def verifizieren(cfg: ShadowConfig, store: ShadowStore | None = None,
             spy = bars.xs(MARKET_SYMBOL, level="symbol").sort_index()["close"].astype(float)
         except KeyError:
             spy = None
+
+        # --- Nur rechnen, was sich seit der letzten Auswertung aendern KONNTE ---
+        #
+        # Eine Vorhersage bleibt offen, bis `fwd_20d` gefuellt ist - also
+        # 20 Handelstage lang. Der Dauerbetrieb lief bis zum 22.08.2026
+        # stuendlich ueber ALLE offenen Vorhersagen: gemessen 19.788 Stueck,
+        # rund 24-mal am Tag, also ~475.000 Auswertungen taeglich fuer
+        # NULL neue Information. Ein Ergebnis kann sich nur aendern, wenn
+        # eine neue Tagesbar dazugekommen ist; innerhalb eines Handelstages
+        # ist jede Wiederholung bitgleich.
+        #
+        # Verglichen wird gegen den juengsten geladenen Bar, nicht gegen die
+        # Uhrzeit: Am Wochenende und an Feiertagen kommt keine Bar dazu, und
+        # eine kalendarische Regel wuerde dort weiter sinnlos rechnen.
+        offen_gesamt = len(offen)
+        try:
+            neuester_bar = pd.DatetimeIndex(
+                bars.index.get_level_values("timestamp")).max()
+            if neuester_bar.tzinfo is None:
+                neuester_bar = neuester_bar.tz_localize("UTC")
+            bewertet = pd.to_datetime(offen.get("evaluated_at"), format="mixed",
+                                      utc=True, errors="coerce")
+            # `>=` waere falsch: eine Auswertung GENAU zum Bar-Zeitstempel
+            # hat diesen Bar noch nicht gesehen.
+            aktuell = bewertet.notna() & (bewertet > neuester_bar)
+            offen = offen[~aktuell]
+        except Exception as e:  # noqa: BLE001 - im Zweifel lieber alles rechnen
+            if verbose:
+                print(f"      Aktualitaetsfilter uebersprungen ({type(e).__name__})")
+
+        if verbose and offen_gesamt:
+            print(f"      {len(offen):,} von {offen_gesamt:,} offenen Vorhersagen "
+                  f"koennen sich geaendert haben")
+        if offen.empty:
+            store.finish_run(run_id, "ok")
+            return 0
 
         # Universums-Median je Stichtag: die Referenz, gegen die der
         # Ueberschuss gerechnet wird (Plan §3.1).

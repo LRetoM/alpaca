@@ -38,7 +38,8 @@ import time
 import traceback
 
 from alpaca_bot.engine import EngineConfig
-from alpaca_bot.shadow import ShadowConfig, ShadowStore, einbuchen, entscheiden, verifizieren
+from alpaca_bot.shadow import (ShadowConfig, ShadowStore, einbuchen, entscheiden,
+                               lernen, verifizieren)
 
 _stop = False
 
@@ -86,11 +87,22 @@ def alle_schritte(cfg: ShadowConfig, store: ShadowStore, *, verbose: bool = True
     ihren Einstiegskurs), dann verifizieren, dann neu entscheiden. Andersherum
     wuerde die frische Entscheidung sofort mit-eingebucht - zum Kurs desselben
     Tages, auf dem sie beruht. Das waere ein Datenleck.
+
+    **`lernen` steht am Ende und nicht am Anfang.** Es wertet aus, was die
+    drei Schritte davor erzeugt haben. Liefe es zuerst, saehe es immer den
+    Stand von gestern - eine ganze Runde Verzoegerung, die niemandem
+    auffiele.
+
+    Alle vier Schritte sind **idempotent**: Ohne neuen Handelstag tun sie
+    nichts und kosten Sekundenbruchteile. Das ist die Voraussetzung
+    dafuer, den Durchgang haeufig laufen zu lassen, ohne Rechenzeit und
+    API-Kontingent zu verbrennen (§G14).
     """
     ergebnis = {}
     for name, fn in (("eingebucht", einbuchen),
                      ("verifiziert", verifizieren),
-                     ("entschieden", entscheiden)):
+                     ("entschieden", entscheiden),
+                     ("gelernt", lernen)):
         if _stop:
             break
         try:
@@ -119,7 +131,8 @@ def main() -> int:
                    help="Sekunden zwischen zwei Durchgaengen im Dauerbetrieb")
     p.add_argument("--einmal", action="store_true", help="Nur ein Durchgang")
     p.add_argument("--status", action="store_true", help="Nur Zustand anzeigen")
-    p.add_argument("--schritt", choices=["entscheiden", "einbuchen", "verifizieren"],
+    p.add_argument("--schritt",
+                   choices=["entscheiden", "einbuchen", "verifizieren", "lernen"],
                    help="Nur diesen einen Schritt ausfuehren")
     p.add_argument("--bot-id", default="B00_basis")
     args = p.parse_args()
@@ -155,7 +168,7 @@ def main() -> int:
 
     if args.schritt:
         fn = {"entscheiden": entscheiden, "einbuchen": einbuchen,
-              "verifizieren": verifizieren}[args.schritt]
+              "verifizieren": verifizieren, "lernen": lernen}[args.schritt]
         n = fn(cfg, store)
         print(f"\n  {args.schritt}: {n}")
         print()

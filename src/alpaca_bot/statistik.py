@@ -107,6 +107,22 @@ def newey_west_t(reihe: np.ndarray | pd.Series, lag: int) -> tuple[float, float]
     if n < 3:
         return float("nan"), float("nan")
 
+    # Die Reihe muss mehrere UNABHAENGIGE Bloecke enthalten, sonst ist die
+    # Langfristvarianz nicht schaetzbar. Bei ueberlappenden `h`-Tage-Fenstern
+    # stecken in n Beobachtungen nur rund n/h unabhaengige Bloecke.
+    #
+    # Gefunden am 22.08.2026 an echten Schattendaten: fwd_10d ueber nur
+    # 8 Handelstage (lag 9). Der Schaetzer entartete und machte aus einem
+    # rohen t von 5,30 ein korrigiertes von **14,57** - kein zu hoher
+    # Wert, sondern reiner Unsinn, der wie ein spektakulaerer Befund
+    # aussieht. Genau die Richtung, gegen die dieses Modul gebaut ist.
+    #
+    # Die Forderung n >= 3*(lag+1) ist bewusst konservativ: Lieber "nicht
+    # berechenbar" als eine Zahl, die niemand nachpruefen kann. `nan`
+    # zwingt den Aufrufer zu einer Entscheidung; eine Zahl tut das nicht.
+    if n < 3 * (lag + 1):
+        return float("nan"), float("nan")
+
     e = x - x.mean()
     g0 = float(e @ e) / n
     if g0 <= 0:

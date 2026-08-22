@@ -1155,6 +1155,132 @@ Mutationen, **28 von 28 gefangen**.
 
 ---
 
+## G14. Der Schattenbot lief 24/7 — aber er lernte nicht (22.08.2026)
+
+**Anlass:** die Forderung, das System müsse außerhalb der Handelszeiten
+weiterarbeiten und kontinuierlich dazulernen. Der Befund war das
+Gegenteil von erwartet.
+
+### Er lief bereits rund um die Uhr — nur ohne Erkenntnisgewinn
+
+Der Dauerbetrieb kennt keine Börsenzeiten und rechnet stündlich. Jeder
+Durchgang meldete:
+
+```
+Durchgang fertig: {'eingebucht': 0, 'verifiziert': 19788, 'entschieden': 0}
+```
+
+**Immer dieselben 19.788.** `offene_ergebnisse()` hält eine Vorhersage
+offen, bis `fwd_20d` gefüllt ist — also 20 Handelstage lang. Ein
+Ergebnis kann sich aber nur ändern, wenn eine **neue Tagesbar**
+dazukommt; innerhalb eines Handelstages ist jede Wiederholung bitgleich.
+
+| | vorher | nachher |
+|---|---:|---:|
+| Dauer je Durchgang | 17 s | **0,2 s** |
+| Rechenzeit ohne neue Daten | ~7 Min/Tag | ~0 |
+
+Ehrliche Einordnung: 7 Minuten täglich sind **keine** dramatische
+Verschwendung. Der eigentliche Befund ist nicht die verlorene
+Rechenzeit, sondern dass die übrigen 23 h 53 min gar nichts taten.
+
+Der Filter vergleicht bewusst gegen den **jüngsten geladenen Bar**, nicht
+gegen die Uhrzeit: Am Wochenende und an Feiertagen kommt keine Bar dazu,
+eine kalendarische Regel würde dort weiterrechnen.
+
+### Der eigentliche Fund: die Lernschleife war gebaut und lief nie
+
+`patterns.py` ist vollständig und mit der richtigen Disziplin gebaut —
+Musterverfall, Nachprüfung ausschließlich auf **neu hinzugekommenen**
+Daten, Mindestzahl an Handelstagen, Meldung an alle betroffenen Bots.
+Sein eigener Docstring beschreibt genau das gewünschte Verhalten.
+
+**Die Tabelle `muster` enthielt null Zeilen.** Der Daemon kannte nur
+`einbuchen`/`verifizieren`/`entscheiden` und rief den Musterspeicher an
+keiner Stelle auf.
+
+Das ist der Unterschied zwischen „das System könnte lernen" und „das
+System lernt".
+
+### Warum das Anschalten allein gefährlich gewesen wäre
+
+`patterns._messen` und `shadow_eval.ic` rechneten den t-Wert **ohne die
+Korrektur aus §G12** — auf `fwd_5d`, also genau dem überlappenden
+Horizont. Eine 24/7-Lernschleife darauf hätte rund um die Uhr
+Scheinmuster erzeugt, bei einer Fehlalarmquote von 39,5 %.
+
+Was der Kandidatenlauf tatsächlich ausspuckte:
+
+| Bedingung | Handelstage | IC |
+|---|---:|---:|
+| `regime_vola == 'niedrig'` | **2** | **+0,248** |
+| `regime_vola == 'hoch'` | 4 | +0,097 |
+| `regime_markt == 'aufwaerts'` | 13 | +0,070 |
+
+Ein IC von 0,248 aus **zwei Handelstagen** — das Vierzehnfache des besten
+je gemessenen Faktors (§A). Mit unkorrigiertem t wäre so etwas als
+bestätigtes Muster in den Speicher gewandert.
+
+### Ein Fehler in der Korrektur selbst
+
+Beim Verdrahten fiel auf, dass `newey_west_t` **entartet**, wenn die
+Reihe zu kurz für den Lag ist. An echten Schattendaten:
+
+| Horizont | Handelstage | t roh | t „korrigiert" |
+|---|---:|---:|---:|
+| `fwd_10d` | 8 | 5,30 | **14,57** |
+
+Kein zu hoher Wert, sondern Unsinn — und er sieht wie ein spektakulärer
+Befund aus. Bei acht Beobachtungen und einem Zehn-Tage-Fenster steckt
+darin weniger als ein unabhängiger Block.
+
+**Behoben:** `newey_west_t` verlangt `n >= 3·(lag+1)` und liefert sonst
+`nan`. Wichtig ist, was dann **nicht** passiert: Der rohe Wert springt
+nicht ein. Er wäre die optimistischste aller Antworten. Der
+Schattenbericht schreibt stattdessen aus, dass es keinen t-Wert gibt,
+und nennt den rohen ausdrücklich als „NICHT zitieren".
+
+**Folge für die laufende Auswertung:** Mit 13 Handelstagen ist der
+5-Tage-IC des Schattenbuchs derzeit **ohne gültigen t-Wert**. Nötig sind
+mindestens 15. Die bisher berichteten Werte (`t=1,22`) waren nie
+belastbar — was zur ohnehin geltenden Hausmarke von 60 Tagen passt.
+
+### Was jetzt läuft
+
+Der Dauerbetrieb hat einen vierten Schritt:
+
+```
+einbuchen -> verifizieren -> entscheiden -> lernen
+```
+
+`lernen` steht **am Ende**, nicht am Anfang: Es wertet aus, was die drei
+Schritte davor erzeugt haben. Zuerst gerufen sähe es immer den Stand von
+gestern — eine ganze Runde Verzögerung, die niemandem auffiele.
+
+Alle vier Schritte sind **idempotent**: ohne neuen Handelstag tun sie
+nichts und kosten Sekundenbruchteile. Erst das macht häufiges Laufen
+sinnvoll.
+
+**Was `lernen` ausdrücklich nicht tut:** Es ändert keine Handelsregel.
+Ein bestätigtes Muster ist eine Beobachtung mit Beleg und Verfallsdatum,
+kein Signal. Der Weg in die Handelslogik führt weiterhin über eine
+Voranmeldung in der Flotte.
+
+### Zur Frage nach Reinforcement Learning
+
+`src/alpaca_bot/rl/` existiert und benennt im eigenen Modul-Docstring die
+vier Gründe, warum RL hier begrenzt ist: Datenhunger (DQN braucht
+Millionen Übergänge, 10 Jahre Tagesdaten sind 2.500 Schritte je Aktie),
+Nicht-Stationarität, Auswendiglernen des Kurspfads, Zuordnungsproblem
+bei 95 % Rauschen. Es ist deshalb auf die **Positionsgröße** angesetzt,
+nicht auf die Richtung, und jede Auswertung läuft gegen eine
+Zufallspolitik.
+
+Das ist die richtige Konstruktion. Der Engpass ist auch hier nicht das
+Verfahren, sondern die Zahl unabhängiger Handelstage: derzeit **19**.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

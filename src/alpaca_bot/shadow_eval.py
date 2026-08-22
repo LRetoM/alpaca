@@ -31,10 +31,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
 
 import numpy as np
 import pandas as pd
 
+from . import statistik
 from .shadow import ShadowStore
 
 SPERRZONE_ANTEIL = 0.20
@@ -87,6 +89,19 @@ def datensatz(store: ShadowStore | None = None, *, buch: str = "rangliste",
 # ---------------------------------------------------------------------------
 # Signalguete
 # ---------------------------------------------------------------------------
+def _horizont_tage(spalte: str) -> int:
+    """Liest die Fensterlaenge aus einem Spaltennamen wie 'fwd_5d'.
+
+    Der Horizont steckt im Namen und nirgends sonst. Ihn zu raten waere
+    gefaehrlich: zu klein gewaehlt bleibt die Ueberlappung teilweise
+    stehen, zu gross wird der Test unnoetig streng. Ist nichts lesbar,
+    wird 1 zurueckgegeben - also KEINE Korrektur, und das faellt in der
+    Ausgabe als `aufblaehung 1.0` auf.
+    """
+    m = re.search(r"(\d+)", spalte or "")
+    return int(m.group(1)) if m else 1
+
+
 def ic(df: pd.DataFrame, horizont: str = "fwd_5d") -> dict:
     """Information Coefficient: sortiert der Score die Kandidaten richtig?
 
@@ -94,25 +109,58 @@ def ic(df: pd.DataFrame, horizont: str = "fwd_5d") -> dict:
     wie `research.py` es fuer die Historie tut. Ein globaler IC ueber alle
     Zeilen wuerde zu grossen Teilen messen, ob ein Monat besser war als ein
     anderer (also den Markt), nicht ob der Faktor an EINEM Tag trennt.
+
+    **Der zurueckgegebene `t` ist um die Ueberlappung korrigiert** (§G12).
+    Bei `fwd_5d` teilen benachbarte Tage vier Fuenftel ihres
+    Renditefensters; der unkorrigierte Wert faellt dadurch systematisch
+    zu hoch aus (gemessen: Fehlalarmquote 39,5 % statt 5 %). Der rohe
+    Wert steht als `t_roh` daneben - er ist zum Vergleich da, nicht zum
+    Zitieren.
+
+    Der korrigierte Wert liegt bewusst unter dem eingefuehrten Schluessel
+    `t`: Jeder bestehende Verbraucher (Schattenbericht, Musterspeicher)
+    bekommt damit automatisch den richtigen, ohne selbst daran zu denken.
     """
     if df.empty or horizont not in df:
         return {"n_tage": 0, "ic": np.nan, "t": np.nan}
 
-    tages_ic = []
+    paare = []
     for tag, g in df.groupby("tag"):
         g = g.dropna(subset=["score", horizont])
         if len(g) < 5 or g["score"].nunique() < 2:
             continue
-        tages_ic.append(g["score"].corr(g[horizont], method="spearman"))
+        paare.append((tag, g["score"].corr(g[horizont], method="spearman")))
 
-    tages_ic = pd.Series([x for x in tages_ic if np.isfinite(x)])
+    # Chronologisch: Newey-West liest die Autokorrelation aus der
+    # Reihenfolge. `groupby` sortiert zwar, aber die Zusicherung gehoert
+    # sichtbar hierher, nicht in eine Annahme ueber pandas.
+    paare.sort(key=lambda x: x[0])
+    tages_ic = pd.Series([x for _, x in paare if np.isfinite(x)])
     if len(tages_ic) < 2:
         return {"n_tage": len(tages_ic), "ic": np.nan, "t": np.nan}
 
     mittel = float(tages_ic.mean())
-    t = mittel / (tages_ic.std(ddof=1) / math.sqrt(len(tages_ic)))
-    return {"n_tage": int(len(tages_ic)), "ic": round(mittel, 5),
-            "t": round(float(t), 2), "ic_std": round(float(tages_ic.std(ddof=1)), 4)}
+    t_roh = mittel / (tages_ic.std(ddof=1) / math.sqrt(len(tages_ic)))
+    h = _horizont_tage(horizont)
+    if h > 1:
+        t_korr, aufbl = statistik.newey_west_t(tages_ic.to_numpy(), lag=h - 1)
+    else:
+        t_korr, aufbl = float(t_roh), 1.0
+    # Nicht berechenbar heisst NICHT "dann eben der rohe Wert". Bei einem
+    # 10-Tage-Fenster ueber 8 Handelstage gibt es keinen gueltigen t-Wert -
+    # der rohe waere die optimistischste aller Antworten und saehe wie ein
+    # Ergebnis aus. `nan` ist hier die einzige ehrliche Zahl.
+    ergebnis = {"n_tage": int(len(tages_ic)), "ic": round(mittel, 5),
+                "t_roh": round(float(t_roh), 2), "horizont": h}
+    if np.isfinite(t_korr):
+        ergebnis |= {"t": round(float(t_korr), 2),
+                     "aufblaehung": round(float(aufbl), 2)}
+    else:
+        ergebnis |= {"t": np.nan, "aufblaehung": np.nan,
+                     "hinweis": f"{len(tages_ic)} Tage sind fuer einen "
+                                f"{h}-Tage-Horizont zu wenig - kein t-Wert"}
+    ergebnis["ic_std"] = round(float(tages_ic.std(ddof=1)), 4)
+    return ergebnis
 
 
 def kalibrierung(df: pd.DataFrame, horizont: str = "fwd_5d",
@@ -560,8 +608,20 @@ def bericht(store: ShadowStore | None = None, *, buch: str = "rangliste",
             L.append("     IC(5T) nicht messbar - zu wenige Kandidaten je Tag."
                      + ("  (im Spiegelbuch normal, dafuer gibt es 'rangliste')"
                         if buch == "spiegel" else ""))
+        elif k.get("hinweis"):
+            # Kein t-Wert ist eine Aussage, kein Formatierungsproblem: Bei
+            # einem 5-Tage-Fenster ueber 13 Handelstage laesst sich die
+            # Ueberlappung nicht schaetzen (§G12). Ein "nan" waere hier das
+            # schlechteste Ergebnis - es sieht nach Panne aus und laedt
+            # dazu ein, ersatzweise den rohen Wert zu zitieren.
+            L.append(f"     IC(5T) {k['ic']}  ueber {k['n_tage']} Tage")
+            L.append(f"     kein t-Wert: {k['hinweis']}")
+            L.append(f"     (roh waere {k['t_roh']} - NICHT zitieren, "
+                     f"er unterstellt Unabhaengigkeit, die es nicht gibt)")
         else:
-            L.append(f"     IC(5T) {k['ic']}  t={k['t']}  ueber {k['n_tage']} Tage")
+            L.append(f"     IC(5T) {k['ic']}  t={k['t']}  ueber {k['n_tage']} Tage"
+                     + (f"  (roh {k['t_roh']}, {k['aufblaehung']}x)"
+                        if k.get("aufblaehung") and k["aufblaehung"] != 1.0 else ""))
         L.append(f"     Trefferquote {tq:.1%} gegen Basisrate {br:.1%}"
                  f"  ->  {tq - br:+.1%}")
         L.append(f"     UEBERSCHUSS {ue:+.3%}   <- gegen Universums-Median")

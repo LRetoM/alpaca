@@ -33,6 +33,8 @@ import numpy as np
 import pandas as pd
 
 from .shadow import ShadowStore
+from .shadow_eval import _horizont_tage
+from .statistik import gruppierter_test
 
 MIN_TAGE_BESTAETIGUNG = 60
 """Unter dieser Zahl unabhaengiger Handelstage wird kein Muster bestaetigt."""
@@ -87,16 +89,34 @@ def _messen(df: pd.DataFrame, bedingung: str, wirkung: str = "ic_5d") -> dict:
         k = ic(teil)
         return {"n_tage": k["n_tage"], "effekt": k["ic"], "t": k["t"]}
 
-    # Sonst: Tagesmittel der Zielgroesse gegen null testen
+    # Sonst: Tagesmittel der Zielgroesse gegen null testen.
+    #
+    # UEBER `gruppierter_test` mit `horizont`, nicht von Hand: Die
+    # Zielgroessen sind 5-Tage-Fenster (`fwd_5d`, `ueberschuss_5d`), und
+    # benachbarte Handelstage teilen vier Fuenftel davon (§G12). Ein hier
+    # von Hand gerechneter t-Wert waere im Mittel um 1,6 zu hoch - und
+    # dieser Wert entscheidet, ob ein Muster als bestaetigt gilt.
+    #
+    # Ein Musterspeicher, der auf unkorrigierten Werten laeuft, wuerde bei
+    # 5-Tage-Fenstern in rund 40 % der Faelle ein Muster "bestaetigen",
+    # das reines Rauschen ist - und zwar dauerhaft und automatisch.
     spalte = {"ueberschuss": "ueberschuss_5d", "rendite": "fwd_5d"}.get(wirkung, wirkung)
     if spalte not in teil:
         return {"n_tage": 0, "effekt": np.nan, "t": np.nan}
-    je_tag = teil.groupby("tag")[spalte].mean().dropna()
-    if len(je_tag) < 3:
-        return {"n_tage": len(je_tag), "effekt": np.nan, "t": np.nan}
-    t = je_tag.mean() / (je_tag.std(ddof=1) / np.sqrt(len(je_tag)))
-    return {"n_tage": int(len(je_tag)), "effekt": round(float(je_tag.mean()), 5),
-            "t": round(float(t), 2)}
+    h = _horizont_tage(spalte)
+    r = gruppierter_test(teil[spalte], teil["tag"], min_gruppen=MIN_TAGE_BESTAETIGUNG,
+                         horizont=h)
+    if r.n_gruppen < 3:
+        return {"n_tage": r.n_gruppen, "effekt": np.nan, "t": np.nan}
+    t = r.t_ueberlappung
+    if not np.isfinite(t):
+        return {"n_tage": r.n_gruppen, "effekt": round(float(r.mittel), 5),
+                "t": np.nan,
+                "hinweis": f"{r.n_gruppen} Tage sind fuer einen {h}-Tage-"
+                           f"Horizont zu wenig - kein t-Wert"}
+    return {"n_tage": int(r.n_gruppen), "effekt": round(float(r.mittel), 5),
+            "t": round(float(t), 2), "t_roh": round(float(r.t), 2),
+            "aufblaehung": round(float(r.aufblaehung), 2)}
 
 
 def pruefen(store: ShadowStore | None = None, *, nur_neue_daten: bool = True,
