@@ -147,7 +147,58 @@ def main() -> int:
         return 0
 
     print(fleet.uebersicht(store))
+    print(_trennschaerfe_tabelle(store))
     return 0
+
+
+def _trennschaerfe_tabelle(store) -> str:
+    """Welcher Bot kann ueberhaupt etwas zeigen - und welcher nie?
+
+    **Warum das in den Ueberblick gehoert (23.08.2026, BEFUNDE §G22).**
+    Die Uebersicht nannte bisher Achse, Wert und Status. Was fehlte, war
+    die Frage davor: *Ist dieser Bot ueberhaupt in der Lage, einen
+    Unterschied zu zeigen?*
+
+    Gemessen am 23.08.2026 sind **vier von zwoelf Bots bitgleich** mit
+    ihrer Referenz - B03, B05 (beide stillgelegt), B06 und B09 (beide
+    laufend). Sie messen strukturell nichts, zaehlen aber dauerhaft im
+    Versuchszaehler und heben damit `schwelle_sigma` fuer alle anderen.
+    Das ist teils gewollt (B06 wartet auf einen Regimewechsel, §E) und
+    teils ein Befund (B09, §G16 Fund 1) - aber es muss sichtbar sein,
+    bevor jemand auf ein Ergebnis von ihnen wartet.
+    """
+    zeilen = ["", "=" * 78,
+              "  TRENNSCHAERFE - was koennte jeder Bot zeigen?",
+              "=" * 78,
+              f"  {'Bot':<26} {'Streuung':>10} {'nachweisbar ab':>16}  Bemerkung"]
+    for bot in fleet.aktive_bots(store) or []:
+        # Der Basis-Bot ist die Referenz, kein Kandidat. `referenz_bot`
+        # gibt fuer ihn sich selbst zurueck - die Trennschaerfe waere
+        # dann zwangslaeufig "bitgleich" und stuende irrefuehrend in
+        # derselben Spalte wie die echten Nullmesser B06 und B09.
+        if not bot.basis_bot or bot.basis_bot == bot.bot_id:
+            continue
+        t = shadow_eval.trennschaerfe(bot.bot_id, store=store)
+        if t.get("hinweis"):
+            kurz = ("BITGLEICH - misst nichts" if "bitgleich" in t["hinweis"]
+                    else t["hinweis"][:44])
+            zeilen.append(f"  {bot.bot_id:<26} {'-':>10} {'-':>16}  {kurz}")
+            continue
+        zeilen.append(
+            f"  {bot.bot_id:<26} {t['streuung'] * 100:>9.3f}% "
+            f"{t['mit_80_prozent'] * 100:>15.3f}%  "
+            f"= {t['kumuliert_80'] * 100:.1f} % ueber {t['n_tage']} Tage")
+    zeilen += [
+        "",
+        "  'nachweisbar ab' = mittlere Tagesdifferenz fuer 80 %",
+        "  Trefferwahrscheinlichkeit bei der aktuellen Tageszahl.",
+        "  Der GESAMTE Vorsprung der Strategie liegt bei +0,11 % je Trade",
+        "  (BEFUNDE §A) - grob 0,02-0,03 %/Tag auf das ganze Depot.",
+        "  Ein Bot, dessen Huerde weit darueber liegt, wird auch bei",
+        "  echtem Vorsprung nicht bestehen. Das ist keine Aussage ueber",
+        "  den Bot, sondern ueber die Datenlage.",
+    ]
+    return "\n".join(zeilen)
 
 
 if __name__ == "__main__":
