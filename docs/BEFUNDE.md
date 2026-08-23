@@ -108,6 +108,82 @@ die vom Meldetag. Für Screening brauchbar, als Beleg nicht.
 
 ---
 
+## B6. Die Bilanz aller Versuche — die wichtigste Zahl für jede Planung
+
+**Stand 23.08.2026.** Diese Aufstellung existiert, weil die Einzelbefunde
+über das ganze Register verstreut sind und in der Summe etwas sagen, was
+keiner von ihnen allein sagt.
+
+| Versuch | Anzahl | bestanden |
+|---|---:|---:|
+| Flottenbots (`B00`–`B12`) | 13 | **0** |
+| Registrierte Hypothesen | 3 | 0 |
+| Faktorkandidaten (§C, 16.08.) | 18 | 0 |
+| PEAD über Analysten / Kursreaktion (§C) | 2 | 0 (beide widerlegt) |
+| Symbol-Aufteilung auf mehrere Bots (§C) | 1 | 0 (widerlegt) |
+| ML-Modell gegen den Score (§G15) | 1 | 0 (verworfen) |
+| **Summe** | **38** | **0** |
+
+Die 13 Flottenbots im Detail:
+
+* **4 wirkungslos, stillgelegt** — `B01`, `B02`, `B03`, `B05` (§E)
+* **4 bitgleich mit ihrer Referenz** — `B03`, `B05` (stillgelegt),
+  `B06`, `B09` (laufend). Sie messen strukturell **nichts**
+* **3 unter der Schwelle** — `B04` (0,41×), `B07` (−0,89×), `B08`
+  (0,22× der Nachweisgrenze, §G22)
+* **2 zu neu** — `B11`, `B12`
+* **1 ersetzt** — `B10`
+
+### Was daraus folgt — und was nicht
+
+**Das ist kein Scheitern, sondern die Basisrate.** §B3 nennt sie für
+publizierte Anomalien: ~65 % replizieren nicht, der Rest verliert im
+Mittel 58 % seiner Wirkung. Für selbst erdachte Parametervarianten ist
+sie noch schlechter. Wer diese Bilanz für ungewöhnlich hält, wird die
+nächsten zwanzig Versuche falsch einplanen.
+
+**Jeder Versuch verteuert alle anderen — dauerhaft.** `schwelle_sigma`
+wächst mit `sqrt(2·ln N)`, stillgelegte Bots zählen weiter mit (§B2):
+
+```
+16 Versuche -> 2,85      21 Versuche -> 2,97
+19 Versuche -> 2,93      24 Versuche -> 3,02
+```
+
+Und die Erhöhung wirkt **rückwirkend auf jede laufende Messung**. Fünf
+neue Achsen auf einmal anzumelden macht also nicht fünf Fragen
+beantwortbar — es macht die eine, die gerade läuft, schwerer.
+
+### Die Unterscheidung, an der alles hängt
+
+|  | Messapparat | Handelslogik |
+|---|---|---|
+| Beispiele | Protokoll, Wächter, Auswertung, Werkzeuge | `EngineConfig`, Ausstiegsregeln, Universum |
+| Kosten | keine | **ein Versuchszählerplatz, dauerhaft** |
+| Wann | jederzeit | nur vorangemeldet, eine Achse |
+| Basisrate | — | **0 von 38** |
+
+Am Messapparat darf und soll laufend gearbeitet werden — die Runden
+§G13–§G22 haben genau das getan, ohne eine einzige Handelsentscheidung
+zu berühren. **Ein „Code 2.0", der beides vermischt, kostet die
+Vergleichsbasis und hebt die Hürde für alles Laufende.**
+
+### Der eigentliche Engpass ist nicht die Feinjustierung
+
+§A: Vorsprung **+0,11 % je Trade** gegen Rundlauf-Breakeven **0,142 %**.
+§C stellt fest, dass der Faktorraum aus Kurs- und Volumendaten
+**vermutlich ausgeschöpft** ist — die 18 Kandidaten entdeckten
+überwiegend den bereits gehandelten Umkehr-Effekt neu.
+
+Keine der 13 Flottenachsen adressiert diesen Konflikt. Sie justieren
+Stop, Ziel, Frist, Breite und Kapitaleinsatz — alles Randbedingungen
+eines Vorsprungs, der zu klein ist. Neue Information müsste von
+**außerhalb** der Kursdaten kommen (Nachrichten, Insider,
+Fundamentaldaten), nicht aus einer weiteren Ableitung derselben Reihe.
+
+
+---
+
 ## C. Widerlegt — nicht erneut versuchen
 
 | Hypothese | Ergebnis | Datum |
