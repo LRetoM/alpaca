@@ -3089,6 +3089,116 @@ Tagesdifferenzen nicht tragen. Deshalb steht im `BETRIEBSPLAN` §4 „erst
 Historienfilter" — dieser Befund beziffert, warum.
 
 
+## G24. Der Historienlauf testet eine andere Strategie als der Live-Bot (23.08.2026)
+
+**Anlass:** der Einwand, die historischen Testtrades funktionierten nicht
+richtig und die echten Ergebnisse würden besser ausfallen. Geprüft statt
+diskutiert — **der Einwand trifft zu.**
+
+### Der Fund
+
+Beide Pfade rufen `signals.build_reversal_frame`, aber mit
+unterschiedlichen Argumenten:
+
+```
+simulate.py:191   build_reversal_frame(df, market, ecfg.reversal_weights)
+shadow_daten.py   build_reversal_frame(df, market, cfg.reversal_weights,
+                                       symbol=s, news=news)
+```
+
+`ReversalWeights.news = 0.10` ist ein **additiver Score-Baustein**
+(`signals.py:320`). Fehlt `news`, ist `f_news = 0` — der Faktor entfällt
+ersatzlos. Der Historienlauf rechnet also **ohne** ihn, Schatten und
+Live-Bot rechnen **mit** ihm.
+
+### Gemessen, nicht hergeleitet
+
+Acht Symbole, dieselben Bars, dieselben Gewichte, echte Nachrichtendaten:
+
+| Symbol | `simulate.py` | Schatten/Live | Differenz |
+|---|---:|---:|---:|
+| WMT | 0,8666 | 0,9666 | **+0,1000** |
+| TJX | 0,7235 | 0,8235 | +0,1000 |
+| TTMI | 0,6988 | 0,7988 | +0,1000 |
+| FN | 0,5955 | 0,6955 | +0,1000 |
+| BABA | 0,7354 | 0,7913 | +0,0559 |
+| VICR | 0,6182 | 0,6332 | +0,0150 |
+| CW | 0,9455 | 0,9455 | 0 |
+| AGX | 0,6539 | 0,6539 | 0 |
+
+**Sechs von acht bekommen einen anderen Score.** Und die Rangfolge kippt:
+
+```
+simulate.py :  CW   WMT  BABA  TJX  TTMI  AGX  VICR  FN
+shadow/live :  WMT  CW   TJX   TTMI BABA  FN   AGX   VICR
+```
+
+Der Bot kauft die obersten Plätze. Eine andere Reihenfolge heißt **andere
+Aktien im Depot**.
+
+Über den gesamten Schattenbestand (2.117 Vorhersagen `B00`):
+
+* **19,7 %** tragen einen Nachrichtenbeitrag > 0, im Mittel **+0,054**
+* **65 Kandidaten (3,07 %)** überschreiten `min_score = 0,35`
+  **ausschließlich** wegen der Nachrichten
+* **46 %** der als `wuerde_gehandelt` markierten Kandidaten haben einen
+  Nachrichtenbeitrag
+
+### Was daraus folgt — und was ausdrücklich nicht
+
+**Der Historienlauf ist kein sauberer Test der laufenden Strategie.** Die
+Zahlen aus §G11 (−22,4 % über 2021–2025, +7,57 % über sechs Jahre,
+Vorsprung je Trade −0,016 %) messen die **Vier-Faktor-Fassung ohne
+Nachrichten**. Live läuft eine Fünf-Faktor-Fassung.
+
+**Das heißt NICHT, dass die Ergebnisse besser werden.** Der
+Nachrichtenfaktor ist der einzige Baustein ohne eigene Messung — seine
+eigene Dokumentation sagt es deutlich:
+
+> *„Für diesen Faktor gibt es KEINE eigene Messung … Er wurde auf
+> ausdrücklichen Wunsch am 03.08.2026 direkt in beide Bots eingebaut,
+> OHNE vorherige Schattenbetrieb-Messung … Fällt die Auswertung negativ
+> aus, gehört dieser Faktor wieder auf 0."*
+
+Er kann helfen oder schaden. Bekannt ist nur, dass er **wirkt** — und das
+ist jetzt beziffert.
+
+**Nachrüsten geht nicht.** Der Alpaca-Nachrichtenfeed reicht nicht bis
+2021 zurück. Die Historie lässt sich also nicht mit Nachrichten
+nachrechnen; die beiden Fassungen bleiben getrennt vergleichbar.
+
+**Die vier Kernbausteine sind identisch** (Gewicht 1,00 von 1,10). Der
+Unterschied betrifft ~9 % des Scores — genug, um die Rangfolge zu drehen,
+zu wenig, um aus −22 % ein Plus zu machen.
+
+### Warum es niemand gefunden hat
+
+`shadow.pruefungen()` Nr. 6 heißt „Replay gegen simulate.py" und
+verspricht im Docstring: *„Erzeugt der Schattencode dieselben
+Entscheidungen wie simulate.py? Weichen sie ab, ist einer von beiden
+falsch."*
+
+Die Umsetzung prüfte das **nicht**. Sie startete `simulate.run()`, zählte
+die Trades und meldete `True`, sofern nichts abstürzte — ein
+Durchlauftest, als Vergleich beschriftet. Genau die Fehlerklasse aus §G17
+und §G19: eine Zusicherung, die niemand nachgerechnet hat.
+
+Erschwerend: Der Bericht meldete sie durchgehend als
+*„übersprungen (--replay zum Ausführen)"* — sie lief also nicht einmal
+in ihrer schwachen Fassung.
+
+**Behoben:** Die Prüfung vergleicht jetzt die **Scores** beider Pfade auf
+denselben Bars und meldet Abweichungen mit Symbol und Betrag.
+
+### Einordnung für die Planung
+
+Die Zahlen aus §G23 (Kostenlast, Szenarien) bleiben gültig — sie hängen
+am Umschlag und am Spread, nicht am Score. Was sich ändert, ist die
+Belastbarkeit der **Renditeschätzung**: Die historischen Jahreszahlen
+gelten für die Vier-Faktor-Fassung. Für die live laufende Fassung gibt es
+**keine Mehrjahresmessung** — nur 19 Handelstage Papierbetrieb.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

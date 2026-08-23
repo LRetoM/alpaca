@@ -24,6 +24,7 @@ ueber den Bytecode jeder Funktion, nicht behauptet (`scripts/29_umzug_pruefen.py
 
 from __future__ import annotations
 
+import datetime as dt
 import sqlite3
 
 import numpy as np
@@ -462,28 +463,79 @@ def _pruefe_kosten(s: ShadowStore) -> Befund:
                       f"nicht durchfuehrbar: {type(e).__name__}: {e}")
 
 def _pruefe_replay(s: ShadowStore) -> Befund:
-    """Erzeugt der Schattencode dieselben Entscheidungen wie simulate.py?
+    """Rechnet simulate.py denselben SCORE wie der Schatten?
 
-    Beide rufen `Engine.decide()`. Weichen sie ab, ist einer von beiden
-    falsch - und dann taugt der Vergleich zwischen Simulation und Schatten
-    grundsaetzlich nicht.
+    **Was hier bis zum 23.08.2026 stand - und warum es nichts prueft.**
+    Der Docstring versprach genau diese Frage ("Erzeugt der Schattencode
+    dieselben Entscheidungen wie simulate.py? Weichen sie ab, ist einer
+    von beiden falsch"). Die Umsetzung startete `simulate.run()`, zaehlte
+    die Trades und meldete `True`, sofern nichts abstuerzte. Ein
+    Durchlauftest, als Vergleich beschriftet - dieselbe Fehlerklasse wie
+    §G17 und §G19.
+
+    Beim Nachruesten kam der Grund heraus, warum es jemand haette pruefen
+    muessen (§G24): Die beiden Pfade rufen `build_reversal_frame` mit
+    unterschiedlichen Argumenten.
+
+        simulate.py   build_reversal_frame(df, market, weights)
+        shadow_daten  build_reversal_frame(df, market, weights,
+                                           symbol=s, news=news)
+
+    `ReversalWeights.news = 0.10` ist ein additiver Score-Baustein. Ohne
+    `news` faellt er ersatzlos weg. Gemessen an acht Symbolen: sechs
+    bekommen einen anderen Score, bis zu +0,1000 - und die Rangfolge
+    dreht sich. Der Bot kauft die obersten Plaetze, also andere Aktien.
+
+    Diese Pruefung vergleicht deshalb die Scores selbst, nicht die
+    Lauffaehigkeit. Sie meldet **auffaellig**, nicht **fehlgeschlagen**:
+    Der Unterschied ist bekannt, benannt und nicht nachruestbar (der
+    Nachrichtenfeed reicht nicht bis 2021 zurueck). Er muss nur sichtbar
+    bleiben, damit niemand die Historienzahlen fuer eine Messung der
+    laufenden Strategie haelt.
     """
     try:
-        from . import simulate as sim
-        from . import universe as U
+        from .signals import build_reversal_frame
 
-        syms = list(dict.fromkeys([*U.BENCHMARK_SETS["broad_liquid"][:40],
-                                   MARKET_SYMBOL]))
-        bars = lade_bars(syms, 2.0, verbose=False)
+        cfg = EngineConfig.for_reversal()
+        syms = ["AAPL", "MSFT", "JPM", "XOM", "WMT", "KO", "PFE", "CAT"]
+        bars = lade_bars([*syms, MARKET_SYMBOL], 1.0, verbose=False)
         markt = bars.xs(MARKET_SYMBOL, level="symbol")["close"].astype(float)
-        res = sim.run(bars, engine_config=EngineConfig.for_reversal(),
-                      sim_config=sim.SimConfig(initial_cash=100_000,
-                                               log_to_journal=False),
-                      market=markt, verbose=False)
-        n = len(res.trades)
-        return Befund(6, "Replay gegen simulate.py", True,
-                      f"simulate.py laeuft auf denselben Daten durch "
-                      f"({n} Trades). Beide nutzen Engine.decide().")
+
+        from . import news as news_mod
+
+        start = (dt.datetime.now(dt.UTC) - dt.timedelta(days=60)).isoformat()
+        artikel = news_mod.get_news(syms, start=start, max_articles=2000)
+
+        abweichungen = []
+        for sym in syms:
+            try:
+                df = bars.xs(sym, level="symbol")
+            except KeyError:
+                continue
+            ohne = float(build_reversal_frame(
+                df, markt, cfg.reversal_weights)["score"].iloc[-1])
+            mit = float(build_reversal_frame(
+                df, markt, cfg.reversal_weights,
+                symbol=sym, news=artikel)["score"].iloc[-1])
+            if abs(mit - ohne) > 1e-9:
+                abweichungen.append((sym, ohne, mit))
+
+        if not abweichungen:
+            return Befund(6, "Replay gegen simulate.py", True,
+                          f"{len(syms)} Symbole geprueft, Scores identisch - "
+                          f"Historienlauf und Schatten rechnen dasselbe.")
+
+        groesste = max(abweichungen, key=lambda x: abs(x[2] - x[1]))
+        return Befund(
+            6, "Replay gegen simulate.py", False,
+            f"{len(abweichungen)} von {len(syms)} Symbolen bekommen im "
+            f"Historienlauf einen ANDEREN Score als im Schatten (groesste "
+            f"Abweichung {groesste[0]}: {groesste[1]:.4f} -> {groesste[2]:.4f}, "
+            f"{groesste[2]-groesste[1]:+.4f}). Ursache: `simulate.py` "
+            f"uebergibt kein `news`, der Nachrichtenfaktor (Gewicht "
+            f"{cfg.reversal_weights.news}) faellt dort weg. BEKANNT und nicht "
+            f"nachruestbar (§G24) - die Historienzahlen gelten fuer die "
+            f"Vier-Faktor-Fassung, nicht fuer die laufende.")
     except Exception as e:  # noqa: BLE001
         return Befund(6, "Replay gegen simulate.py", False,
                       f"FEHLGESCHLAGEN: {type(e).__name__}: {e}")
