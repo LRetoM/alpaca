@@ -652,9 +652,15 @@ MUTATIONEN = [
     Mutation(
         "Abnahme nimmt wieder pauschal B00_basis",
         "src/alpaca_bot/shadow_eval.py",
-        "    if basis_bot is None:\n        basis_bot = referenz_bot(bot_id, s)",
-        '    if basis_bot is None:\n        basis_bot = "B00_basis"',
-        "test_abnahmereferenz",
+        # Kontextzeile MUSS mit: Seit §G22 loest auch `trennschaerfe` die
+        # Referenz so auf, und `replace(..., 1)` traf sonst die falsche
+        # Stelle - die Mutation lief ins Leere und meldete faelschlich
+        # "nicht gefangen".
+        "    if basis_bot is None:\n        basis_bot = referenz_bot(bot_id, s)\n"
+        '    erg: dict = {"bot": bot_id, "basis": basis_bot}',
+        '    if basis_bot is None:\n        basis_bot = "B00_basis"\n'
+        '    erg: dict = {"bot": bot_id, "basis": basis_bot}',
+        "test_abnahmereferenz or test_trennschaerfe",
         "Der Entscheidungsvertrag fuer den 10.10.2026. B00_basis ist seit "
         "§G6 als Live-Referenz widerlegt; gemessen betraegt der Unterschied "
         "t=0,99 gegen t=1,24. Ein Argumentstandard darf nicht entscheiden, "
@@ -737,6 +743,28 @@ MUTATIONEN = [
         "'fehlt ein Eintrag, der NEUER ist als der juengste vorhandene?' "
         "zeigt einen laufenden Ausfall - und trennt ihn von der nicht "
         "nachtragbaren Altlast, die sonst dauerhaft ROT leuchten wuerde.",
+    ),
+
+    # --- Runde 7, 23.08.2026 (§G22) ---------------------------------------
+    Mutation(
+        "Trennschaerfe faellt aus der Abnahme",
+        "src/alpaca_bot/shadow_eval.py",
+        '    ts = trennschaerfe(k["bot"], k["basis"], store)',
+        '    ts = {"hinweis": ""}',
+        "test_trennschaerfe",
+        "Ohne die Nachweisgrenze sehen 'nicht besser' und 'nicht zeigbar' "
+        "identisch aus. Am 10.10.2026 waeren das zwei voellig verschiedene "
+        "Befunde, und nur einer rechtfertigt, B11 zu verwerfen.",
+    ),
+    Mutation(
+        "Trennschaerfe rechnet ohne Guetezuschlag",
+        "src/alpaca_bot/shadow_eval.py",
+        "        (schwelle + Z_GUETE_80) * streuung / math.sqrt(n), 6)",
+        "        schwelle * streuung / math.sqrt(n), 6)",
+        "test_trennschaerfe",
+        "Ein Effekt exakt auf der Schwelle wird nur in der HAELFTE der "
+        "Faelle gefunden. Ohne den Zuschlag meldet die Auswertung eine zu "
+        "niedrige Nachweisgrenze und macht die Datenlage besser, als sie ist.",
     ),
 ]
 

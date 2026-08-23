@@ -249,6 +249,45 @@ B11 gilt als **bestanden**, wenn *alle vier* zutreffen:
 > beantworten — genau der Fehler, gegen den §G10 den Vertrag überhaupt
 > erst geschrieben hat. Deshalb steht sie hier, sechs Wochen vorher.
 
+> **Vorab festgehaltene Erwartung vom 23.08.2026 — was der 10.10.
+> beantworten kann und was nicht (`BEFUNDE.md` §G22).**
+>
+> Vor dem Termin gemessen, wie groß ein Unterschied sein müsste, damit
+> Kriterium 1 ihn überhaupt findet. Bei 31 auswertbaren Tagen und der
+> gemessenen Streuung der Tagesdifferenz:
+>
+> | Streuungsschätzung | nachweisbar ab | kumuliert über 31 Tage |
+> |---|---:|---:|
+> | B11 gegen B09 (eigene, n=5) | 0,34 %/Tag | **10,5 %** |
+> | B04 gegen B00 (belastbarer, n=18) | 0,18 %/Tag | **5,4 %** |
+>
+> Zum Vergleich: Der **gesamte** gemessene Vorsprung der Strategie
+> beträgt +0,11 % **je Trade** (§A), auf das Depot gerechnet grob
+> 0,02–0,03 %/Tag.
+>
+> **B11 müsste also mehrfach so viel beitragen, wie die Strategie
+> insgesamt verdient, um am 10.10. bestehen zu können.** Der
+> wahrscheinlichste Ausgang ist deshalb: Kriterium 1 fällt durch, es
+> bleibt beim Zeitausstieg.
+>
+> **Das ist kein Grund, den Vertrag zu ändern** — die konservative
+> Vorgabe „im Zweifel keine Änderung" ist genau richtig. Es ist ein
+> Grund, das Ergebnis richtig zu lesen: „durchgefallen" heißt hier
+> **nicht nachweisbar**, nicht **widerlegt**. Die Auswertung weist die
+> Trennschärfe seit dem 23.08.2026 bei jedem Aufruf mit aus, damit diese
+> Verwechslung nicht passiert.
+>
+> **Warum das hier steht und nicht am 10.10.:** Nach dem Termin wäre
+> dieselbe Rechnung eine nachträgliche Erklärung für ein unerwünschtes
+> Ergebnis. Vorher ist sie eine Vorhersage.
+>
+> **Die Ursache ist bekannt und benannt.** `shadow_eval.vergleich_gepaart`
+> versprach „Streuung 3–5× kleiner, entscheidbar nach 6–10 Wochen".
+> Nachgemessen gilt das für Bots, die sich nur im Kapitaleinsatz
+> unterscheiden (B08: 3,6×) — nicht für B11 gegen B09 (**1,1×**), die
+> andere Positionen unterschiedlich lange halten. Der Docstring ist
+> korrigiert.
+
 **Fällt einer der vier durch, bleibt es beim Zeitausstieg nach 5 Tagen.**
 
 **Drei Zustände, nicht zwei.** Jedes Kriterium kann *erfüllt*,

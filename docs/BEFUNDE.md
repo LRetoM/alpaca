@@ -2806,6 +2806,121 @@ Regression: `tests/test_lebenslauf_abdeckung.py` (13 Tests), zwei neue
 Mutationen — **67 von 67 gefangen**.
 
 
+## G22. Kriterium 1 rechnet richtig — kann am 10.10. aber kaum etwas zeigen (23.08.2026)
+
+**Anlass:** die Vorgabe, dass die Auswertung am 10.10.2026 „genau das
+bewerten und rechnen muss, was wir uns vornehmen". Also den Rechenweg
+selbst geprüft, der an diesem Tag das Urteil fällt.
+
+### Teil 1: Der t-Wert ist NICHT aufgebläht — erstmals gemessen
+
+Der Verdacht lag nahe: §G12 hat gezeigt, dass überlappende
+Renditefenster den t-Wert um das 1,6-fache aufblähen. `vergleich_gepaart`
+rechnet über Tagesdifferenzen `d_t = r_A(t) − r_B(t)`, und die Positionen
+beider Depots laufen über mehrere Tage — überlappen sich also.
+
+**Gemessen statt vermutet.** 600 Läufe auf reinem Rauschen, beide Depots
+mit **identischer Rangliste** (ein erster Entwurf ließ sie unabhängig
+würfeln — dann dominiert unabhängiges Rauschen und die Quote fällt zu
+niedrig aus):
+
+| Perzentil von \|t\| | gemessen | t-Verteilung (df=34) |
+|---|---:|---:|
+| 90 % | 1,71 | 1,69 |
+| 95 % | 2,04 | 2,03 |
+| 97,5 % | 2,42 | 2,35 |
+| 99 % | 2,70 | 2,73 |
+
+Kolmogorow-Smirnow gegen t(34): **p = 0,16**. Mittelwert +0,05
+(Soll 0), Standardabweichung 1,04 (Soll 1). Fehlalarmquote bei t > 2:
+**6,0 %** gegen nominal 5 %, bei der echten Schwelle 2,85: **0,5 %**.
+
+**Der Unterschied zu §G12 ist strukturell:** Dort teilten benachbarte
+Tage ein *Mehrtages-Renditefenster*. Hier ist `d_t` eine
+**Eintages-Differenz** — es gibt kein Fenster zu teilen. Die gemessene
+Autokorrelation von `d` ist nicht von 0 zu unterscheiden.
+
+**Gegenprobe zur Richtung:** Bei einem künstlich eingebauten Vorsprung
+von 15 bps/Tag liegt das mittlere t bei +1,88, das Vorzeichen ist in
+94 % positiv. Der Test findet einen echten Effekt und zeigt ihn in die
+richtige Richtung.
+
+### Teil 2: Die Annahme, auf der der Zeitplan steht, hält nicht
+
+`vergleich_gepaart` versprach im Docstring:
+
+> *„Die Streuung von d ist typisch 3-5x kleiner als die der
+> Einzelrenditen … Praktische Folge: ‚A schlägt B' ist nach 6-10 Wochen
+> entscheidbar."*
+
+An den echten Equity-Kurven nachgemessen:
+
+| Paar | Reduktionsfaktor |
+|---|---:|
+| `B08` gegen `B00` | **3,6×** — wie behauptet |
+| `B04` gegen `B00` | 2,4× |
+| **`B11` gegen `B09`** | **1,1×** — praktisch keine Reduktion |
+| `B07` gegen `B00` | 0,8× — die Differenz streut **stärker** |
+
+**Die Reduktion entsteht durch Überlappung der Depots.** Bots, die sich
+nur im Kapitaleinsatz unterscheiden (`B08`), halten fast dieselben
+Positionen — dort greift sie. Bots, die **andere Positionen
+unterschiedlich lange halten**, haben wenig Überlappung. Genau das ist
+`B11`. Und weil der Zeitbedarf **quadratisch** mit der Streuung wächst,
+macht 1,1× statt 3,6× aus „6–10 Wochen" schnell Monate.
+
+### Was das für den 10.10. konkret heißt
+
+Bei 31 auswertbaren Tagen ist nachweisbar:
+
+| Streuungsschätzung | ab | kumuliert über 31 Tage |
+|---|---:|---:|
+| `B11` gegen `B09` (eigene, n=5) | 0,34 %/Tag | **10,5 %** |
+| `B04` gegen `B00` (belastbarer, n=18) | 0,18 %/Tag | **5,4 %** |
+
+Der **gesamte** gemessene Vorsprung der Strategie beträgt +0,11 % **je
+Trade** (§A) — auf das Depot gerechnet grob 0,02–0,03 %/Tag. `B11`
+müsste also **mehrfach so viel beitragen, wie die Strategie insgesamt
+verdient**, um am 10.10. bestehen zu können.
+
+**Der wahrscheinlichste Ausgang ist: Kriterium 1 fällt durch.** Das ist
+kein Grund, den Vertrag zu ändern — die konservative Vorgabe ist richtig.
+Es ist ein Grund, das Ergebnis richtig zu lesen.
+
+### Behoben: die Trennschärfe ist jetzt Teil jeder Auswertung
+
+`shadow_eval.trennschaerfe()` rechnet je Vergleich aus, welcher Effekt
+überhaupt nachweisbar wäre:
+
+```
+gerade_noch    = schwelle * s / sqrt(n)
+mit_80_prozent = (schwelle + 0,84) * s / sqrt(n)
+```
+
+Die zweite Zahl ist die ehrlichere: Ein Effekt exakt in Höhe der ersten
+wird nur in der **Hälfte** der Fälle auch gefunden.
+
+`kriterien_text` gibt sie **immer** mit aus, samt Warnung. Denn ein
+durchgefallenes Kriterium 1 hat zwei völlig verschiedene Ursachen, die
+in der bisherigen Ausgabe identisch aussahen:
+
+* Der Bot ist **nicht besser**.
+* Der Bot **ist** besser, aber die Datenlage kann es nicht zeigen.
+
+Nur die erste rechtfertigt, eine Idee zu verwerfen. Sonderfall
+abgefangen: Bei Streuung 0 (bitgleiche Bots wie `B09`/`B08`, §G16
+Fund 1) meldet die Funktion das ausdrücklich — ohne den Hinweis sähe die
+Ausgabe wie *perfekte* Trennschärfe aus.
+
+**Vorab festgehalten**, nicht nachträglich: Die Erwartung steht seit dem
+23.08.2026 in `BETRIEBSPLAN` §3.3 — sechs Wochen vor dem Termin. Nach dem
+Termin wäre dieselbe Rechnung eine Erklärung für ein unerwünschtes
+Ergebnis; vorher ist sie eine Vorhersage.
+
+Regression: `tests/test_trennschaerfe.py` (12 Tests), zwei neue
+Mutationen.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

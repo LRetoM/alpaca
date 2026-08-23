@@ -134,6 +134,7 @@ vergessener Import beim Modulwechsel steht dort und sonst nirgends.
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
+| `test_trennschaerfe.py` | 12 | **§G22:** Was könnte der Vergleich überhaupt zeigen? Die Formel `(schwelle + 0,84)·s/√n` mit Wurzel-n-Abhängigkeit, der Sonderfall **bitgleicher Bots** (Streuung 0 heißt *nicht* „beliebig genau“), und die Abnahme muss die Nachweisgrenze **immer** mit ausgeben — sonst sehen „nicht besser“ und „nicht zeigbar“ gleich aus. |
 | `test_abnahmereferenz.py` | 11 | **§G19:** Die Abnahme rechnet gegen die **registrierte** Basis, nicht gegen einen hartkodierten Standard. Dieselbe Frage hatte vier Antworten an vier Orten — gemessen t = 0,99 gegen `B00_basis`, t = 1,24 gegen `B09_nachkauf`. Die Ausgabe weist die Herkunft der Referenz aus. |
 | `test_konsistenz.py` | 20 | **`B09_nachkauf` ist deckungsgleich mit dem, was `12_daemon.py` startet** *(Invariante — bricht, sobald jemand die Skript-Defaults ändert)*. `shadow.py` importiert **kein** `trading.py`. Beide Pfade melden dieselbe `code_version`. Alle `EngineConfig`-Felder erscheinen in `as_dict()`. Die Simulation fährt feldweise die Live-Strategie. |
 

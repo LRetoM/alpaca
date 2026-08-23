@@ -298,13 +298,45 @@ def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
 
     Beide Bots sehen dieselben Tage, Symbole und Kurse. Verglichen wird
     deshalb d_t = rendite_A(t) - rendite_B(t); der Marktfaktor kuerzt sich
-    heraus. Die Streuung von d ist typisch 3-5x kleiner als die der
-    Einzelrenditen, und weil die noetige Tageszahl quadratisch davon
-    abhaengt, sinkt sie um den Faktor 10-25.
+    heraus.
 
-    Praktische Folge: "A schlaegt B" ist nach 6-10 Wochen entscheidbar,
-    nicht erst nach 9 Monaten. Das ist der Grund, warum die Flotte der
-    schnellere Erkenntnisweg ist.
+    **Wie stark das hilft, haengt vom Bot ab - und der Docstring hat das
+    lange zu optimistisch behauptet (23.08.2026, §G22).** Hier stand:
+    *"Die Streuung von d ist typisch 3-5x kleiner ... 'A schlaegt B' ist
+    nach 6-10 Wochen entscheidbar."* An den echten Kurven nachgemessen:
+
+        B08 gegen B00    3,6x     wie behauptet
+        B04 gegen B00    2,4x     schwaecher
+        B11 gegen B09    1,1x     praktisch KEINE Reduktion
+        B07 gegen B00    0,8x     die Differenz streut STAERKER
+
+    Die Reduktion entsteht durch UEBERLAPPUNG der Depots. Bots, die sich
+    nur im Kapitaleinsatz unterscheiden (B08), halten fast dieselben
+    Positionen - dort greift sie. Bots, die andere Positionen anders lange
+    halten (B11), haben wenig Ueberlappung, und die Differenz ist fast so
+    volatil wie die Rendite selbst. Weil der Zeitbedarf QUADRATISCH mit
+    der Streuung waechst, macht das aus "6-10 Wochen" schnell Monate.
+
+    **Was am Verfahren dagegen stimmt.** Die Fehlalarmquote wurde am
+    23.08.2026 erstmals gemessen - 600 Laeufe auf reinem Rauschen, beide
+    Depots mit identischer Rangliste und ueberlappenden Positionen:
+
+        Perzentil     gemessen   t-Verteilung
+            90 %         1,71         1,69
+            95 %         2,04         2,03
+          97,5 %         2,42         2,35
+            99 %         2,70         2,73
+
+    Kolmogorow-Smirnow gegen t(34): p = 0,16. Der t-Wert ist also NICHT
+    aufgeblaeht - anders als bei den ueberlappenden Renditefenstern in
+    §G12. Der Grund: d_t ist eine EINTAGES-Differenz; es gibt kein
+    Mehrtages-Fenster, das sich mit dem Nachbartag teilt. Gemessene
+    Autokorrelation von d: nicht von 0 unterscheidbar.
+
+    **Wie viel Effekt noetig ist, beantwortet `trennschaerfe()`.** Sie
+    gehoert zu jeder Auswertung dazu: Ein durchgefallenes Kriterium 1
+    ohne diese Zahl laesst "nicht besser" und "nicht zeigbar" gleich
+    aussehen.
     """
     from . import fleet
 
@@ -358,6 +390,102 @@ def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
 VERLAENGERUNG_MIN = 0.10
 VERLAENGERUNG_MAX = 0.60
 KRITERIUM_MIN_TAGE = 20
+
+Z_GUETE_80 = 0.84
+"""Normalquantil fuer 80 % Trefferwahrscheinlichkeit (einseitig)."""
+
+
+def trennschaerfe(bot_id: str, basis_bot: str | None = None,
+                  store: ShadowStore | None = None,
+                  n_tage: int | None = None) -> dict:
+    """Welchen Effekt koennte dieser Vergleich ueberhaupt nachweisen?
+
+    **Warum es diese Funktion gibt (23.08.2026, BEFUNDE §G22).** Ein
+    Kriterium, das "DURCHGEFALLEN" meldet, ohne dazuzusagen, was
+    nachweisbar gewesen waere, ist eine irrefuehrende Auswertung. Es gibt
+    zwei voellig verschiedene Gruende fuer ein durchgefallenes
+    Kriterium 1:
+
+        (a) Der Bot ist nicht besser.
+        (b) Der Bot ist besser, aber die Datenlage kann es nicht zeigen.
+
+    Beide sehen in der Ausgabe identisch aus. Wer sie verwechselt, verwirft
+    eine funktionierende Idee - oder haelt eine tote fuer "noch offen".
+
+    **Der Anlass war eine widerlegte Behauptung.** `vergleich_gepaart`
+    versprach: *"Die Streuung von d ist typisch 3-5x kleiner als die der
+    Einzelrenditen ... 'A schlaegt B' ist nach 6-10 Wochen entscheidbar."*
+    Am 23.08.2026 an den echten Kurven nachgemessen:
+
+        B08 gegen B00    3,6x     wie behauptet
+        B04 gegen B00    2,4x     schwaecher
+        B11 gegen B09    1,1x     praktisch KEINE Reduktion
+        B07 gegen B00    0,8x     die Differenz streut STAERKER
+
+    Die Behauptung gilt fuer Bots, die sich im Kapitaleinsatz
+    unterscheiden (ihre Depots sind fast gleich). Fuer Bots, die andere
+    Positionen anders lange halten - also genau fuer `B11` -, gilt sie
+    nicht. Dort ist die Differenz fast so volatil wie die Rendite selbst,
+    und der Zeitbedarf steigt quadratisch damit.
+
+    **Die Rechnung.** Bei n Tagen und Streuung s der Tagesdifferenz ist
+    der kleinste nachweisbare mittlere Unterschied
+
+        gerade_noch  = schwelle * s / sqrt(n)          (t genau auf der Schwelle)
+        mit_80_prozent = (schwelle + 0.84) * s / sqrt(n)
+
+    Das Zweite ist die ehrlichere Zahl: Ein Effekt exakt in Hoehe von
+    `gerade_noch` wird nur in der HAELFTE der Faelle auch gefunden.
+
+    `n_tage=None` nimmt die heute vorhandenen Tage. Fuer eine Vorschau
+    auf einen kuenftigen Termin die erwartete Zahl uebergeben.
+    """
+    from . import fleet
+
+    s = store or ShadowStore()
+    if basis_bot is None:
+        basis_bot = referenz_bot(bot_id, s)
+
+    eq = s.table("equity_kurve")
+    erg: dict = {"bot": bot_id, "basis": basis_bot, "streuung": None,
+                 "n_tage": 0, "gerade_noch": None, "mit_80_prozent": None,
+                 "hinweis": ""}
+    if eq.empty:
+        erg["hinweis"] = "keine Equity-Kurve"
+        return erg
+
+    piv = eq.pivot(index="tag", columns="bot_id", values="equity")
+    if bot_id not in piv or basis_bot not in piv:
+        erg["hinweis"] = f"{bot_id} oder {basis_bot} hat keine Kurve"
+        return erg
+
+    d = (piv[bot_id].astype(float).pct_change()
+         - piv[basis_bot].astype(float).pct_change()).dropna()
+    if len(d) < 3:
+        erg["hinweis"] = f"nur {len(d)} Tage - keine Streuungsschaetzung"
+        return erg
+
+    streuung = float(d.std(ddof=1))
+    erg["streuung"] = round(streuung, 6)
+    erg["n_streuung"] = len(d)
+    # Die Streuung wird auf ALLEN Tagen geschaetzt, auch denen in der
+    # Sperrzone: Sie ist eine Eigenschaft des Verfahrens, kein Ergebnis.
+    # Ein Ergebnis waere der Mittelwert - der bleibt aussen vor.
+    n = int(n_tage if n_tage is not None else
+            (len(d) if len(d) < 5 else len(d) - int(len(d) * SPERRZONE_ANTEIL)))
+    erg["n_tage"] = n
+    if n < 2 or streuung <= 0:
+        erg["hinweis"] = ("Streuung 0 - die Bots sind bitgleich, ein "
+                          "Unterschied ist grundsaetzlich nicht messbar")
+        return erg
+
+    schwelle = fleet.schwelle_sigma(s)
+    erg["schwelle"] = schwelle
+    erg["gerade_noch"] = round(schwelle * streuung / math.sqrt(n), 6)
+    erg["mit_80_prozent"] = round(
+        (schwelle + Z_GUETE_80) * streuung / math.sqrt(n), 6)
+    erg["kumuliert_80"] = round(erg["mit_80_prozent"] * n, 6)
+    return erg
 
 
 def referenz_bot(bot_id: str, store: ShadowStore | None = None) -> str:
@@ -558,6 +686,30 @@ def kriterien_text(bot_id: str, basis_bot: str | None = None,
         L.append("  beim Zeitausstieg nach `max_hold_days`.")
     if k["hinweis_min_tage"]:
         L += ["", "  " + k["hinweis_min_tage"]]
+
+    # Trennschaerfe IMMER mit ausgeben - besonders bei "durchgefallen".
+    # Ein Kriterium, das nicht dazusagt, was ueberhaupt nachweisbar war,
+    # laesst "nicht besser" und "nicht zeigbar" gleich aussehen. Das sind
+    # zwei verschiedene Befunde, und nur einer rechtfertigt, eine Idee zu
+    # verwerfen (BEFUNDE §G22).
+    ts = trennschaerfe(k["bot"], k["basis"], store)
+    L += ["", "-" * 78, "  TRENNSCHAERFE - was koennte dieser Vergleich zeigen?"]
+    if ts.get("hinweis"):
+        L.append(f"        {ts['hinweis']}")
+    else:
+        L += [
+            f"        Streuung der Tagesdifferenz : "
+            f"{ts['streuung'] * 100:.3f} %/Tag  (aus {ts['n_streuung']} Tagen)",
+            f"        Auswertbare Tage            : {ts['n_tage']}",
+            f"        Nachweisbar ab              : "
+            f"{ts['mit_80_prozent'] * 100:.3f} %/Tag fuer 80 % Trefferwahrscheinlichkeit",
+            f"                                      "
+            f"(kumuliert {ts['kumuliert_80'] * 100:.1f} % ueber {ts['n_tage']} Tage)",
+            "",
+            "        Liegt der WAHRE Unterschied darunter, faellt Kriterium 1",
+            "        auch dann durch, wenn der Bot besser ist. 'Durchgefallen'",
+            "        heisst dann NICHT WEISBAR, nicht WIDERLEGT.",
+        ]
     return "\n".join(L)
 
 
