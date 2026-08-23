@@ -3281,7 +3281,13 @@ Der Unterschied ist die **Zähleinheit**. Der Flottenvergleich mittelt
 | 250 | +0,031 |
 
 **Gemessen: IC +0,0696 über 13 Tage.** Am 10.10. liegt die Nachweisgrenze
-bei +0,063 — der gemessene Wert liegt **knapp darüber**.
+bei +0,063 — der gemessene Wert liegt knapp darüber.
+
+> **Korrigiert am selben Tag durch §G26.** Diese Rechnung nutzt `t > 2`.
+> Gemessen liefert diese Schwelle aber 11 % Fehlalarm statt 5 %; ehrlich
+> kalibriert sind es **2,57**, und damit steigt die Nachweisgrenze auf
+> **+0,081**. Der gemessene IC liegt dann **darunter**. Die Aussage
+> „wird am 10.10. erstmals entscheidbar" war zu optimistisch.
 
 Damit wird am 10.10. erstmals die Frage entscheidbar, für die der
 Schattenbetrieb überhaupt gebaut wurde (`shadow.py`-Docstring): **„Sortiert
@@ -3307,6 +3313,97 @@ keine dort, wo er Depots vergleicht.
 
 Wer den Bot verbessern will, muss Fragen stellen, die der IC beantworten
 kann — also Fragen an die **Auswahl**, nicht an die **Ausstiegsmechanik**.
+
+
+## G26. Der IC-Kanal geprüft — Richtung stimmt, Schwelle ist zu mild (23.08.2026)
+
+**Anlass:** §G25 hat den IC zum einzigen Kanal mit Trennschärfe erklärt
+und damit zum entscheidenden Instrument für den 10.10. Er war aber nie so
+geprüft worden wie Kriterium 1 in §G22 — eine Lücke genau an der Stelle,
+die zählt.
+
+### Der Aufbau
+
+600 Läufe unter der Null: 130 Symbole, 53 Handelstage, Score **ohne jede**
+Vorhersagekraft. Entscheidend sind zwei Details, die den Unterschied
+zwischen einem gültigen und einem wertlosen Test ausmachen:
+
+* **`fwd_5d` echt überlappend gebildet** — Tag t und t+1 teilen vier
+  ihrer fünf Renditetage. Das ist die Falle aus §G12.
+* **Der Score ist persistent, nicht täglich neu gewürfelt.** Ein erster
+  Entwurf zog jeden Tag unabhängig; dann ist der Tages-IC gar nicht
+  autokorreliert, die Falle entsteht nicht, und der Test misst das
+  Falsche. Er meldete brave 6 % — ein Scheinergebnis.
+
+**Die Persistenz wurde gemessen, nicht geschätzt.** Tag-zu-Tag-Rang-
+korrelation der echten Schatten-Scores: **Median 0,49** (Bereich
+0,09–0,66, 18 Tagespaare). Symbolüberlappung von Tag zu Tag: 33 %. Ein
+zweiter Entwurf mit angenommenen 0,80 überzeichnete die Fehlalarmquote
+deutlich — die Zahlen unten stehen für den gemessenen Wert.
+
+### Was herauskam
+
+| Schwelle | roher t | korrigierter t | Soll |
+|---:|---:|---:|---:|
+| 2,00 | 18,7 % | **11,0 %** | 5,0 % |
+| 2,85 | 6,3 % | **2,2 %** | 0,8 % |
+
+**Die Überlappungskorrektur wirkt** — sie halbiert die Fehlalarmquote
+(18,7 → 11,0 %). Das bestätigt §G12 aus einer unabhängigen Richtung.
+
+**Sie reicht nicht.** 11 % gegen 5 % ist mehr als das Doppelte. §G12 hat
+genau das schon benannt („für die korrigierte Statistik 11 % … ehrliche
+Restunschärfe") — diese Messung bestätigt die Zahl auf den Punkt.
+
+Kalibriert, also die Schwellen, die **wirklich** liefern, was sie
+versprechen:
+
+```
+für  5,0 % Fehlalarm nötig:  |t| > 2,57   (nominal 2,00)
+für  0,8 % Fehlalarm nötig:  |t| > 3,43   (nominal 2,85)
+```
+
+### Die Richtung stimmt einwandfrei
+
+Mit echtem Signal im Score:
+
+| Signalstärke | IC | mittleres t | Vorzeichen positiv | über 2,85 |
+|---|---:|---:|---:|---:|
+| 0,02 | +0,169 | +7,98 | 100 % | 100 % |
+| 0,05 | +0,377 | +13,46 | 100 % | 100 % |
+
+Der Test findet, was da ist, und zeigt es in die richtige Richtung. **Der
+Rechenweg ist nicht defekt** — er ist nur milder, als seine Schwelle
+behauptet.
+
+### Was das für den 10.10. ändert
+
+§G25 hat die Nachweisgrenze mit `t > 2` gerechnet: IC ab **+0,063** bei
+53 Tagen, gegen einen gemessenen IC von **+0,0696** — knapp darüber, also
+gerade noch entscheidbar.
+
+Mit der kalibrierten Schwelle 2,57 statt 2,00 verschiebt sich das:
+
+| | Nachweisgrenze | gemessener IC |
+|---|---:|---:|
+| §G25 (nominal `t > 2`) | +0,063 | +0,070 ✓ knapp darüber |
+| **kalibriert (`t > 2,57`)** | **+0,081** | +0,070 ✗ **darunter** |
+
+**Auch der IC-Kanal ist am 10.10. damit wahrscheinlich nicht
+entscheidbar.** Die Aussage aus §G25 („wird erstmals entscheidbar") war
+zu optimistisch und wird hiermit korrigiert.
+
+Bei 100 Handelstagen läge die kalibrierte Grenze bei +0,062, bei 250 bei
++0,040 — der IC bleibt der Kanal mit der besten Trennschärfe, nur braucht
+er mehr Zeit als §G25 angenommen hat.
+
+### Was NICHT geändert wurde
+
+`fleet.schwelle_sigma()` bleibt unverändert. Sie erfüllt einen anderen
+Zweck — sie fängt die **Mehrfachtestung** ab (§B2), nicht die
+Überlappungs-Restunschärfe. Beide Effekte multiplizieren sich; eine
+Schwelle, die beides zugleich abdecken soll, verwischt die Begründung.
+Wer den IC zitiert, findet die kalibrierte Grenze hier.
 
 
 ## H. Betrieb — was sich bewährt hat
