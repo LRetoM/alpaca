@@ -223,6 +223,32 @@ B11 gilt als **bestanden**, wenn *alle vier* zutreffen:
 4. Die verlängerten Trades sind **nicht** allein durch wenige Ausreißer
    getragen — Median ebenfalls positiv
 
+> **Festlegung vom 23.08.2026: Die Sperrzone gilt für Kriterium 1, nicht
+> für 3 und 4.** Beim Durchrechnen der Kriterien fiel auf, dass der
+> Vertrag dazu schwieg und die Umsetzung asymmetrisch ist:
+> `vergleich_gepaart` (Kriterium 1) verwirft die jüngsten 20 % der
+> Handelstage, die Kriterien 3 und 4 rechnen über **alle** Ausstiege.
+>
+> Das wird **nicht angeglichen**, aber es steht jetzt hier — und zwar
+> *bevor* Daten dazu existieren, denn genau darum geht es:
+>
+> * **Kriterium 3 (Verlängerungsquote) misst einen Mechanismus,** nicht
+>   ein Ergebnis: „greift die Regel überhaupt". Dafür ist mehr Datenbasis
+>   besser, und eine Quote lässt sich nicht zugunsten eines Ergebnisses
+>   erzählen.
+> * **Kriterium 4 (Median positiv) ist ein Ergebniswert** und damit
+>   grundsätzlich das, wogegen die Sperrzone schützt. Es bleibt trotzdem
+>   ungefiltert, weil es kein Schwellenwert-Kriterium ist, sondern eine
+>   Vorzeichenprüfung gegen die Ausreißer-Falle („trägt der Median oder
+>   nur ein Glückstreffer"). Bei einer reinen Vorzeichenfrage kostet die
+>   Sperrzone 20 % der ohnehin knappen Fälle, ohne die Erzählgefahr
+>   nennenswert zu senken.
+>
+> **Der Punkt ist nicht, welche Antwort richtig ist, sondern wann sie
+> fällt.** Am 10.10. wäre dieselbe Frage mit Kenntnis des Ergebnisses zu
+> beantworten — genau der Fehler, gegen den §G10 den Vertrag überhaupt
+> erst geschrieben hat. Deshalb steht sie hier, sechs Wochen vorher.
+
 **Fällt einer der vier durch, bleibt es beim Zeitausstieg nach 5 Tagen.**
 
 **Drei Zustände, nicht zwei.** Jedes Kriterium kann *erfüllt*,

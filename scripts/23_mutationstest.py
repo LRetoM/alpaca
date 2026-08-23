@@ -179,7 +179,10 @@ MUTATIONEN = [
     ),
     Mutation(
         "bars_held wieder aus dem gespeicherten Wert",
-        "src/alpaca_bot/daemon.py",
+        # `_handelstage` heisst seit dem 23.08.2026 `lifecycle.handelstage`
+        # und liegt dort, weil der Intraday-Stop dieselbe Rechnung braucht
+        # (§G21). `daemon` importiert den Namen weiter.
+        "src/alpaca_bot/lifecycle.py",
         "return max(0, len(pd.bdate_range(start.normalize(), ende.normalize())) - 1)",
         "return 0",
         "test_protokoll",
@@ -709,6 +712,31 @@ MUTATIONEN = [
         "der Code in shadow_schritte.py, die Regel bewachte nur noch die "
         "Fassade und meldete weiter gruen. Gefunden hat das kein Test, "
         "sondern dieser Mutationslauf.",
+    ),
+
+    # --- Runde 6, 23.08.2026 (§G21) ---------------------------------------
+    Mutation(
+        "Intraday-Stop schreibt wieder keinen Lebenslauf",
+        "src/alpaca_bot/live.py",
+        "                        from .lifecycle import eintrag_anlegen",
+        "                        from .lifecycle import handelstage as eintrag_anlegen",
+        "test_lebenslauf_abdeckung or test_protokoll",
+        "GENAU der Fund vom 23.08.2026: stop_intraday war der einzige "
+        "Ausstiegsgrund mit 0 % Abdeckung im Lebenslauf. Weil der "
+        "Intraday-Stop bei Einbruechen feuert, fehlten dem Lernbericht "
+        "ausgerechnet die Verlusttrades - er rechnete +3,34 % statt "
+        "+2,94 % und nannte den falschen schlechtesten Ausstiegsgrund.",
+    ),
+    Mutation(
+        "Lebenslauf-Waechter zaehlt wieder nur Gesamtzahlen",
+        "src/alpaca_bot/data_integrity.py",
+        '    laufend = fehlend[fehlend["tag"] > juengster_eintrag]',
+        "    laufend = fehlend.iloc[:0]",
+        "test_lebenslauf_abdeckung",
+        "Zwei fehlende von 58 sehen nach Zeitversatz aus. Erst die Frage "
+        "'fehlt ein Eintrag, der NEUER ist als der juengste vorhandene?' "
+        "zeigt einen laufenden Ausfall - und trennt ihn von der nicht "
+        "nachtragbaren Altlast, die sonst dauerhaft ROT leuchten wuerde.",
     ),
 ]
 

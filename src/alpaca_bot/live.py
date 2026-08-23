@@ -27,6 +27,11 @@ import pandas as pd
 from . import account, compliance, data, risiko, trading
 from .engine import Decision, Engine, EngineConfig, MarketSnapshot, PortfolioState, Position
 from .journal import Journal
+# Dieselbe Haltedauer-Rechnung wie im Daemon. Sie liegt seit dem
+# 23.08.2026 in `lifecycle`, weil der Intraday-Stop sie ebenfalls braucht
+# und `live` nicht aus `daemon` importieren darf - `daemon` importiert
+# `live` (BEFUNDE §G21).
+from .lifecycle import handelstage as _handelstage
 
 
 @dataclass
@@ -662,11 +667,33 @@ def pruefe_stops_intraday(
                           referenz_quelle=ref.quelle)
                 if not dry_run:
                     meta = stored.get(sym, {})
+                    exit_ts = pd.Timestamp.now(tz="UTC")
+                    tage = _handelstage(meta.get("entry_date"), exit_ts)
                     store.record_exit(
                         sym, exit_price=ref.preis, exit_reason="stop_intraday",
                         entry_price=meta.get("entry_price"), return_pct=gewinn,
-                        bars_held=meta.get("bars_held"),
+                        bars_held=tage, when=exit_ts,
                     )
+                    # Lebenslauf AUCH hier - bis zum 23.08.2026 fehlte er.
+                    # `_record_lifecycle` haengt am normalen `sell`-Pfad im
+                    # Daemon; dieser Zweig schrieb nur nach `state.exits`.
+                    # Folge: `stop_intraday` war der einzige Ausstiegsgrund
+                    # mit 0 % Abdeckung im Lebenslauf - und weil der
+                    # Intraday-Stop per Konstruktion bei Einbruechen feuert,
+                    # fehlten dem Lernbericht ausgerechnet die Verlusttrades
+                    # (BEFUNDE §G21). Ein Ausfall hier darf den Verkauf nicht
+                    # rueckgaengig machen, deshalb gefangen und gemeldet.
+                    try:
+                        from .lifecycle import eintrag_anlegen
+
+                        eintrag_anlegen(
+                            symbol=sym, meta=meta, exit_price=ref.preis,
+                            exit_reason="stop_intraday", return_pct=gewinn,
+                            exit_ts=exit_ts, bars_held=tage,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        run.error(f"Lebenslauf {sym} nicht erfasst: "
+                                  f"{type(e).__name__}: {e}")
                     store.drop_position(sym)
                 verkauft.append(sym)
             except Exception as e:  # noqa: BLE001

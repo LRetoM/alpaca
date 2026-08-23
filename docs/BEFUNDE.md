@@ -2699,6 +2699,113 @@ Regression: `scripts/29_umzug_pruefen.py` (bleibt als Werkzeug für den
 nächsten Umzug), eine geänderte Mutation — **65 von 65 gefangen**.
 
 
+## G21. Der Intraday-Stop protokollierte keinen Lebenslauf (23.08.2026)
+
+**Anlass:** die Frage „reicht die Basis, um am 10.10.2026 einfach
+auszuwerten?". Beim Durchrechnen der vier Kriterien geprüft, was die
+Auswertung an diesem Tag sonst noch abfragen würde — und dabei die
+Auffälligkeit „58 Ausstiege, 56 Lebenslauf-Einträge" aufgelöst, die seit
+der Eingangsprüfung dieser Runde offen stand.
+
+### Der Fund
+
+`daemon._record_lifecycle` hängt am normalen `sell`-Pfad. Der am
+15.08.2026 ergänzte **Intraday-Stop** (`live.pruefe_stops_intraday`)
+schreibt seinen Ausstieg direkt über `state.record_exit` und ging daran
+vorbei.
+
+| Ausstiegsgrund | im Lebenslauf | mittlere Rendite |
+|---|---:|---:|
+| `zeitausstieg` | 39/39 | +2,5 % |
+| `these_traegt_nicht_mehr` | 11/11 | +5,1 % |
+| `gewinnziel_erreicht` | 4/4 | +11,1 % |
+| `stop_ausgeloest` | 2/2 | −5,5 % |
+| **`stop_intraday`** | **0/2** | **−8,3 %** |
+
+**Die Richtung wiegt schwerer als die Größe.** Der Intraday-Stop feuert
+per Konstruktion bei scharfen Einbrüchen — er trifft fast nur
+Verlusttrades. Folgen im Lernbericht:
+
+* Mittlere Rendite **+3,34 % statt +2,94 %** — systematisch zu gut.
+* Als „schlechtester Ausstiegsgrund" wurde `stop_ausgeloest` (−5,5 %)
+  genannt. Der tatsächlich schlechteste (`stop_intraday`, −8,3 %) tauchte
+  gar nicht erst auf.
+
+Dass es heute nur 0,4 Prozentpunkte sind, liegt allein an n=2. Der Fehler
+wächst mit jedem Intraday-Stop und **immer in dieselbe Richtung**.
+
+### Warum der Wächter ihn nicht fand
+
+`check_lifecycle_coverage` verglich nur Gesamtzahlen:
+
+```python
+if len(exits) > len(trades) + 1:      # 58 > 56 + 1  ->  Befund
+```
+
+Der Befund kam also — und war wertlos. „Zwei fehlende von 58" liest sich
+wie Zeitversatz, und die Toleranz `+1` hätte einen einzelnen fehlenden
+Eintrag ganz verschluckt. Die Wahrheit stand in der Aufschlüsselung: Ein
+Grund mit **0 %** neben vier mit 100 % ist kein Zeitversatz, sondern ein
+ausgefallener Schreibpfad. Eine Gesamtzahl kann das nicht zeigen.
+
+### Behoben
+
+* **`lifecycle.eintrag_anlegen()`** — ein Ort für alle Ausstiege. Beide
+  Pfade rufen ihn; `daemon._record_lifecycle` delegiert.
+* **`lifecycle.handelstage()`** — die Haltedauer-Rechnung ist aus
+  `daemon.py` dorthin gewandert, weil `live` sie ebenfalls braucht und
+  nicht aus `daemon` importieren darf (`daemon` importiert `live`).
+  Nebeneffekt: `record_exit` bekommt jetzt denselben Wert wie der
+  Lebenslauf statt `meta["bars_held"]`, das seit jeher auf 0 steht.
+* **Der Wächter fragt anders.** Nicht mehr „wie viele fehlen", sondern
+  **„fehlt ein Eintrag, der NEUER ist als der jüngste vorhandene?"**
+
+### Ein Fehler in der Korrektur selbst — vom Test gefangen
+
+Beim Einbau habe ich `_handelstage` in `live.py` benutzt, ohne es dort zu
+importieren. Die Folge wäre **schlimmer als der ursprüngliche Fehler**
+gewesen: Die Zeile steht **vor** `store.record_exit`, der `except`-Block
+hätte sie gefangen — und damit hätte der Intraday-Stop verkauft, aber
+weder Ausstieg noch Lebenslauf noch `drop_position` protokolliert.
+
+Gefunden hat es der neue Test, der den Pfad mit `dry_run=False`
+durchspielt. **Der bestehende `test_ausfuehrung.TestIntradayStop` fuhr
+immer mit `dry_run=True`** — der Schreibzweig liegt aber hinter
+`if not dry_run`. Es gab also Tests des Intraday-Stops, nur keinen, der
+bis zum Schreiben kam. Genau dort saß die Lücke.
+
+### Warum das Kriterium des Wächters zweimal geändert wurde
+
+Der erste Entwurf fragte „fehlt der **jüngste** Ausstieg dieses Grundes?".
+Richtig — und nicht abstellbar: Die zwei Zeilen vom 19./20.08. lassen
+sich **nicht nachtragen** (`position_meta` wird beim Verkauf gelöscht,
+der Einstiegsscore ist damit weg), und der nächste Intraday-Stop kann
+Wochen auf sich warten lassen. Der Health-Check stand daraufhin **ROT**,
+und `BETRIEBSPLAN` §8 macht aus zweimal ROT „Handel aus".
+
+Eine Warnung, die sich nicht abstellen lässt, wird weggeklickt (§G18
+Fund 4). Das tragfähige Kriterium vergleicht deshalb mit dem jüngsten
+**vorhandenen** Eintrag: Fehlt etwas Neueres, hat der Lebenslauf seither
+geschrieben — nur für diesen Ausstieg nicht, also ein laufender Ausfall.
+Liegt alles Fehlende davor, ist es Vergangenheit und wird benannt statt
+gemeldet. Kein Datum im Code, keine Ausnahmeliste; die Grenze ergibt sich
+aus den Daten und wandert mit.
+
+**Die zwei Zeilen bleiben unrepariert.** Eine erfundene Zeile wäre
+schlimmer als eine fehlende (§G13 Fund 2). Der Befund nennt sie beim
+Namen, damit niemand sie für vorhanden hält.
+
+### Was das für den 10.10. bedeutet
+
+**Nichts für die Abnahme von B11** — die rechnet auf `shadow.sqlite`, und
+der Lebenslauf ist eine Live-Tabelle. Wohl aber für jede Abfrage über
+`15_lernbericht.py` oder die Nachbetrachtung: Sie war bis heute
+systematisch zu optimistisch.
+
+Regression: `tests/test_lebenslauf_abdeckung.py` (13 Tests), zwei neue
+Mutationen — **67 von 67 gefangen**.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

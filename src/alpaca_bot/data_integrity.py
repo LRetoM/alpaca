@@ -314,7 +314,26 @@ def check_extreme_slippage(j: Journal, report: IntegrityReport,
 
 
 def check_lifecycle_coverage(report: IntegrityReport) -> None:
-    """Hat jeder Verkauf einen Lebenslauf-Eintrag (fuer den Lernbericht)?"""
+    """Hat jeder Verkauf einen Lebenslauf-Eintrag - und zwar JEDE Ausstiegsart?
+
+    **Warum die Zaehlung allein nicht reichte (23.08.2026, §G21).** Hier
+    stand vorher nur `len(exits) > len(trades) + 1`. Das meldete am
+    23.08.2026 korrekt "58 gegen 56" - und war als Befund wertlos: Zwei
+    fehlende von 58 sieht nach Zeitversatz aus, und mit der Toleranz von
+    +1 verschwindet es bei einem einzigen fehlenden Eintrag ganz.
+
+    Die Wahrheit stand in der Aufschluesselung. `stop_intraday` war der
+    EINZIGE Ausstiegsgrund mit **0 % Abdeckung** - alle anderen lagen bei
+    100 %. Eine Gesamtzahl kann so etwas nicht zeigen; ein Anteil je
+    Grund zeigt es sofort.
+
+    Und die Richtung war teuer: Der Intraday-Stop feuert per Konstruktion
+    bei scharfen Einbruechen, trifft also fast nur Verlusttrades. Der
+    Lernbericht rechnete dadurch systematisch zu gut.
+
+    Ein Grund mit 0 % ist deshalb ein `fehler`, keine Auffaelligkeit -
+    das ist ein ausgefallener Schreibpfad, kein Zeitversatz.
+    """
     report.checks.append("Jeder Ausstieg hat einen Lebenslauf-Eintrag")
     from .lifecycle import Lifecycle
     from .state import Store
@@ -323,12 +342,75 @@ def check_lifecycle_coverage(report: IntegrityReport) -> None:
     trades = Lifecycle().table()
     report.stats["Ausstiege gesamt"] = len(exits)
     report.stats["Lebenslauf-Eintraege"] = len(trades)
-    if len(exits) > len(trades) + 1:  # etwas Toleranz fuer Timing
+    if exits.empty:
+        return
+
+    # Zuordnung ueber Symbol + Ausstiegstag: Die Zeitstempel der beiden
+    # Tabellen entstehen Sekundenbruchteile auseinander und sind deshalb
+    # nicht gleich.
+    im_lebenslauf = set()
+    if not trades.empty:
+        im_lebenslauf = set(zip(trades["symbol"], trades["exit_date"].str[:10]))
+    getroffen = [(s, str(d)[:10]) in im_lebenslauf
+                 for s, d in zip(exits["symbol"], exits["exit_date"])]
+    fehlend = exits[[not g for g in getroffen]]
+    if fehlend.empty:
+        return
+
+    # **Die entscheidende Unterscheidung: laeuft der Schreibpfad JETZT
+    # noch vorbei - oder ist das eine Altlast?**
+    #
+    # Ein erster Entwurf am 23.08.2026 fragte "fehlt der juengste Ausstieg
+    # dieses Grundes?". Das meldete ROT fuer die zwei
+    # `stop_intraday`-Zeilen vom 19./20.08. - richtig, aber nicht
+    # abstellbar: Nachtragen geht nicht (`position_meta` ist beim Verkauf
+    # geloescht, der Einstiegsscore damit weg), und der naechste
+    # Intraday-Stop kann Wochen auf sich warten lassen. Der Health-Check
+    # haette bis dahin rot gestanden, und BETRIEBSPLAN §8 macht aus
+    # zweimal ROT "Handel aus". Eine Warnung, die sich nicht abstellen
+    # laesst, wird weggeklickt (§G18 Fund 4).
+    #
+    # Das Kriterium ohne dieses Problem: **Fehlt ein Eintrag, der NEUER
+    # ist als der juengste vorhandene?** Dann hat der Lebenslauf seither
+    # geschrieben - nur fuer diesen Ausstieg nicht. Das ist ein laufender
+    # Ausfall. Liegt alles Fehlende davor, ist es Vergangenheit.
+    #
+    # Kein Datum im Code, keine Ausnahmeliste: Die Grenze ergibt sich aus
+    # den Daten selbst und wandert mit.
+    juengster_eintrag = (str(trades["exit_date"].max())[:10]
+                         if not trades.empty else "")
+    fehlend = fehlend.copy()
+    fehlend["tag"] = fehlend["exit_date"].astype(str).str[:10]
+    laufend = fehlend[fehlend["tag"] > juengster_eintrag]
+    altlast = fehlend[fehlend["tag"] <= juengster_eintrag]
+
+    for grund, g in laufend.groupby(laufend["exit_reason"].fillna("unbekannt")):
         report.add(
-            "auffaellig", "Lebenslauf unvollstaendig",
-            f"{len(exits)} Ausstiege protokolliert, aber nur {len(trades)} "
-            "Lebenslauf-Eintraege - manche Verkaeufe liefern keine Daten "
-            "fuer den Lernbericht.",
+            "fehler", f"Ausstiegsgrund '{grund}' schreibt keinen Lebenslauf",
+            f"{len(g)} '{grund}'-Ausstieg(e) NACH dem juengsten vorhandenen "
+            f"Lebenslauf-Eintrag ({juengster_eintrag}) haben keinen - der "
+            f"Lebenslauf hat seither also geschrieben, nur fuer diesen Grund "
+            f"nicht (mittlere Rendite "
+            f"{float(g['return_pct'].mean() or 0):+.2%}). Das ist kein "
+            f"Zeitversatz, sondern ein Schreibpfad, der an "
+            f"`lifecycle.eintrag_anlegen` vorbeilaeuft. Solange er fehlt, "
+            f"rechnet der Lernbericht ueber eine Auswahl statt ueber alle "
+            f"Trades.",
+        )
+
+    if not altlast.empty:
+        verteilung = ", ".join(
+            f"{g} {int(n)}x" for g, n in
+            altlast["exit_reason"].fillna("unbekannt").value_counts().items())
+        namen = ", ".join(f"{r.symbol} ({r.tag})" for r in altlast.itertuples())
+        report.add(
+            "auffaellig", "Lebenslauf unvollstaendig (Altlast)",
+            f"{len(altlast)} Ausstieg(e) aelter als der juengste "
+            f"Lebenslauf-Eintrag haben keinen: {namen} ({verteilung}). "
+            f"Nicht nachtragbar - `position_meta` ist beim Verkauf geloescht, "
+            f"der Einstiegsscore damit weg. Eine erfundene Zeile waere "
+            f"schlimmer als eine fehlende (§G13 Fund 2). Wirkung: "
+            f"Auswertungen ueber den Lebenslauf rechnen ohne diese Trades.",
         )
 
 

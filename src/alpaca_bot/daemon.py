@@ -41,27 +41,12 @@ from .journal import Journal
 from .state import Store
 
 
-def _handelstage(entry_date, exit_ts) -> int | None:
-    """Haltedauer in HANDELSTAGEN - dieselbe Rechnung wie build_portfolio.
-
-    Kalendertage waeren hier falsch: Eine Position von Freitag bis Montag
-    hat drei Kalendertage, aber nur einen Handelstag gelebt - und der
-    Zeitausstieg (`max_hold_days`) rechnet in Handelstagen. Zwei
-    verschiedene Zaehlweisen im selben System machen jede Auswertung nach
-    Haltedauer unvergleichbar.
-    """
-    if not entry_date:
-        return None
-    try:
-        start = pd.Timestamp(entry_date)
-        if start.tz is None:
-            start = start.tz_localize("UTC")
-        ende = pd.Timestamp(exit_ts)
-        if ende.tz is None:
-            ende = ende.tz_localize("UTC")
-        return max(0, len(pd.bdate_range(start.normalize(), ende.normalize())) - 1)
-    except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
-        return None
+# `_handelstage` ist am 23.08.2026 nach `lifecycle.py` gewandert
+# (BEFUNDE §G21): Der Intraday-Stop in `live.py` braucht dieselbe
+# Rechnung, und `live` darf `daemon` nicht importieren - `daemon`
+# importiert `live`. Der Name bleibt hier als Import erhalten, damit
+# bestehende Aufrufe unveraendert weiterlaufen.
+from .lifecycle import handelstage as _handelstage
 
 
 @dataclass
@@ -185,40 +170,25 @@ class Daemon:
     def _record_lifecycle(self, decision, meta: dict) -> None:
         """Legt den Lebenslauf eines geschlossenen Trades an.
 
-        MAE, MFE und der Nachlauf werden hier noch nicht gefuellt - der
-        Kursverlauf NACH dem Ausstieg existiert schlicht noch nicht.
-        Das ergaenzt `_analyse_closed_trades()` in den Folgetagen.
+        Die eigentliche Arbeit macht seit dem 23.08.2026
+        `lifecycle.eintrag_anlegen` - dort steht auch, warum es eine
+        gemeinsame Funktion sein MUSS: Der Intraday-Stop in `live.py`
+        ging an dieser Methode vorbei, und damit fehlten dem Lernbericht
+        genau die Verlusttrades (BEFUNDE §G21).
         """
         try:
-            import uuid
+            from .lifecycle import eintrag_anlegen
 
-            from .lifecycle import Lifecycle
-
-            entry = meta.get("entry_price")
             exit_ts = pd.Timestamp.now(tz="UTC")
-            Lifecycle().record({
-                "trade_id": uuid.uuid4().hex,
-                "symbol": decision.symbol,
-                "entry_date": str(meta.get("entry_date") or ""),
-                "entry_price": entry,
-                "entry_score": meta.get("entry_score"),
-                "entry_reasons": meta.get("reasons"),
-                "planned_stop": meta.get("stop_price"),
-                "planned_target": meta.get("target_price"),
-                "exit_date": exit_ts.isoformat(),
-                "exit_price": decision.price,
-                "exit_reason": str(decision.reasons.get("ausstiegsgrund", "")),
-                "return_pct": decision.reasons.get("gewinn_pct"),
-                # Aus den DATEN rechnen, nicht aus `meta` uebernehmen:
-                # `position_meta.bars_held` wird beim Anlegen auf 0 gesetzt
-                # und NIE erhoeht - die Engine berechnet den Wert zur
-                # Laufzeit frisch aus `entry_date` (live.build_portfolio),
-                # schreibt ihn aber nicht zurueck. Wer `meta` vertraut,
-                # schreibt fuer JEDEN Trade eine 0 ins Protokoll und macht
-                # damit jede Auswertung nach Haltedauer unmoeglich
-                # (bestaetigt: 36 von 36 Trades hatten bars_held = 0).
-                "bars_held": _handelstage(meta.get("entry_date"), exit_ts),
-            })
+            eintrag_anlegen(
+                symbol=decision.symbol,
+                meta=meta,
+                exit_price=decision.price,
+                exit_reason=str(decision.reasons.get("ausstiegsgrund", "")),
+                return_pct=decision.reasons.get("gewinn_pct"),
+                exit_ts=exit_ts,
+                bars_held=_handelstage(meta.get("entry_date"), exit_ts),
+            )
         except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
             print(f"      Lebenslauf nicht erfasst: {type(e).__name__}: {e}")
 
