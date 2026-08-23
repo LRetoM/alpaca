@@ -491,6 +491,35 @@ def reconcile_fills(lookback_hours: int = 48) -> int:
         for _, r in broker.iterrows()
         if r.get("filled_avg_price")
     }
+    # Der ENDSTATUS des Brokers, nicht der bei Abgabe (BEFUNDE §G19
+    # Fund 5). `orders.status` trug bis zum 23.08.2026 in 178 von 183
+    # echten Zeilen `pending_new` - den Wert, den `trading.market_order`
+    # im Moment des Absendens zurueckgibt. Am Journal war damit nicht
+    # ablesbar, ob eine Order ueberhaupt ausgefuehrt wurde; die Spalte
+    # sah gefuellt aus und trug keine Information. Der Broker liefert den
+    # richtigen Wert hier laengst mit - er wurde nur nicht geschrieben.
+    status_endgueltig = {
+        str(r["id"]): str(r["status"])
+        for _, r in broker.iterrows()
+        if r.get("status")
+    }
+    # Die Broker-Zeile selbst, als das, was `orders.raw` immer sein
+    # sollte: die Aufzeichnung der Gegenseite. Bis zum 23.08.2026 stand
+    # dort in 183 von 183 echten Zeilen der String 'null' - `run.order`
+    # nimmt ein `raw`-Argument entgegen, und kein einziger Aufrufer hat
+    # je eines uebergeben (BEFUNDE §G19 Fund 5). Beim Absenden ist auch
+    # nichts Sinnvolles da; die interessanten Felder (`filled_qty`,
+    # Endstatus) entstehen erst spaeter. Genau hier ist der Moment.
+    import json as _json
+
+    roh = {
+        str(r["id"]): _json.dumps(
+            {k: (str(v) if k == "submitted_at" else v)
+             for k, v in r.to_dict().items()},
+            default=str, ensure_ascii=False,
+        )
+        for _, r in broker.iterrows()
+    }
 
     updated = 0
     with j._conn() as c:
@@ -512,10 +541,20 @@ def reconcile_fills(lookback_hours: int = 48) -> int:
                 if dp > 0:
                     drift = sign * (price - dp) / dp * 10_000
 
+            # `COALESCE` statt blindem Setzen: Liefert der Broker keinen
+            # Status oder keine Rohzeile mit, bleibt der bisherige Wert
+            # stehen. Ein Fuellpreis ohne Status ist besser als ein
+            # Fuellpreis mit geleertem Status - eine Korrektur darf nie
+            # weniger Information hinterlassen als sie vorfand.
+            oid = str(o["order_id"])
             c.execute(
                 "UPDATE orders SET fill_price = ?, slippage_bps = ?,"
-                " decision_drift_bps = ? WHERE order_id = ?",
-                (price, slip, drift, o["order_id"]),
+                " decision_drift_bps = ?,"
+                " status = COALESCE(?, status),"
+                " raw = COALESCE(?, raw)"
+                " WHERE order_id = ?",
+                (price, slip, drift, status_endgueltig.get(oid),
+                 roh.get(oid), o["order_id"]),
             )
             updated += 1
     return updated

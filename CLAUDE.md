@@ -58,8 +58,14 @@ Neue Ideen laufen als eigener Bot in der Flotte (`fleet.anmelden`) mit
 ## Sicherheitsgrundsätze
 
 - `dry_run=True` ist der Standard; echtes Senden muss explizit sein.
-- Der Schattenbetrieb importiert `trading.py` bewusst **nicht** — er
-  *kann* keine Order senden, nicht nur „darf nicht".
+- Der Schattenbetrieb importiert `trading.py` bewusst **nicht**. Seit
+  23.08.2026 ist das eine geprüfte Regel der Projektverfassung
+  (`selfcheck.check_schatten_handelt_nicht`, §G19) und keine Behauptung
+  mehr. **Genauer Geltungsbereich:** Die Prüfung deckt den Quelltext ab.
+  Zur Laufzeit ist `alpaca_bot.trading` sehr wohl geladen — das
+  Paket-`__init__.py` importiert es. „Kann nicht" gilt also für den
+  Quelltext, für den Prozess gilt „tut nicht" plus `dry_run=True` als
+  Standard und `_check_risk()` vor jedem Senden.
 - Datenbanken und Logs gehören **nicht** unter `~/Documents` (macOS-TCC
   blockiert Hintergrunddienste dort).
 - Jede neue externe API zuerst in `ratelimit.QUOTAS` eintragen.

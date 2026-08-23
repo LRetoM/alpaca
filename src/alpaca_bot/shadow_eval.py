@@ -360,7 +360,44 @@ VERLAENGERUNG_MAX = 0.60
 KRITERIUM_MIN_TAGE = 20
 
 
-def kriterien_pruefen(bot_id: str, basis_bot: str = "B00_basis",
+def referenz_bot(bot_id: str, store: ShadowStore | None = None) -> str:
+    """Die bei der ANMELDUNG hinterlegte Vergleichsbasis eines Bots.
+
+    **Auslöser (23.08.2026, BEFUNDE §G19 Fund 1).** Diese Funktion gibt es,
+    weil dieselbe Frage vier Antworten hatte:
+
+        BETRIEBSPLAN §3.3 (Vertragstext)  ->  B00_basis
+        Flottenregistrierung in der DB    ->  B09_nachkauf
+        `21_fleet.py --basis` (Standard)  ->  B00_basis
+        `fokus.offene_fragen`             ->  B09_nachkauf
+
+    Gemessen an B11_dyn_ausstieg_live am 23.08.2026: t = 0,99 gegen B00,
+    t = 1,24 gegen B09. Es ist also KEINE Formalie, welche Referenz das
+    Abnahmekommando nimmt - beide Zahlen tragen denselben Namen und
+    entscheiden ueber denselben Vertrag.
+
+    **Warum die Registrierung gewinnt und nicht der Dokumenttext.**
+    BEFUNDE §G6 hat `B00_basis` am 16.08.2026 als Live-Referenz
+    widerlegt: Der Live-Bot laeuft seit dem 30.07.2026 mit
+    `deploy_to_target=True` und `allow_topup=True`, `B00_basis` steht bei
+    `False`/`False`. `B11_dyn_ausstieg_live` wurde daraufhin eigens gegen
+    `B09_nachkauf` angemeldet - genau deshalb traegt er den Zusatz "gegen
+    echte Live-Basis" im Namen. Eine Registrierung ist unveraenderlich;
+    ein Dokumentsatz ist es nicht. Maszgeblich ist deshalb, was bei der
+    Anmeldung festgelegt wurde, nie eine spaeter abgeschriebene Zahl -
+    dasselbe Prinzip, das BETRIEBSPLAN §3.2 fuer `schwelle_sigma()`
+    aufstellt.
+
+    Faellt auf `B00_basis` zurueck, wenn ein Bot ohne `basis_bot`
+    registriert ist (`B00_basis` selbst ist der einzige solche Fall).
+    """
+    from . import fleet
+
+    b = fleet.bot(bot_id, store or ShadowStore())
+    return (b.basis_bot if b and b.basis_bot else "B00_basis")
+
+
+def kriterien_pruefen(bot_id: str, basis_bot: str | None = None,
                       store: ShadowStore | None = None) -> dict:
     """Prueft die vier vorab festgelegten Kriterien aus BETRIEBSPLAN §3.3.
 
@@ -370,6 +407,14 @@ def kriterien_pruefen(bot_id: str, basis_bot: str = "B00_basis",
     Hinweis, kein Veto. Ohne diese Trennung waere der Termin nicht
     einhaltbar: 60 nutzbare Tage erreicht ein am 18.08. gestarteter Bot
     erst Ende November.
+
+    `basis_bot=None` (Standard) nimmt die bei der Anmeldung hinterlegte
+    Referenz (`referenz_bot`). Bis zum 23.08.2026 stand hier fest
+    `"B00_basis"` - eine hartkodierte Vorgabe, die der Registrierung von
+    B11 widersprach und damit den Entscheidungsvertrag auf eine bereits
+    widerlegte Referenz stellte (BEFUNDE §G19 Fund 1). Ein ausdruecklich
+    uebergebener Wert gewinnt weiterhin, damit sich eine Gegenprobe
+    ("was saehe man gegen B00?") von Hand rechnen laesst.
 
     Ein Kriterium hat drei moegliche Zustaende, nicht zwei:
 
@@ -394,6 +439,8 @@ def kriterien_pruefen(bot_id: str, basis_bot: str = "B00_basis",
     from . import fleet
 
     s = store or ShadowStore()
+    if basis_bot is None:
+        basis_bot = referenz_bot(bot_id, s)
     erg: dict = {"bot": bot_id, "basis": basis_bot}
 
     v = vergleich_gepaart(bot_id, basis_bot, s, schreiben=False)
@@ -468,13 +515,27 @@ def kriterien_pruefen(bot_id: str, basis_bot: str = "B00_basis",
     return erg
 
 
-def kriterien_text(bot_id: str, basis_bot: str = "B00_basis",
+def kriterien_text(bot_id: str, basis_bot: str | None = None,
                    store: ShadowStore | None = None) -> str:
-    """Die vier Kriterien als lesbare Abnahmeliste."""
+    """Die vier Kriterien als lesbare Abnahmeliste.
+
+    `basis_bot=None` nimmt die registrierte Referenz - siehe
+    `referenz_bot` fuer den Grund (BEFUNDE §G19 Fund 1).
+    """
     k = kriterien_pruefen(bot_id, basis_bot, store)
     zeichen = {True: "ERFUELLT   ", False: "DURCHGEFALLEN", None: "offen      "}
+    # Die Herkunft der Referenz steht im Kopf, nicht nur ihr Name. Vom
+    # 16.08. bis 23.08.2026 nannten Vertragstext und Abnahmekommando
+    # verschiedene Bots, ohne dass die Ausgabe das verraten haette
+    # (BEFUNDE §G19 Fund 1). Wer die Zahl zitiert, sieht jetzt mit,
+    # woher sie kommt.
+    registriert = referenz_bot(k["bot"], store)
+    herkunft = ("registrierte Basis dieses Bots"
+                if k["basis"] == registriert
+                else f"VON HAND GESETZT - registriert ist {registriert}")
     L = ["=" * 78,
          f"  KRITERIEN AUS BETRIEBSPLAN §3.3: {k['bot']} gegen {k['basis']}",
+         f"  Referenz: {herkunft}",
          "=" * 78, ""]
     titel = {
         "1_t_ueber_schwelle": "1. t ueber Zufallsschwelle",

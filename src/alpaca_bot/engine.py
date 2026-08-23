@@ -421,7 +421,7 @@ class EngineConfig:
 
     @classmethod
     def for_reversal(cls, **overrides) -> EngineConfig:
-        """Voreinstellungen fuer die Kurzfrist-Umkehr.
+        """Voreinstellungen fuer die Kurzfrist-Umkehr - der GELTENDE Stand.
 
         Die Haltedauer MUSS zum Horizont passen, auf dem der Effekt
         gemessen wurde (3-5 Tage). Genau dieser Fehler hat den ersten
@@ -431,6 +431,71 @@ class EngineConfig:
         Enge Ziele und Stops, kurze Haltedauer, hoher Umschlag - dafuer
         muss der Vorsprung je Trade die Kosten deutlich uebersteigen.
         Ob er das tut, entscheidet die Simulation, nicht die Hoffnung.
+
+        ------------------------------------------------------------------
+        MESSSTAND: was ist an diesen Werten geprueft? (Stand 23.08.2026)
+        ------------------------------------------------------------------
+        Diese Tabelle beantwortet die Frage, die sich in ein paar
+        Generationen zwangslaeufig wieder stellt: *"Ist das der beste Wert
+        oder nur der erste, den jemand hingeschrieben hat?"* Sie nennt je
+        Achse den Flottenbot, der die Alternative geprueft hat, und das
+        Ergebnis. Kein Eintrag = nie gegengemessen.
+
+          Wert                       geprueft durch     Ergebnis
+          -------------------------  -----------------  --------------------
+          min_score=0.35             B05 (-> 0.50)      wirkungslos: band nie,
+                                                        alle Kaeufe >= 0.678
+                                     B12 (-> 0.80)      LAEUFT seit 21.08.,
+                                                        filtert 21,6 % (kalibriert
+                                                        am Median 0,97 der
+                                                        echten Kaeufe)
+          stop_atr=2.0               B01 (-> 1.5)       wirkungslos, stillgelegt
+                                     B02 (-> 3.0)       wirkungslos, stillgelegt
+                                                        (in 14 Tagen kein
+                                                        einziger Stop ausgeloest)
+          target_atr=2.0             B03 (-> 3.0)       wirkungslos, stillgelegt -
+                                                        `exit_score` feuert am
+                                                        selben Tag zum selben Kurs
+          max_hold_days=5            B04 (-> 10)        laeuft, unter der Schwelle
+                                     Historienlauf      marktbereinigt NEGATIV auf
+                                                        allen Horizonten (§G11)
+          zeitausstieg_dynamisch=F   B11                LAEUFT, Termin 10.10.2026
+                                                        (BETRIEBSPLAN §3.3)
+          max_positions=15           B07 (-> 25)        laeuft, Tendenz NEGATIV
+          deploy_to_target=F*        B08                laeuft, unter der Schwelle
+          allow_topup=F*             B09                misst NICHTS - bitgleich
+                                                        mit B08 (§G16 Fund 1)
+          Regimefilter an            B06                im Bullenmarkt wirkungslos,
+                                                        wartet auf Regimewechsel
+          reenter_cooldown_days=3    --                 NIE gegengemessen; Kosten
+                                                        beziffert in §F
+          exit_score=0.10            --                 NIE gegengemessen, obwohl
+                                                        §E ihn als den Wert
+                                                        ausweist, der `target_atr`
+                                                        aushebelt
+          trail_after_atr=99.0       --                 NIE gegengemessen
+          min_dollar_volume=1e6      --                 Liquiditaetsgrenze, keine
+                                                        Ertragsachse
+          min_price=3.0              --                 dito
+
+        (*) Der LIVE-Bot laeuft seit dem 30.07.2026 mit
+        `deploy_to_target=True` und `allow_topup=True` - er setzt sie ueber
+        `scripts/12_daemon.py`. Die Vorgabe hier ist bewusst `False`
+        geblieben, weil `B00_basis` sie traegt. Genau diese Luecke war
+        BEFUNDE §G6: "B00_basis entspricht dem Live-Bot" stimmte danach
+        nie wieder. Wer die Live-Konfiguration braucht, nimmt
+        `B09_nachkauf`, nicht diese Vorgaben.
+
+        **Wie diese Tabelle aktuell bleibt.** Sie wird bei jeder
+        Stilllegung und jeder Anmeldung mitgezogen. Die laufenden t-Werte
+        stehen bewusst NICHT hier - sie aendern sich taeglich, und eine
+        abgeschriebene Zahl ist binnen einer Woche falsch (BEFUNDE §G19
+        Fund 2). Abrufen mit `python scripts/27_status.py`.
+
+        **Was "kein Eintrag" bedeutet.** Nicht "gut", sondern
+        "ungemessen". Drei Achsen tragen die Strategie mit und wurden nie
+        gegengeprueft - `exit_score` ist die auffaelligste, weil §E ihn
+        als den Wert ausweist, der `target_atr` wirkungslos macht.
         """
         defaults = dict(
             strategy="reversal",

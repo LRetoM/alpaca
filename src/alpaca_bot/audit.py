@@ -115,9 +115,49 @@ def _run_configs(j: Journal) -> dict[str, dict]:
     return out
 
 
+def _grund(roh, schluessel):
+    """Ein einzelnes Feld aus der JSON-Begruendung einer Entscheidung.
+
+    Defektes JSON gibt `None` zurueck statt zu werfen: Der Regelabgleich
+    darf an einer kaputten Zeile nicht abbrechen, sonst bleiben alle
+    folgenden Zeilen ungeprueft - der Ausfall waere groesser als der
+    Defekt. Ein `None` fuehrt beim Aufrufer zu einem eigenen Befund,
+    verschwindet also nicht still.
+    """
+    if not roh:
+        return None
+    try:
+        return json.loads(roh).get(schluessel)
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return None
+
+
 def check_decisions(j: Journal, report: AuditReport, days: int = 7) -> None:
-    """Entsprach jede Kaufentscheidung den damals geltenden Schwellen?"""
+    """Entsprach jede Kauf- UND Nachkaufentscheidung den damaligen Schwellen?
+
+    **Warum `topup` mitgeprueft wird (23.08.2026, BEFUNDE §G19 Fund 6).**
+    Diese Funktion filterte bis dahin auf `action == "buy"`. Nachkaeufe
+    sind aber **110 von 304** Live-Entscheidungen (36 %) und damit die
+    Mehrheit der Kapitalzuteilung (§G13 Fund 3, §G16 Fund 1).
+
+    `Engine._find_topups` erzwingt fuer sie zwei Regeln:
+
+        score >= min_score              die These traegt heute noch
+        gewinn >= topup_min_gain_pct    kein Nachkauf in einen Verlust
+
+    Die zweite ist die teurere. Der Docstring der Engine sagt, warum:
+    *"In eine verlustreiche Position nachzukaufen ist Average-Down und
+    macht aus einem begrenzten Verlust einen groesseren."* Geprueft wurde
+    bis zum 23.08.2026 keine von beiden.
+
+    Nachgemessen an allen 110 bisherigen Nachkaeufen: **null Verstoesse**.
+    Die Engine haelt sich daran - es war eine Abdeckungsluecke, kein
+    Regelbruch. Genau deshalb gehoert sie geschlossen: Dieses Modul
+    existiert fuer den Fall, dass eine Regel aufhoert zu greifen, und
+    eine Regel ohne Abgleich hoert unbemerkt auf.
+    """
     report.checks.append("Kaufentscheidungen halten die Score-Schwelle ein")
+    report.checks.append("Nachkaeufe halten Score-Schwelle und Gewinnvorgabe ein")
     report.checks.append("Positionsgroessen halten max_position_pct ein")
 
     configs = _run_configs(j)
@@ -133,20 +173,61 @@ def check_decisions(j: Journal, report: AuditReport, days: int = 7) -> None:
     # Zeitstempeln (7,8 %) gingen so verloren, darunter die META-Kaufentscheidung.
     dec["ts"] = pd.to_datetime(dec["ts"], format="mixed", utc=True, errors="coerce")
     dec = dec[(dec["ts"] >= since) & (dec["run_id"].isin(configs))]
-    buys = dec[(dec["action"] == "buy") & (dec["blocked_by"].isna())]
-    report.stats["Kaufentscheidungen geprueft"] = len(buys)
 
-    for _, d in buys.iterrows():
+    # `buy` UND `topup`: Beide teilen dieselbe Score-Schwelle, weil beide
+    # Kapital zuteilen. Getrennt gezaehlt bleiben sie, damit im Bericht
+    # sichtbar ist, ob eine Art gar nicht vorkommt - genau das war der
+    # Fund bei B09 (§G16 Fund 1: 0 Nachkaeufe im Spiegel, 110 live).
+    kapital = dec[dec["action"].isin(("buy", "topup"))
+                  & (dec["blocked_by"].isna())]
+    report.stats["Kaufentscheidungen geprueft"] = int(
+        (kapital["action"] == "buy").sum())
+    report.stats["Nachkaeufe geprueft"] = int(
+        (kapital["action"] == "topup").sum())
+
+    for _, d in kapital.iterrows():
         cfg = configs.get(d["run_id"], {})
+        art = "Nachkauf" if d["action"] == "topup" else "Kauf"
+
         min_score = cfg.get("min_score")
         if min_score is not None and d["conviction"] is not None:
             if float(d["conviction"]) < float(min_score) - 1e-9:
                 report.add(
                     "verstoss", "Score-Schwelle",
-                    f"Score {d['conviction']:.3f} lag unter der damaligen "
-                    f"Schwelle {min_score}.",
+                    f"{art}: Score {d['conviction']:.3f} lag unter der "
+                    f"damaligen Schwelle {min_score}.",
                     str(d["ts"]), d["symbol"],
                 )
+
+        if d["action"] != "topup":
+            continue
+
+        # Die Average-Down-Sperre. `gewinn_pct` schreibt
+        # `Engine._find_topups` in die Begruendung - ohne dieses Feld
+        # laesst sich die Regel nicht nachpruefen, deshalb ist sein
+        # Fehlen selbst ein Befund und kein stilles Ueberspringen.
+        gewinn = _grund(d["reasons"], "gewinn_pct")
+        mindest = cfg.get("topup_min_gain_pct")
+        if mindest is None:
+            continue
+        if gewinn is None:
+            report.add(
+                "auffaellig", "Nachkauf ohne Gewinnangabe",
+                "Die Begruendung traegt kein `gewinn_pct` - ob in eine "
+                "Verlustposition nachgekauft wurde, ist an dieser Zeile "
+                "nicht pruefbar.",
+                str(d["ts"]), d["symbol"],
+            )
+            continue
+        if float(gewinn) < float(mindest) - 1e-9:
+            report.add(
+                "verstoss", "Nachkauf in eine Verlustposition",
+                f"Position lag bei {float(gewinn):+.2%}, erlaubt ist ab "
+                f"{float(mindest):+.2%}. Nachkaufen in eine fallende "
+                f"Position ist Average-Down: aus einem begrenzten Verlust "
+                f"wird ein groesserer.",
+                str(d["ts"]), d["symbol"],
+            )
 
 
 def check_position_sizes(j: Journal, report: AuditReport, equity: float) -> None:

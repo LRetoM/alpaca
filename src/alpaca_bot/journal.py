@@ -46,8 +46,15 @@ import pandas as pd
 from .config import DATA_DIR, RESULTS_DIR
 
 JOURNAL_DB = DATA_DIR / "journal.sqlite"
+
 RAW_DIR = DATA_DIR / "journal_raw"
-RAW_DIR.mkdir(parents=True, exist_ok=True)
+"""Standardort der JSONL-Sicherung - NUR fuer das Produktivjournal.
+
+Kein `mkdir` mehr beim Import und keine Verwendung mehr im Schreibpfad:
+Beides war der Fund vom 23.08.2026 (BEFUNDE §G19 Fund 4). Massgeblich
+ist `Journal.raw_dir`, das neben der jeweiligen Datenbank liegt. Diese
+Konstante bleibt als Ortsangabe fuer Werkzeuge stehen, die den
+Produktivbestand aufraeumen."""
 
 
 def _json_default(o: Any) -> Any:
@@ -146,6 +153,24 @@ class Journal:
     def __init__(self, path: Path = JOURNAL_DB):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Die JSONL-Sicherung liegt NEBEN ihrer Datenbank, nicht an einem
+        # festen Ort. Bis zum 23.08.2026 war `RAW_DIR` ein Modul-Global:
+        # `Journal(tmp_path/...)` isolierte die SQLite sauber, der
+        # RunLogger schrieb die JSONL aber weiter ins Produktivverzeichnis.
+        #
+        # Gemessene Folge (BEFUNDE §G19 Fund 4): 2.146 der 2.618 Dateien
+        # dort gehoerten zu KEINEM Lauf im Journal - 28,6 % aller Zeilen,
+        # 84 Dateien mit Symbol TEST. Das Modul verspricht ueber diese
+        # Dateien: "waere die Datenbank je beschaedigt, liesse sie sich
+        # daraus vollstaendig rekonstruieren." Eine Rekonstruktion haette
+        # Testtrades als echte eingespielt.
+        #
+        # Dass genau dieser Fehler schon einmal die SQLite traf, steht in
+        # `scripts/14_journal_bereinigen.py`: Es existiert, weil Symbol
+        # TEST in die Produktivdatenbank lief. Geraeumt wurde damals die
+        # Datenbank - das Leck blieb offen.
+        self.raw_dir = self.path.parent / "journal_raw"
+        self.raw_dir.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
         self._migrate()
@@ -399,13 +424,43 @@ class Journal:
 
         legacy = o["status"].astype(str).str.endswith(" geschlossen")
         if nur_bereinigt:
-            fallback = o["referenz_quelle"] == "fallback"
-            ausgeschlossen = legacy | fallback
+            # Positivliste statt Ausschlussliste - der Fund vom 23.08.2026
+            # (BEFUNDE §G19 Fund 3).
+            #
+            # Hier stand bis dahin `o["referenz_quelle"] == "fallback"`.
+            # Der Wert existiert in den Daten NICHT ein einziges Mal: Die
+            # Spalte kam erst am 04.08.2026 per `_migrate` dazu, alle
+            # aelteren Zeilen tragen NULL. Und `NULL != "fallback"` - der
+            # Filter, der Zeilen ohne echte Marktquote fernhalten sollte,
+            # hat null Zeilen entfernt.
+            #
+            # Betroffen waren 31 der 162 auswertbaren Orders (19 %), alle
+            # aus 28.07.-04.08.2026, darunter genau die Ausreisser, die
+            # §G bereits als Datenfehler fuehrt: KGS -1.648, SIMO -1.584,
+            # TGTX -1.258 bps. Wirkung auf die Kennzahl:
+            #
+            #     mit den NULL-Zeilen : n=162  Median +0,0  Mittel -71,7 bps
+            #     nur verifizierte Ref: n=131  Median +0,0  Mittel -27,4 bps
+            #
+            # Der MEDIAN ist unveraendert - der Schluss aus BETRIEBSPLAN
+            # §3.1 ("Ausfuehrungsbedingung erfuellt") bleibt also gueltig.
+            # Falsch war die Grundmenge, nicht das Urteil. Genau deshalb
+            # ist die Positivliste die richtige Form: Eine Ausschlussliste
+            # muss jeden schlechten Wert kennen, eine Positivliste nur die
+            # guten - und ein spaeter hinzukommender Wert (oder wieder
+            # eine neue Spalte voller NULL) faellt automatisch heraus,
+            # statt automatisch durchzurutschen.
+            VERIFIZIERTE_REFERENZ = {"quote", "quote_verworfen"}
+            ohne_referenz = ~o["referenz_quelle"].isin(VERIFIZIERTE_REFERENZ)
+            ausgeschlossen = legacy | ohne_referenz
             if ausgeschlossen.any() and not still:
+                n_null = int((o["referenz_quelle"].isna() & ~legacy).sum())
                 print(f"  [slippage_report] {int(legacy.sum())} Legacy-Zeile(n) "
                       f"(vor dem close_position()-Fix) und "
-                      f"{int(fallback.sum())} Zeile(n) ohne echte Quote "
-                      f"ausgeschlossen von {len(o)} gesamt.")
+                      f"{int((ohne_referenz & ~legacy).sum())} Zeile(n) ohne "
+                      f"verifizierte Referenzquelle ausgeschlossen von "
+                      f"{len(o)} gesamt (davon {n_null} aus der Zeit vor "
+                      f"der Spalte `referenz_quelle`, 04.08.2026).")
             o = o[~ausgeschlossen]
         if o.empty:
             return o
@@ -434,22 +489,29 @@ class Journal:
            mit `expected_price=60.74` bei Fuellpreisen um 45-46 - eine
            Verzerrung von ueber +2000 bps, die den gesamten Mittelwert
            uebertoent.
-        2. **Zeilen ohne echte Marktquote** (`referenz_quelle='fallback'`,
-           siehe `live._reference_price`). Dort ist `expected_price` der
-           Entscheidungskurs, keine Marktbeobachtung - die "Slippage"
-           waere in Wahrheit Kursdrift seit der Entscheidung, genau die
-           Vermischung, die dieses Modul verhindern soll.
+        2. **Zeilen ohne verifizierte Marktquote.** Gezaehlt wird nur, was
+           `live._reference_price` ausdruecklich als echten, zeitgleichen
+           Marktpreis ausgewiesen hat - `referenz_quelle` in
+           {`quote`, `quote_verworfen`}. Alles andere faellt heraus:
 
-        Nicht ausgeschlossen wird `referenz_quelle='quote_verworfen'`: Dort
-        wich die Bid/Ask-Quote zu stark vom letzten echten Trade ab und
-        wurde durch diesen ersetzt (beobachtet bei SIMO/KGS am 04.08.2026,
-        Quote 11-14 % neben Fuellpreis UND Entscheidungskurs). Der
-        verwendete Wert ist dann ein echter, zeitgleicher Marktpreis -
-        zaehlt also mit, im Unterschied zum Entscheidungskurs-Fallback.
+             * `fallback` - dort ist `expected_price` der
+               Entscheidungskurs, keine Marktbeobachtung. Die "Slippage"
+               waere in Wahrheit Kursdrift seit der Entscheidung, genau
+               die Vermischung, die dieses Modul verhindern soll.
+             * `NULL` - Zeilen aus der Zeit VOR dem 04.08.2026, als es die
+               Spalte noch nicht gab. Was ihr `expected_price` bedeutet,
+               ist nicht mehr feststellbar. Eine Zeile unbekannter
+               Herkunft ist keine Messung (BEFUNDE §G19 Fund 3).
 
-        `nur_bereinigt=True` (Standard) schliesst Legacy-Zeilen und Fallback
-        aus. `False` zeigt alles - auch die bekannten Ausreisser - fuer die
-        Nachvollziehbarkeit.
+           `quote_verworfen` zaehlt bewusst MIT: Dort wich die Bid/Ask-
+           Quote zu stark vom letzten echten Trade ab und wurde durch
+           diesen ersetzt (beobachtet bei SIMO/KGS am 04.08.2026, Quote
+           11-14 % neben Fuellpreis UND Entscheidungskurs). Der verwendete
+           Wert ist dann ein echter, zeitgleicher Marktpreis.
+
+        `nur_bereinigt=True` (Standard) schliesst Legacy-Zeilen und alles
+        ohne verifizierte Referenz aus. `False` zeigt alles - auch die
+        bekannten Ausreisser - fuer die Nachvollziehbarkeit.
         """
         o = self._slippage_basis(nur_bereinigt=nur_bereinigt)
         if o.empty:
@@ -508,10 +570,36 @@ class Journal:
         return problems
 
     def summary(self) -> str:
+        """Der Protokollkopf - LIVE und Simulation getrennt ausgewiesen.
+
+        **Warum getrennt (23.08.2026, BEFUNDE §G19 Fund 8).** Hier stand
+        vorher eine einzige Spalte ueber alle Quellen:
+
+            Entscheidungen  :  18425  (183 ausgefuehrt)
+
+        Das las sich wie eine Ausfuehrungsquote von 1 %. In Wahrheit
+        stammten 18.118 der Zeilen aus vier Simulationslaeufen mit
+        rueckdatierten Zeitstempeln bis 2021 (§G13 Fund 1), die nie
+        ausgefuehrt werden sollten. §G13 hat `decision_quality` und
+        `integrity_check` auf `live_trade` gefiltert - der Kopf DIESES
+        Berichts blieb ungefiltert. Er stand damit direkt ueber einem
+        Befund, der korrekt 62 statt 17.100 meldete, ohne dass der
+        Unterschied erklaerbar war.
+
+        `Zeitraum` verschaerfte es: Er kommt aus `runs.started_at` (echte
+        Uhrzeit) und zeigte 2026-07-28 bis 2026-08-21, waehrend die
+        Entscheidungen bis 2021 zurueckreichen.
+        """
         runs = self.table("runs")
         dec = self.table("decisions")
         orders = self.table("orders")
         out = self.table("outcomes")
+
+        live_runs = set(runs.loc[runs["script"] == "live_trade", "run_id"]) \
+            if not runs.empty else set()
+        dec_live = dec[dec["run_id"].isin(live_runs)] if not dec.empty else dec
+        n_sim = len(dec) - len(dec_live)
+
         lines = [
             "=" * 62,
             "  PROTOKOLL-UEBERSICHT",
@@ -519,15 +607,28 @@ class Journal:
             f"  Laeufe          : {len(runs):>6}"
             + (f"  ({(runs['status'] == 'failed').sum()} fehlgeschlagen)" if len(runs) else ""),
             f"  Schritte        : {len(self.table('steps')):>6}",
-            f"  Entscheidungen  : {len(dec):>6}"
-            + (f"  ({int(dec['executed'].sum())} ausgefuehrt)" if len(dec) else ""),
+            f"  Entscheidungen  : {len(dec_live):>6}  LIVE"
+            + (f"  ({int(dec_live['executed'].sum())} ausgefuehrt)"
+               if len(dec_live) else ""),
+            f"  + aus Simulation: {n_sim:>6}  (zaehlen in KEINER Live-Auswertung"
+            f" mit, §G13)",
             f"  Orders          : {len(orders):>6}"
             + (f"  ({int((orders['dry_run'] == 0).sum())} echt)" if len(orders) else ""),
             f"  Bewertete Ergeb.: {len(out):>6}",
         ]
         if not runs.empty:
-            lines.append(f"  Zeitraum        : {runs['started_at'].min()[:10]} "
+            lines.append(f"  Zeitraum (Laeufe): {runs['started_at'].min()[:10]} "
                          f"bis {runs['started_at'].max()[:10]}")
+        # Der Entscheidungszeitraum ist NICHT der Laufzeitraum. Simulationen
+        # schreiben rueckdatierte Zeitstempel; ohne diese Zeile sieht das
+        # Protokoll drei Wochen alt aus, obwohl es Zeilen von 2021 traegt.
+        if not dec.empty and n_sim:
+            ts = pd.to_datetime(dec["ts"], format="mixed", utc=True,
+                                errors="coerce").dropna()
+            if not ts.empty:
+                lines.append(f"  Zeitraum (Entsch.): {ts.min().date()} "
+                             f"bis {ts.max().date()}  <- reicht durch die "
+                             f"Simulationen weiter zurueck")
         problems = self.integrity_check()
         lines.append("")
         if problems:
@@ -548,7 +649,8 @@ class RunLogger:
     _raw: Any = field(default=None, init=False)
 
     def __post_init__(self):
-        self._raw = (RAW_DIR / f"{self.run_id}.jsonl").open("a", encoding="utf-8")
+        self._raw = (self.journal.raw_dir
+                     / f"{self.run_id}.jsonl").open("a", encoding="utf-8")
 
     # --- Schritte ---------------------------------------------------------
     def log(self, kind: str, message: str = "", level: str = "info", **payload) -> None:
@@ -688,9 +790,20 @@ class RunLogger:
                 " symbol, side, qty, notional, status, dry_run, fill_price,"
                 " expected_price, decision_price, slippage_bps, decision_drift_bps,"
                 " referenz_quelle, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                # `raw` bleibt SQL-NULL, wenn nichts uebergeben wurde -
+                # NICHT der String 'null'. Bis zum 23.08.2026 stand
+                # `_dumps(raw)` hier unbedingt, und weil kein Aufrufer je
+                # ein `raw` uebergab, trugen 183 von 183 echten Zeilen
+                # den Text 'null' (BEFUNDE §G19 Fund 5). Eine Spalte, die
+                # zu 100 % gefuellt aussieht und nichts enthaelt, ist
+                # genau die Falle aus §G13 Fund 2: "Eine Null sieht wie
+                # eine Messung aus. Ein NULL waere aufgefallen."
+                # Gefuellt wird sie beim Broker-Abgleich
+                # (`live.reconcile_fills`), wo die Gegenseite vorliegt.
                 (oid, decision_id, self.run_id, ts, symbol, side, qty, notional,
                  status, int(dry_run), fill_price, expected_price, decision_price,
-                 slip, drift, referenz_quelle, _dumps(raw)),
+                 slip, drift, referenz_quelle,
+                 _dumps(raw) if raw is not None else None),
             )
             if decision_id:
                 c.execute(
@@ -707,7 +820,7 @@ class RunLogger:
         Damit laesst sich spaeter rekonstruieren, was das System zum
         Zeitpunkt der Entscheidung tatsaechlich gesehen hat.
         """
-        path = RAW_DIR / f"{self.run_id}__{name}.csv"
+        path = self.journal.raw_dir / f"{self.run_id}__{name}.csv"
         df.to_csv(path)
         self.log("snapshot", name, datei=str(path), zeilen=len(df))
         return path

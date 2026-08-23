@@ -71,9 +71,22 @@ statt 1,61).
 ### B2. Viele Versuche erzeugen Scheingewinner
 
 Bei N Versuchen liegt das erwartete Maximum allein durch Zufall bei
-`sqrt(2·ln N)`. Aktuell 12 Versuche → **Schwelle t > 2,73**
-(`fleet.schwelle_sigma`). Ein t-Wert darunter ist der Normalfall, kein
-Befund. Stillgelegte Bots zählen dauerhaft mit.
+`sqrt(2·ln N)`. Maßgeblich ist **`fleet.schwelle_sigma()`** — hier steht
+bewusst keine Zahl. Ein t-Wert darunter ist der Normalfall, kein Befund.
+Stillgelegte Bots zählen dauerhaft mit.
+
+```
+python scripts/21_fleet.py     # weist Versuchszahl und Schwelle aus
+```
+
+> **Warum hier keine Zahl mehr steht (23.08.2026, §G19 Fund 2).** Bis
+> dahin stand an dieser Stelle „Aktuell 12 Versuche → Schwelle t > 2,73".
+> Beides war überholt: 16 Versuche, Schwelle **2,85**. Die Zahl war an
+> fünf Stellen dieses Dokuments abgeschrieben und **überall zu niedrig** —
+> ein Register, das die Hürde senkt, gegen die es messen soll. Genau
+> davor warnt `BETRIEBSPLAN` §3.2: *„Eine abgeschriebene Zahl im Dokument
+> wäre nach der nächsten Anmeldung falsch und würde die Hürde
+> nachträglich senken."* Sie war es bereits.
 
 ### B3. Publizierte Anomalien replizieren meist nicht
 
@@ -123,14 +136,28 @@ Fundamentaldaten), nicht aus einer weiteren Kursableitung.
 
 ## D. Gemessen, aber (noch) nicht belastbar
 
-| Frage | Stand | Schwelle |
-|---|---|---|
-| Länger halten (10 statt 5 Tage)? | `B04_halten_lang`: **t = 0,94** über 10 Tage | t > 2,73 |
-| Mehr Positionen (25 statt 15)? | `B07`: **t = −2,42** — Tendenz **negativ** | t > 2,73 |
-| Voll investieren / Nachkauf? | `B08`/`B09`: t = 0,14 | t > 2,73 |
-| Vorsprung der Rangliste gegen Universum | +0,46 %/5 Tage, **t = 1,45** über 8 Tage | t > 2 |
+**Die laufenden Stände stehen bewusst nicht mehr hier.** Sie ändern sich
+täglich; eine abgeschriebene Zahl ist innerhalb einer Woche falsch
+(gemessen: alle drei Flottenzeilen dieser Tabelle waren es am
+23.08.2026, §G19 Fund 2). Abrufen:
 
-**Keiner dieser Werte rechtfertigt derzeit eine Regeländerung.**
+```
+python scripts/27_status.py    # alle Bots gegen ihre registrierte Referenz
+python scripts/21_fleet.py     # Versuchszahl und Schwelle
+```
+
+| Frage | Wo abzulesen | Schwelle |
+|---|---|---|
+| Länger halten (10 statt 5 Tage)? | `B04_halten_lang` | `fleet.schwelle_sigma()` |
+| Mehr Positionen (25 statt 15)? | `B07_mehr_positionen` — Tendenz **negativ** | `fleet.schwelle_sigma()` |
+| Voll investieren? | `B08_voll_investiert` | `fleet.schwelle_sigma()` |
+| Nachkauf? | `B09_nachkauf` — **misst nichts**, bitgleich mit `B08` (§G16 Fund 1) | — |
+| Vorsprung der Rangliste gegen Universum | `17_shadow_report.py` | t > 2 |
+
+**Keiner dieser Werte rechtfertigt derzeit eine Regeländerung.** Der
+Momentaufnahme halber, ausdrücklich **datiert und nicht fortzuschreiben**
+(23.08.2026, Schwelle 2,85): B04 t = +1,26 über 14 Tage, B07 t = −1,93
+über 13, B08 t = +0,70 über 13, B11 t = +1,24 über 4.
 
 ---
 
@@ -2243,6 +2270,316 @@ neue Fälle in `tests/test_nutzung.py`, fünf neue Mutationen —
 **59 von 59 gefangen**.
 
 
+## G19. Acht Funde in der Datenwahrheit — und ein Vertrag mit drei Referenzen (23.08.2026)
+
+**Anlass:** fünfte vollständige Durchsicht, diesmal mit zwei Leitfragen —
+*„liefert dieses Artefakt die Daten, die es zu liefern behauptet?"* und
+*„sagen Code und Dokument dasselbe?"*. Ausgangslage: Testsuite grün,
+Health-Check grün, Arbeitsbaum sauber.
+
+**Vorweg, weil es beim Prüfen sofort auffällt und keiner ist:** Das
+Live-Journal stand seit Freitag 21.08. 20:15 UTC still. Das ist korrekt —
+22./23.08. sind Wochenende.
+
+### Fund 1: Der Entscheidungsvertrag für den 10.10. hatte drei Referenzen — Schwere: hoch
+
+Die Frage *„wogegen wird `B11_dyn_ausstieg_live` abgenommen?"* hatte vier
+Antworten an vier Orten:
+
+| Quelle | Referenz |
+|---|---|
+| `BETRIEBSPLAN` §3.3 (Vertragstext, 3 Stellen) | `B00_basis` |
+| Flottenregistrierung in `shadow.sqlite` | `B09_nachkauf` |
+| `21_fleet.py --basis` (Standardwert) | `B00_basis` |
+| `fokus.offene_fragen` (per Test gepinnt) | `B09_nachkauf` |
+
+**Keine Formalie.** Gemessen an den echten Schattendaten:
+
+```
+--kriterien B11_dyn_ausstieg_live                        t = 0,99
+--kriterien B11_dyn_ausstieg_live --basis B09_nachkauf   t = 1,24
+```
+
+Beide Zahlen heißen „Kriterium 1 aus §3.3".
+
+**`B00_basis` war die widerlegte Antwort.** §G6 hat sie am 16.08.2026
+verworfen — der Live-Bot läuft seit dem 30.07. mit
+`deploy_to_target=True` und `allow_topup=True`, `B00_basis` steht auf
+`False`/`False`. `B11_dyn_ausstieg_live` wurde daraufhin **eigens** gegen
+`B09_nachkauf` angemeldet; daher sein Namenszusatz „gegen echte
+Live-Basis". Der Betriebsplan wurde nie nachgezogen, obwohl er zuletzt am
+22.08. bearbeitet wurde — und §G16 Fund 1 zitiert ihn sogar mit *„laut
+BETRIEBSPLAN §3.3 gegen genau diesen Bot"*. Er sagte das nicht.
+
+**Verschärfend:** `shadow.pruefungen()` Nr. 10 meldet gleichzeitig FEHL —
+*„B09_nachkauf ist KEIN Live-Spiegel"* (§G16 Fund 1). Der Vertrag nannte
+also eine widerlegte Referenz, das ausführende Kommando nahm sie als
+Vorgabe, und die registrierte Alternative ist ihrerseits als kein Spiegel
+markiert.
+
+**Behoben:** `shadow_eval.referenz_bot()` liest die Registrierung;
+`kriterien_pruefen`/`kriterien_text`/`--basis` haben `None` statt eines
+Botnamens als Vorgabe. Die Ausgabe weist die Herkunft der Referenz jetzt
+im Kopf aus (`registrierte Basis` vs. `VON HAND GESETZT`). Der
+Betriebsplan nennt `B09_nachkauf` — die **vier Kriterien selbst bleiben
+Wort für Wort unverändert**, es ist keine nachträgliche Anpassung,
+sondern die Rückkehr zur Festlegung vom 16.08.
+
+**Lehre:** Eine Registrierung ist unveränderlich und datiert. Ein
+Dokumentsatz ist beides nicht. Wo beide etwas über dieselbe Messung
+sagen, gewinnt die Registrierung — dasselbe Prinzip, mit dem
+`BETRIEBSPLAN` §3.2 verbietet, `schwelle_sigma()` abzuschreiben.
+
+### Fund 2: Dieses Register senkte die eigene Signifikanzhürde
+
+`fleet.schwelle_sigma()` steht bei **2,85** (16 Versuche). Dieses Dokument
+schrieb an **fünf Stellen 2,73** — §B2 (dazu „Aktuell 12 Versuche"), §D
+dreimal, §I einmal. Der übrige Text nutzt korrekt 2,85.
+
+Das verstößt gegen die eigene Regel. `CLAUDE.md`: *„Aktuelle
+Signifikanzschwelle: `fleet.schwelle_sigma()`"*. `BETRIEBSPLAN` §3.2:
+*„Eine abgeschriebene Zahl im Dokument wäre nach der nächsten Anmeldung
+falsch und würde die Hürde nachträglich senken."* Sie war es bereits.
+
+Die „Stand"-Spalte in §D war ebenfalls gedriftet: B04 mit 0,94 notiert
+(aktuell 1,26), B07 mit −2,42 (aktuell −1,93), B08/B09 mit 0,14
+(aktuell 0,70).
+
+**Behoben:** §B2, §D und §I verweisen auf `fleet.schwelle_sigma()` und
+`scripts/27_status.py`, statt zu beziffern. Wo eine Momentaufnahme
+nützlich ist, steht sie **datiert und ausdrücklich nicht
+fortzuschreiben**.
+
+### Fund 3: Die Slippage-Bereinigung filterte auf einen Wert, den es nie gab — Schwere: mittel-hoch
+
+`journal._slippage_basis` schloss Zeilen ohne echte Marktquote so aus:
+
+```python
+fallback = o["referenz_quelle"] == "fallback"
+```
+
+Der Wert kommt in den Daten **kein einziges Mal** vor. Die Spalte
+entstand erst am 04.08.2026 per `_migrate`; ältere Zeilen tragen `NULL`,
+und `NULL != "fallback"`. Der Filter entfernte **null** Zeilen.
+
+| | n | Median | Mittel |
+|---|---:|---:|---:|
+| wie gerechnet | 162 | +0,0 bps | **−71,7 bps** |
+| nur verifizierte Referenz | 131 | +0,0 bps | **−27,4 bps** |
+
+Die 31 Zeilen stammen alle aus 28.07.–04.08. und enthalten genau die
+Ausreißer, die §G bereits als Datenfehler führt: KGS −1.648,
+SIMO −1.584, TGTX −1.258 bps.
+
+**Der Schluss in `BETRIEBSPLAN` §3.1 bleibt gültig** — der Median ist
+beidseitig +0,0, und 131 liegt weit über den geforderten 30. Falsch war
+die Grundmenge, nicht das Urteil. Dass es folgenlos blieb, liegt allein
+am Median: §G16 Fund 9 hatte die Kostenkontrolle vom Mittelwert auf ihn
+umgestellt und damit unwissentlich das Symptom behandelt.
+
+**Behoben:** Positivliste statt Ausschlussliste — gezählt wird nur, was
+`referenz_quelle` in {`quote`, `quote_verworfen`} führt. Eine
+Ausschlussliste muss jeden schlechten Wert kennen; eine Positivliste nur
+die guten, und Neues rutscht nicht automatisch durch. §3.1 nennt jetzt
+131 Orders.
+
+### Fund 4: 28,6 % der Sicherung waren Fremddaten — Schwere: hoch
+
+`journal.py` beschreibt seine Aufgabenteilung so: *„SQLite ist die
+Auswertungsschicht, JSONL die Sicherung — wäre die Datenbank je
+beschädigt, ließe sie sich daraus vollständig rekonstruieren."*
+
+`RAW_DIR` war ein **Modul-Global**. `Journal(pfad)` isolierte die SQLite
+sauber — `tests/conftest.py` nutzt das ausdrücklich —, aber `RunLogger`
+schrieb die JSONL immer ins Produktivverzeichnis:
+
+| | Dateien | Zeilen |
+|---|---:|---:|
+| Lauf steht im Journal | 472 | 19.845 |
+| **kein Lauf im Journal** | **2.146** | **7.935 (28,6 %)** |
+| davon mit Symbol `TEST` | 84 | — |
+
+Eine Rekonstruktion hätte Testtrades als echte eingespielt. **Kein
+Werkzeug liest die JSONL je zurück** — die Zusicherung war nie geprüft.
+
+Besonders unangenehm: `scripts/14_journal_bereinigen.py` existiert
+**genau deshalb**, weil Symbol `TEST` schon einmal in die
+Produktivdatenbank lief. Geräumt wurde damals die Datenbank. Das Leck
+blieb offen — und mein eigener Testlauf beim Prüfen legte 17 weitere
+Dateien an.
+
+**Behoben:** `Journal.raw_dir` hängt an der Datenbank
+(`self.path.parent / "journal_raw"`), kein `mkdir` mehr beim Import.
+Neues Werkzeug `scripts/28_rohprotokoll_bereinigen.py` (Trockenlauf als
+Vorgabe, **verschiebt statt löscht** — eine Datei ohne Lauf kann auch aus
+einem bewusst bereinigten Lauf stammen; 19 der 2.159 waren es
+nachweislich). Ausgeführt: 2.159 Dateien nach `journal_raw/fremd/`, die
+Sicherung ist jetzt sortenrein (472 Dateien, 472 Läufe, 0 fremd).
+
+### Fund 5: Zwei stumme Spalten in `orders`
+
+Über 183 echte Orders:
+
+| Spalte | Zustand |
+|---|---|
+| `raw` | 183/183 „gefüllt" — mit dem String `'null'` |
+| `status` | 178/183 `pending_new` — der Status **bei Abgabe**, nie der endgültige |
+
+Am Journal war damit nicht ablesbar, ob eine Order ausgeführt wurde. Die
+übrigen 5 `status`-Werte tragen deutschen Fließtext aus dem alten
+`close_position` (`"AMKR geschlossen"`) — zwei unvereinbare Typen in
+einer Spalte.
+
+`raw` ist §G13 Fund 2 in Reinform: *„Eine Null sieht wie eine Messung
+aus. Ein `NULL` wäre aufgefallen."*
+
+**Warum es niemand fand:** `check_stumme_felder` bewacht
+`decisions.reasons`, `check_lifecycle_felder` den Lebenslauf. Für die
+`orders`-Spalten gab es **keinen Wächter**.
+
+**Behoben:** `live.reconcile_fills` schreibt Endstatus **und** die
+Broker-Rohzeile nach — beides liegt dort längst vor und wurde nur nicht
+gespeichert (`COALESCE`, damit eine Korrektur nie weniger Information
+hinterlässt als sie vorfand). `run.order` speichert SQL-`NULL` statt
+`'null'`. Neu: `data_integrity.check_stumme_orderspalten` — er fragt
+nicht „ist gefüllt?", sondern **„trägt mehr als einen Wert?"**. Er meldet
+beide Spalten heute noch; sie klären sich mit dem nächsten Handelstag.
+
+### Fund 6: Der Regelabgleich sah 36 % der Entscheidungen nicht
+
+`audit.check_decisions` filterte auf `action == "buy"`. Nachkäufe sind
+**110 von 304** Live-Entscheidungen und die Mehrheit der
+Kapitalzuteilung (§G13 Fund 3). `Engine._find_topups` erzwingt für sie
+zwei Regeln — `score >= min_score` und `topup_min_gain_pct`, die
+Average-Down-Sperre. Geprüft wurde keine.
+
+**Nachgemessen an allen 110 Nachkäufen: null Verstöße.** Die Engine hält
+sich daran — es war eine Abdeckungslücke, kein Regelbruch. Genau deshalb
+gehört sie geschlossen: Das Modul existiert für den Fall, dass eine Regel
+aufhört zu greifen, und eine Regel ohne Abgleich hört unbemerkt auf.
+
+**Behoben:** `buy` und `topup` werden geprüft und **getrennt gezählt** —
+damit sichtbar bleibt, wenn eine Aktionsart gar nicht vorkommt (genau der
+Fund bei B09). Ein Nachkauf ohne `gewinn_pct` ist selbst ein Befund, kein
+stilles Überspringen.
+
+### Fund 7: Eine Sicherung, die es nie gab
+
+`shadow.RAW_DIR` wurde bei **jedem** `ShadowStore()` angelegt und **nie
+beschrieben** — seit dem 31.07.2026 leer. Es sah aus wie das Gegenstück
+zu `journal_raw`.
+
+Dahinter liegen 26 MB: 20.690 Vorhersagen, die gesamte Flottenmessung,
+der Musterspeicher, der Versuchszähler — die Datengrundlage der
+Entscheidung vom 10.10.2026, vollständig ungesichert. Nur ein leeres
+Verzeichnis, das eine Sicherung vortäuschte.
+
+**Behoben:** `ShadowStore.sichern()` legt eine
+transaktionskonsistente Kopie über `sqlite3.Connection.backup()` an
+(nicht `shutil.copy` — eine Dateikopie während eines Schreibvorgangs
+kann eine halbe Transaktion erwischen, und eine Sicherung, die da ist und
+nicht funktioniert, ist schlimmer als keine). Sieben Stände, aufgeräumt
+nach Alter. Der Schattendaemon ruft sie **nach** einem Durchgang und
+**nur bei tatsächlicher Änderung** — die vier Schritte sind idempotent
+(§G14), am Wochenende liefern sie alle 0, und sieben identische Kopien
+hätten am Montag jeden Stand von vor dem Wochenende verdrängt. Erste
+Sicherung: 26,4 MB, `PRAGMA integrity_check` = ok.
+
+### Fund 8: Der Protokollkopf mischte Simulation und Live
+
+Rest von §G13 Fund 1. `Journal.summary()` meldete:
+
+```
+Entscheidungen  :  18425  (183 ausgefuehrt)
+Zeitraum        : 2026-07-28 bis 2026-08-21
+```
+
+Das las sich wie 1 % Ausführungsquote. 18.118 Zeilen stammen aus vier
+Simulationsläufen mit rückdatierten Zeitstempeln bis 2021. §G13 hat
+`decision_quality` und `integrity_check` gefiltert — der **Kopf** dieses
+Berichts blieb ungefiltert und stand direkt über einem Befund, der
+korrekt 62 statt 17.100 meldete, ohne dass der Unterschied erklärbar war.
+Der Zeitraum verschärfte es: Er kommt aus `runs.started_at`.
+
+**Behoben:** 304 LIVE (181 ausgeführt), 18.121 aus Simulation getrennt
+ausgewiesen, und der Entscheidungszeitraum steht daneben, sobald
+Simulationszeilen vorhanden sind.
+
+### Struktur: eine Zusicherung, die zur Laufzeit schwächer ist als ihr Wortlaut
+
+*„Der Schattenbetrieb importiert `trading.py` bewusst nicht — er **kann**
+keine Order senden, nicht nur ‚darf nicht'."* Das steht in `CLAUDE.md`,
+`README.md` und `BETRIEBSPLAN` §6.
+
+**Am Quelltext stimmt es** — kein Schattenmodul referenziert `trading`.
+Geprüft war es an keiner Stelle: dieselbe Lage wie beim RL-Docstring in
+§G17.
+
+**Zur Laufzeit trägt der Wortlaut nicht.** `import alpaca_bot.shadow`
+führt `__init__.py` aus, und das importiert `trading` mit — nachgemessen,
+`alpaca_bot.trading` liegt danach in `sys.modules`. Aus „kann nicht" wird
+streng genommen „tut nicht". Der Import allein sendet keine Order, und
+`trading` hält zusätzlich `dry_run=True` als Vorgabe und `_check_risk()`
+vor jedem Senden — die Trennung ist mehrfach abgesichert. Aber die
+stärkere Formulierung trägt nur so weit, wie die Prüfung reicht: bis zum
+Quelltext. Das steht jetzt im Docstring der Regel.
+
+**Behoben:** `selfcheck.CHARTER` hat eine 13. Regel („Der Schattenbetrieb
+ruft keine Order-Funktion auf"), geprüft über `check_schatten_handelt_nicht`
+gegen `shadow.py`, `shadow_eval.py`, `fleet.py`, `patterns.py` — auch
+lokale Importe innerhalb von Funktionen.
+
+### Zwei zu schwache Tests, vom Mutationstest entlarvt
+
+Zum dritten Mal in diesem Projekt (nach §G17 zweimal) hat der
+Mutationstest eigene Tests widerlegt, die grün waren:
+
+1. **`test_protokoll.test_legacy_zeilen_ausgeschlossen`** wurde durch
+   Fund 3 **im Stillen entwertet.** Seine Legacy-Zeile trug kein
+   `referenz_quelle`; nach der Verschärfung flog sie aus **zwei** Gründen
+   heraus. Der Test blieb grün, auch als die Mutation den Legacy-Filter
+   ganz entfernte. Jetzt trägt die Zeile `quote`, und der Legacy-Filter
+   ist wieder der einzige Grund.
+2. **Meine eigenen Tests der neuen Verfassungsregel** setzten
+   `SCHATTEN_MODULE` durchweg per monkeypatch auf eine Attrappe — sie
+   prüften den Mechanismus, nie die Voreinstellung. Eine Mutation auf
+   `SCHATTEN_MODULE = ()` blieb ungefangen: Die Regel hätte grün
+   gemeldet, ohne eine Datei anzusehen. Wieder §G17: *„Ein Test, der nur
+   seine eigenen Argumente prüft, prüft die Voreinstellung nicht."*
+
+### Was diese Runde sonst geprüft und für gut befunden hat
+
+* **Keine Importzyklen zwischen den Schichten.** Im Schattenblock gibt es
+  welche (`fleet ↔ shadow`, `patterns ↔ shadow`, `shadow ↔ shadow_eval`),
+  aufgelöst über lokale Importe.
+* **Alle 23 `EngineConfig`-Felder haben Leser** — kein toter Parameter.
+* **Alle 32 Skripte starten.** Kein Artefakt ist unbenutzbar geworden.
+* `_run_configs`, `decision_quality` und `integrity_check` filtern
+  korrekt auf `live_trade` (§G13 hält).
+* Die 17.100 unbewerteten Entscheidungen sind weiterhin korrekt auf 62
+  gefiltert.
+* `Store.record_day_trade` ist weiterhin ungenutzt — bekannt und bewusst
+  offen (§G16 Fund 8), nicht erneut aufgeführt.
+
+### Neu dokumentiert: der Messstand der Konfiguration
+
+`EngineConfig.for_reversal()` trägt jetzt eine Tabelle, die je Achse
+nennt, **welcher Flottenbot die Alternative geprüft hat und mit welchem
+Ergebnis** — und wo kein Eintrag steht, heißt das „ungemessen", nicht
+„gut". Sie beantwortet die Frage, die sich sonst in ein paar Generationen
+wieder stellt: *Ist das der beste Wert oder nur der erste, den jemand
+hingeschrieben hat?*
+
+Dabei sichtbar geworden: **drei Achsen, die die Strategie mittragen,
+wurden nie gegengeprüft** — `exit_score`, `trail_after_atr` und
+`reenter_cooldown_days`. `exit_score` ist die auffälligste, weil §E ihn
+ausdrücklich als den Wert ausweist, der `target_atr` wirkungslos macht.
+
+Regression: `tests/test_abnahmereferenz.py` (11), 
+`tests/test_journalherkunft.py` (17), `tests/test_sicherungen_runde5.py`
+(19), sechs neue Mutationen — **65 von 65 gefangen**.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
@@ -2261,9 +2598,9 @@ neue Fälle in `tests/test_nutzung.py`, fünf neue Mutationen —
 | Frage | Wo gemessen | Nötig |
 |---|---|---|
 | Trägt die Strategie nach echten Kosten? | `journal.slippage_report()` | 30+ saubere Orders, Median < 8 bps |
-| Länger halten? | `B04_halten_lang` | t > 2,73 |
-| Dynamischer Ausstieg statt fixer 5 Tage? | **noch nicht angemeldet** | siehe `docs/auswertung-august.md` |
-| Mehr Breite? | `B07_mehr_positionen` | derzeit t = −2,42 (negativ) |
+| Länger halten? | `B04_halten_lang` | `fleet.schwelle_sigma()` |
+| Dynamischer Ausstieg statt fixer 5 Tage? | `B11_dyn_ausstieg_live` gegen seine registrierte Basis | alle vier Kriterien aus `BETRIEBSPLAN` §3.3, Termin 10.10.2026 |
+| Mehr Breite? | `B07_mehr_positionen` | `fleet.schwelle_sigma()`; Tendenz negativ |
 
 ---
 

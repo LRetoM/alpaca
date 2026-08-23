@@ -472,6 +472,101 @@ def check_stumme_felder(j: Journal, report: IntegrityReport,
             )
 
 
+# Spalten der `orders`-Tabelle, die eine Auswertungsachse tragen, und was
+# ohne sie nicht mehr beantwortbar ist. Dieselbe Form wie
+# `_pflichtfelder_aus_gruenden` - der Befundtext muss sagen, WAS fehlt,
+# sonst wird er als Formalie abgetan.
+_ORDERSPALTEN = {
+    "status": "ob eine Order ueberhaupt ausgefuehrt wurde",
+    "referenz_quelle": "ob eine Zeile echte Ausfuehrungsqualitaet misst "
+                       "oder nur Kursdrift seit der Entscheidung",
+    "fill_price": "zu welchem Kurs tatsaechlich gehandelt wurde",
+    "expected_price": "wogegen die Ausfuehrung gemessen wird",
+}
+
+
+def check_stumme_orderspalten(j: Journal, report: IntegrityReport,
+                              juengste: int = 30) -> None:
+    """Traegt jede Orderspalte noch Information - oder nur noch einen Wert?
+
+    **Warum es diesen Check zusaetzlich gibt (23.08.2026, §G19 Fund 5).**
+    `check_stumme_felder` bewacht `decisions.reasons`,
+    `check_lifecycle_felder` den Lebenslauf. Fuer die `orders`-Tabelle
+    gab es nichts - und genau dort standen zwei stumme Spalten:
+
+        raw      183 von 183 echten Zeilen: der String 'null'
+        status   178 von 183: 'pending_new'
+
+    Beide sahen zu 100 % gefuellt aus. `raw` enthielt die JSON-Schreibweise
+    von "nichts", `status` den Wert bei ABGABE - nie den endgueltigen.
+    Am Journal war damit nicht ablesbar, ob eine Order ausgefuehrt wurde,
+    obwohl die Spalte genau dafuer da ist.
+
+    **Der Unterschied zu `check_stumme_felder`.** Dort ist die gefaehrliche
+    Richtung "war gefuellt, ist es nicht mehr". Hier ist sie "sieht gefuellt
+    aus, traegt aber nur einen einzigen Wert" - eine Spalte, die nie
+    variiert, ist keine Messung, sondern eine Konstante mit Spaltenkopf.
+
+    Geprueft wird auf den JUENGSTEN Orders, aus demselben Grund wie dort:
+    Eine Spalte, die spaeter eingefuehrt wurde, ist ueber die ganze
+    Historie zwangslaeufig ueberwiegend leer, und ein Check, der deshalb
+    dauerhaft leuchtet, wird weggeklickt.
+    """
+    report.checks.append("Orderspalten tragen mehr als einen Wert")
+
+    o = j.table("orders", "dry_run = 0")
+    if o.empty:
+        return
+    o = o.sort_values("ts").tail(juengste)
+    if len(o) < juengste:
+        return
+    report.stats["Orders geprueft"] = len(o)
+
+    for spalte, wofuer in _ORDERSPALTEN.items():
+        if spalte not in o.columns:
+            continue
+        werte = o[spalte].dropna()
+        quote = len(werte) / len(o)
+
+        if quote < 0.5:
+            report.add(
+                "fehler", f"Orderspalte '{spalte}' ist ueberwiegend leer",
+                f"Nur {len(werte)} von {len(o)} der juengsten Orders tragen "
+                f"einen Wert. Ohne die Spalte ist nicht mehr beantwortbar, "
+                f"{wofuer}.",
+            )
+            continue
+
+        if werte.nunique() <= 1 and len(werte) >= juengste * 0.5:
+            einziger = werte.iloc[0] if len(werte) else "leer"
+            report.add(
+                "auffaellig", f"Orderspalte '{spalte}' traegt nur einen Wert",
+                f"Alle {len(werte)} juengsten Orders zeigen '{einziger}'. "
+                f"Eine Spalte, die nie variiert, sieht gefuellt aus und ist "
+                f"keine Messung. Genau so verlief `orders.status` bis zum "
+                f"23.08.2026 ('pending_new' in 178 von 183 Zeilen - der "
+                f"Status bei Abgabe, nie der endgueltige). Ohne echte "
+                f"Variation ist nicht beantwortbar, {wofuer}.",
+            )
+
+    # `raw` getrennt, weil hier der Text 'null' und SQL-NULL dasselbe
+    # bedeuten - eine reine Fuellquote wuerde 100 % melden. Seit dem
+    # 23.08.2026 schreibt `journal.RunLogger.order` SQL-NULL statt
+    # 'null'; Altzeilen tragen weiter den Text.
+    if "raw" in o.columns:
+        echt = o["raw"].dropna()
+        echt = echt[echt.astype(str).str.strip() != "null"]
+        report.stats["Orders mit Broker-Rohzeile"] = f"{len(echt)}/{len(o)}"
+        if echt.empty:
+            report.add(
+                "auffaellig", "Orderspalte 'raw' enthaelt keine Broker-Zeile",
+                f"Keine der juengsten {len(o)} Orders traegt die Aufzeichnung "
+                f"der Gegenseite. Sie entsteht im Broker-Abgleich "
+                f"(`live.reconcile_fills`) - bleibt sie leer, hat der "
+                f"Abgleich seit der letzten Order nicht gegriffen.",
+            )
+
+
 def check_lifecycle_felder(report: IntegrityReport) -> None:
     """`bars_held`, `mae/mfe` und die Nachlauf-Fenster - stumm oder gefuellt?
 
@@ -631,6 +726,7 @@ def run_all() -> IntegrityReport:
     check_extreme_slippage(j, report)
     check_lifecycle_coverage(report)
     check_stumme_felder(j, report)
+    check_stumme_orderspalten(j, report)
     check_lifecycle_felder(report)
     check_bars_held_stimmig(report)
     check_codeversion_zuordnung(j, report)

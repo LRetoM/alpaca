@@ -124,6 +124,22 @@ def alle_schritte(cfg: ShadowConfig, store: ShadowStore, *, verbose: bool = True
             nutzung.melden(baustein, -1, signatur="fehler",
                            dauer_s=round(time.time() - t0, 2),
                            hinweis=f"{type(e).__name__}: {e}")
+
+    # Sicherung NACH den Schritten, nicht davor: Gesichert wird der
+    # Stand, den dieser Durchgang erzeugt hat. Und nur, wenn etwas
+    # entstanden ist - die vier Schritte sind idempotent (§G14), am
+    # Wochenende liefern sie alle 0. Eine Kopie je Leerlauf waere reine
+    # Plattenarbeit und wuerde die sieben aufbewahrten Staende binnen
+    # Stunden mit identischen Kopien fuellen, sodass am Montag kein
+    # einziger Stand von vor dem Wochenende mehr da waere.
+    # (BEFUNDE §G19 Fund 7)
+    if any(v > 0 for v in ergebnis.values() if isinstance(v, int)):
+        t0 = time.time()
+        ziel = store.sichern()
+        if verbose and ziel:
+            print(f"      Sicherung: {ziel.name} "
+                  f"({ziel.stat().st_size / 1e6:.1f} MB, "
+                  f"{time.time() - t0:.1f}s)")
     return ergebnis
 
 

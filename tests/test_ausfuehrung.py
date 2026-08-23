@@ -341,8 +341,14 @@ class TestKriterienPruefen:
 
         store = MagicMock()
         store.table.return_value = self._exits(bars_held, return_pct)
-        b = SimpleNamespace(config=SimpleNamespace(
-            max_hold_days=frist, zeitausstieg_dynamisch=dynamisch))
+        # `basis_bot` gehoert seit dem 23.08.2026 dazu: `kriterien_pruefen`
+        # holt die Referenz aus der Anmeldung, statt `B00_basis` fest
+        # vorzugeben (§G19 Fund 1, `tests/test_abnahmereferenz.py`). Eine
+        # Attrappe ohne dieses Feld bildet keine echte Registrierung ab.
+        b = SimpleNamespace(
+            basis_bot="B09_nachkauf",
+            config=SimpleNamespace(max_hold_days=frist,
+                                   zeitausstieg_dynamisch=dynamisch))
 
         with patch.object(shadow_eval, "vergleich_gepaart",
                           return_value={"t_wert": t, "n_tage": n_tage}), \

@@ -639,6 +639,71 @@ MUTATIONEN = [
         "Datenstand leuchtet der Health-Check an jedem Wochenende gelb, "
         "und eine Warnung, die immer leuchtet, wird weggeklickt.",
     ),
+
+    # --- Runde 5, 23.08.2026 (§G19) ---------------------------------------
+    Mutation(
+        "Abnahme nimmt wieder pauschal B00_basis",
+        "src/alpaca_bot/shadow_eval.py",
+        "    if basis_bot is None:\n        basis_bot = referenz_bot(bot_id, s)",
+        '    if basis_bot is None:\n        basis_bot = "B00_basis"',
+        "test_abnahmereferenz",
+        "Der Entscheidungsvertrag fuer den 10.10.2026. B00_basis ist seit "
+        "§G6 als Live-Referenz widerlegt; gemessen betraegt der Unterschied "
+        "t=0,99 gegen t=1,24. Ein Argumentstandard darf nicht entscheiden, "
+        "was der Vertrag regelt.",
+    ),
+    Mutation(
+        "Slippage filtert wieder auf einen Wert statt auf eine Positivliste",
+        "src/alpaca_bot/journal.py",
+        '            ohne_referenz = ~o["referenz_quelle"].isin(VERIFIZIERTE_REFERENZ)',
+        '            ohne_referenz = o["referenz_quelle"] == "fallback"',
+        "test_journalherkunft",
+        "Genau die alte Fassung. `NULL != 'fallback'` liess 31 von 162 "
+        "Orders unbekannter Herkunft in der Kernmessung des Projekts - "
+        "darunter die Ausreisser, die §G als Datenfehler fuehrt.",
+    ),
+    Mutation(
+        "Rohsicherung wandert wieder ins Produktivverzeichnis",
+        "src/alpaca_bot/journal.py",
+        '        self.raw_dir = self.path.parent / "journal_raw"',
+        "        self.raw_dir = RAW_DIR",
+        "test_journalherkunft",
+        "Der Modul-Global, der 2.146 Fremddateien (28,6 % aller Zeilen) in "
+        "die Sicherung geschrieben hat, aus der sich das Journal angeblich "
+        "vollstaendig rekonstruieren laesst.",
+    ),
+    Mutation(
+        "Regelabgleich uebersieht Nachkaeufe wieder",
+        "src/alpaca_bot/audit.py",
+        '    kapital = dec[dec["action"].isin(("buy", "topup"))\n'
+        '                  & (dec["blocked_by"].isna())]',
+        '    kapital = dec[(dec["action"] == "buy")\n'
+        '                  & (dec["blocked_by"].isna())]',
+        "test_sicherungen_runde5",
+        "110 von 304 Live-Entscheidungen sind Nachkaeufe. Ohne sie bleibt "
+        "die Average-Down-Sperre - die teuerste Regel des Nachkaufpfads - "
+        "vollstaendig ungeprueft.",
+    ),
+    Mutation(
+        "raw speichert wieder den Text 'null' statt SQL-NULL",
+        "src/alpaca_bot/journal.py",
+        "                 _dumps(raw) if raw is not None else None),",
+        "                 _dumps(raw)),",
+        "test_journalherkunft",
+        "Eine Spalte, die zu 100 % gefuellt aussieht und nichts enthaelt. "
+        "§G13 Fund 2 in Reinform: 'Eine Null sieht wie eine Messung aus. "
+        "Ein NULL waere aufgefallen.'",
+    ),
+    Mutation(
+        "Schatten darf wieder unbemerkt handeln",
+        "src/alpaca_bot/selfcheck.py",
+        'SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py", "patterns.py")',
+        "SCHATTEN_MODULE = ()",
+        "test_sicherungen_runde5",
+        "Die Zusicherung steht in CLAUDE.md, README.md und BETRIEBSPLAN §6. "
+        "Eine leere Modulliste laesst die Regel gruen melden, ohne etwas zu "
+        "pruefen - die Fehlerklasse aus §G15.",
+    ),
 ]
 
 

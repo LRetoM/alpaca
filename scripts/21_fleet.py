@@ -43,8 +43,15 @@ def main() -> int:
                    help="Woran lag der Unterschied?")
     p.add_argument("--kriterien", metavar="BOT_ID",
                    help="Die vier Abnahmekriterien aus BETRIEBSPLAN §3.3")
-    p.add_argument("--basis", default="B00_basis",
-                   help="Vergleichsbot fuer --kriterien (Standard: B00_basis)")
+    # Standard ist bewusst None, nicht "B00_basis". Bis zum 23.08.2026
+    # stand hier fest "B00_basis" - und damit nahm das Abnahmekommando
+    # eine Referenz, die BEFUNDE §G6 am 16.08.2026 bereits widerlegt
+    # hatte, waehrend die Registrierung von B11 auf B09_nachkauf zeigte.
+    # Gemessener Unterschied: t = 0,99 gegen B00, t = 1,24 gegen B09
+    # (BEFUNDE §G19 Fund 1). None heisst "nimm die registrierte Basis".
+    p.add_argument("--basis", default=None,
+                   help="Vergleichsbot fuer --kriterien "
+                        "(Standard: die bei der Anmeldung registrierte Basis)")
     p.add_argument("--stilllegen", metavar="BOT_ID")
     p.add_argument("--grund", default="")
     p.add_argument("--anmelden", metavar="BOT_ID")

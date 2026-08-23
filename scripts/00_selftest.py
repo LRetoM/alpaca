@@ -262,8 +262,15 @@ def main() -> int:
         for i in range(20):
             d = run.decision("TEST", "buy", ts=df.index[100 + i * 5],
                              reasons={"grund_a": True}, price=float(df["close"].iloc[100 + i * 5]))
+            # `referenz_quelle="quote"` ist seit dem 23.08.2026 Pflicht,
+            # damit die Zeile in der Slippage-Auswertung mitzaehlt: Die
+            # Bereinigung nimmt nur noch Zeilen mit VERIFIZIERTER Referenz
+            # (§G19 Fund 3). Ohne dieses Argument bildet der Selbsttest
+            # den echten Schreibpfad nicht mehr ab - `live.py` setzt es
+            # bei jeder Order.
             run.order(d, symbol="TEST", side="buy", status="filled", qty=1,
-                      dry_run=False, expected_price=100.0, fill_price=100.05)
+                      dry_run=False, expected_price=100.0, fill_price=100.05,
+                      referenz_quelle="quote")
     check("Lauf, Entscheidungen und Orders gespeichert",
           len(j.table("runs")) == 1 and len(j.table("decisions")) == 20
           and len(j.table("orders")) == 20)

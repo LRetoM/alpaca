@@ -69,7 +69,9 @@ aus `BEFUNDE.md` §G15/§G16.
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
-| `test_protokoll.py` | 18 | `code_version` je Lauf *(war 2 Monate kaputt)*, `referenz_quelle`, Slippage schließt Legacy und Fallback aus, Dry-Run-Orders überschreiben sich nicht, Lebenslauf, Kapitalflüsse (DIV/INT sind **kein** Kapitalfluss). |
+| `test_protokoll.py` | 19 | `code_version` je Lauf *(war 2 Monate kaputt)*, `referenz_quelle`, Slippage schließt Legacy, Fallback **und Zeilen ohne Referenzquelle** aus (§G19), Dry-Run-Orders überschreiben sich nicht, Lebenslauf, Kapitalflüsse (DIV/INT sind **kein** Kapitalfluss). |
+| `test_journalherkunft.py` | 17 | **§G19:** Die JSONL-Sicherung liegt neben **ihrer** Datenbank — ein Testlauf darf das Produktivverzeichnis nicht berühren *(2.146 Fremddateien, 28,6 % aller Zeilen)*. Slippage zählt nur **verifizierte** Referenzen (Positivliste, `NULL` fällt heraus). `raw` speichert SQL-`NULL`, nicht den Text `'null'`. Der Protokollkopf trennt Live von Simulation. |
+| `test_sicherungen_runde5.py` | 19 | **§G19:** Der Regelabgleich prüft **Nachkäufe** mit — Score-Schwelle und Average-Down-Sperre *(110 von 304 Live-Entscheidungen waren ungeprüft)*. Die Schattendatenbank hat eine **echte**, transaktionskonsistente Sicherung. Kein Schattenmodul importiert `trading` — auch nicht lokal in einer Funktion, und die **Modulliste selbst** darf nicht leer sein. |
 | `test_datenklarheit.py` | 14 | Wächter für **stumme Felder** (hört ein Feld auf, sich zu füllen?), `bars_held` gegen die Datumsangaben, Journal trennt Live von Simulation, Kontext an **allen** Entscheidungsarten (nicht nur `buy`). |
 | `test_monitoring.py` | 8 | Kontext im Protokoll, Kontext ändert **keine** Entscheidung, Liquiditätsdezile. |
 | `test_daten.py` | 6 | Bar-Cache-Schlüssel: `sha256` statt `hash()` *(pro Prozess randomisiert)*, Datum auf den Tag normalisiert. |
@@ -114,6 +116,7 @@ aus `BEFUNDE.md` §G15/§G16.
 
 | Datei | Tests | Kernfragen |
 |---|---:|---|
+| `test_abnahmereferenz.py` | 11 | **§G19:** Die Abnahme rechnet gegen die **registrierte** Basis, nicht gegen einen hartkodierten Standard. Dieselbe Frage hatte vier Antworten an vier Orten — gemessen t = 0,99 gegen `B00_basis`, t = 1,24 gegen `B09_nachkauf`. Die Ausgabe weist die Herkunft der Referenz aus. |
 | `test_konsistenz.py` | 20 | **`B09_nachkauf` ist deckungsgleich mit dem, was `12_daemon.py` startet** *(Invariante — bricht, sobald jemand die Skript-Defaults ändert)*. `shadow.py` importiert **kein** `trading.py`. Beide Pfade melden dieselbe `code_version`. Alle `EngineConfig`-Felder erscheinen in `as_dict()`. Die Simulation fährt feldweise die Live-Strategie. |
 
 > **Wichtige Ergänzung seit §G16:** `test_konsistenz.py` sichert die

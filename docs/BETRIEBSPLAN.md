@@ -93,12 +93,32 @@ Position hat 5 Tage erreicht
 | Gemessener Vorsprung | +0,11 % je Trade |
 | Rundlauf-Breakeven bei 5 bps Spread | 0,142 % |
 | **Erforderlich** | Slippage-Median **< 8 bps** über 30+ saubere Orders |
-| **Stand 22.08.2026** | **+0,0 bps Median über 162 prüfbare Orders** |
+| **Stand 23.08.2026** | **+0,0 bps Median über 131 prüfbare Orders** |
 
-**Die Ausführungsbedingung ist damit erfüllt.** 162 prüfbare Orders
+**Die Ausführungsbedingung ist damit erfüllt.** 131 prüfbare Orders
 gegen die geforderten 30, Median +0,0 bps gegen die geforderten < 8.
 Die Ausführung im Papierdepot kostet also praktisch nichts gegenüber dem
 Referenzkurs.
+
+> **Korrektur der Grundmenge vom 23.08.2026 (`BEFUNDE.md` §G19 Fund 3).**
+> Hier stand vorher „162 prüfbare Orders". Die Bereinigung, die Zeilen
+> ohne echte Marktquote entfernen sollte, filterte auf
+> `referenz_quelle == 'fallback'` — einen Wert, den es in den Daten nie
+> gab. Die Spalte kam erst am 04.08.2026 dazu; ältere Zeilen tragen
+> `NULL`, und `NULL != 'fallback'`. So blieben 31 Orders aus
+> 28.07.–04.08. in der Messung, darunter genau die Ausreißer, die §G
+> bereits als Datenfehler führt (KGS −1.648, SIMO −1.584, TGTX −1.258 bps).
+>
+> | | n | Median | Mittel |
+> |---|---:|---:|---:|
+> | vorher | 162 | +0,0 bps | −71,7 bps |
+> | **jetzt** | **131** | **+0,0 bps** | **−27,4 bps** |
+>
+> **Der Schluss oben ändert sich nicht** — der Median ist beidseitig +0,0,
+> und 131 liegt weiterhin weit über den geforderten 30. Falsch war die
+> Grundmenge, nicht das Urteil. Dass es folgenlos blieb, liegt allein am
+> Median: §G16 Fund 9 hatte die Kostenkontrolle vom Mittelwert auf ihn
+> umgestellt. Der Mittelwert war um **44,3 bps** verzerrt.
 
 **Was das NICHT heißt.** Die Frage aus der Überschrift ist damit *nicht*
 beantwortet, nur ihre eine Hälfte:
@@ -144,9 +164,38 @@ mehr Zeit ändert daran nichts. Zählen weiter im Versuchszähler.
 
 ### 3.3 Was „Erfolg" für B11_dyn_ausstieg_live konkret heißt
 
-Geprüft wird `B11_dyn_ausstieg_live` gegen `B00_basis`. Der Vorgänger
-`B10_dyn_ausstieg` ist seit 16.08. stillgelegt (er hat **null** Ausstiege
-produziert) und zählt nur noch im Versuchszähler mit.
+Geprüft wird `B11_dyn_ausstieg_live` gegen **`B09_nachkauf`** — die bei
+seiner Anmeldung hinterlegte Referenz. Der Vorgänger `B10_dyn_ausstieg`
+ist seit 16.08. stillgelegt (er hat **null** Ausstiege produziert) und
+zählt nur noch im Versuchszähler mit.
+
+> **Korrektur vom 23.08.2026 (`BEFUNDE.md` §G19 Fund 1).** Hier stand bis
+> dahin `B00_basis`. Das war ein Übersehen beim Nachziehen von §G6: Jener
+> Befund hat `B00_basis` am 16.08.2026 als Live-Referenz **widerlegt**
+> (der Live-Bot läuft seit dem 30.07. mit `deploy_to_target=True` und
+> `allow_topup=True`, `B00_basis` steht auf `False`/`False`) und
+> `B11_dyn_ausstieg_live` eigens gegen `B09_nachkauf` angemeldet — daher
+> sein Namenszusatz „gegen echte Live-Basis". Dieses Dokument wurde nicht
+> nachgezogen, und `21_fleet.py --basis` trug `B00_basis` als
+> hartkodierten Standard.
+>
+> **Es war keine Formalie:** t = 0,99 gegen `B00_basis`, t = 1,24 gegen
+> `B09_nachkauf` (gemessen 23.08.2026). Beide Zahlen heißen „Kriterium 1".
+>
+> Das ist **keine nachträgliche Anpassung des Vertrags** im Sinne der
+> Warnung unten. Der Vertrag wird auf die Referenz zurückgesetzt, die bei
+> der Anmeldung am 16.08.2026 festgelegt wurde — die Kriterien selbst
+> bleiben Wort für Wort unverändert. Maßgeblich ist ab jetzt die
+> **Registrierung**, nicht dieser Absatz: `shadow_eval.referenz_bot()`
+> liest sie, und `--basis` ohne Angabe folgt ihr.
+>
+> **Einordnung:** Der Vergleich bleibt so oder so **intern gültig** —
+> beide Seiten teilen denselben Rhythmus, die getestete Achse
+> (`zeitausstieg_dynamisch`) ist sauber isoliert. Was `B09_nachkauf`
+> **nicht** ist: ein Spiegel des echten Live-Bots (§G16 Fund 1,
+> `shadow.pruefungen()` Nr. 10 weist die Abweichung bei jedem Aufruf aus).
+> Ein bestandenes B11 heißt also „besser als B09 unter Spiegelbedingungen",
+> nicht „besser als der Live-Bot".
 
 **Diese vier Kriterien sind der Entscheidungsvertrag.** Sie stehen vorab
 fest und werden nicht nachträglich angepasst — weder nach oben noch nach
@@ -158,8 +207,10 @@ python scripts/21_fleet.py --kriterien B11_dyn_ausstieg_live
 
 B11 gilt als **bestanden**, wenn *alle vier* zutreffen:
 
-1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B00_basis")` liefert einen
-   t-Wert über **`fleet.schwelle_sigma()`** (keine feste Zahl, siehe §3.2)
+1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B09_nachkauf")` liefert einen
+   t-Wert über **`fleet.schwelle_sigma()`** (keine feste Zahl, siehe §3.2).
+   Den Bot-Namen hier gar nicht erst abschreiben: `--kriterien` nimmt ohne
+   `--basis` die registrierte Referenz und weist sie im Kopf mit aus.
 2. über mindestens **20 auswertbare Handelstage** — das sind Tage *nach*
    Abzug der Sperrzone (`SPERRZONE_ANTEIL = 0,20`). 20 auswertbare Tage
    entsprechen **25 rohen** Handelstagen.
@@ -343,7 +394,7 @@ Interessant sind dort:
 |---|---|
 | **Ein Entscheidungspfad** | `Engine.decide()` läuft in Backtest, Schatten und Live. Abweichungen können nur aus Ausführung stammen. |
 | **Strukturelle Lookahead-Sperre** | `MarketSnapshot.validate()` — die Engine *kann* nicht in die Zukunft sehen. |
-| **Schatten kann nicht handeln** | `shadow.py` importiert `trading.py` bewusst nicht. |
+| **Schatten handelt nicht** | Kein Schattenmodul importiert `trading.py`. Seit 23.08.2026 **geprüft** (`selfcheck`-Regel 9, §G19) statt behauptet. Geltungsbereich ist der Quelltext — zur Laufzeit lädt das Paket-`__init__.py` `trading` mit, dort tragen `dry_run=True` und `_check_risk()`. |
 | **Voranmeldung + Versuchszähler** | Schutz gegen nachträgliche Erzählungen. |
 | **Automatische Integritätsprüfung** | Findet Protokollfehler, bevor sie Entscheidungen verfälschen. |
 | **Betrieb bewährt** | 11 Tage ununterbrochen, 1 abgefangener Fehler. |

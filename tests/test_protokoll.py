@@ -90,8 +90,17 @@ class TestSlippageBereinigung:
                     expected_price=expected, referenz_quelle=quelle)
 
     def test_legacy_zeilen_ausgeschlossen(self, temp_journal):
-        # Status-Text "X geschlossen" = vor dem close_position()-Fix
-        self._order(temp_journal, "alt", "AMKR geschlossen", 45.0, 60.0)
+        # Status-Text "X geschlossen" = vor dem close_position()-Fix.
+        #
+        # `quelle="quote"` ist hier WESENTLICH, nicht Beiwerk: Seit dem
+        # 23.08.2026 wirft die Bereinigung auch jede Zeile ohne
+        # verifizierte Referenz heraus (§G19 Fund 3). Ohne dieses
+        # Argument waere die Legacy-Zeile aus ZWEI Gruenden draussen, und
+        # der Test bliebe gruen, selbst wenn der Legacy-Filter ganz
+        # entfaellt - genau das meldete der Mutationstest am 23.08.2026.
+        # Mit gueltiger Quelle ist der Legacy-Filter der einzige Grund,
+        # und der Test prueft wieder, was sein Name behauptet.
+        self._order(temp_journal, "alt", "AMKR geschlossen", 45.0, 60.0, "quote")
         self._order(temp_journal, "neu", "filled", 100.0, 100.5, "quote")
         rep = temp_journal.slippage_report()
         assert rep["n"].sum() == 1, "Legacy-Zeile muss ausgeschlossen sein"
@@ -101,8 +110,14 @@ class TestSlippageBereinigung:
         self._order(temp_journal, "ok", "filled", 100.0, 100.5, "quote")
         assert temp_journal.slippage_report()["n"].sum() == 1
 
+    def test_zeilen_ohne_referenzquelle_ausgeschlossen(self, temp_journal):
+        """§G19 Fund 3: `NULL != 'fallback'` liess sie frueher durch."""
+        self._order(temp_journal, "alt", "filled", 45.0, 60.0, None)
+        self._order(temp_journal, "ok", "filled", 100.0, 100.5, "quote")
+        assert temp_journal.slippage_report()["n"].sum() == 1
+
     def test_unbereinigt_zeigt_alles(self, temp_journal):
-        self._order(temp_journal, "alt", "AMKR geschlossen", 45.0, 60.0)
+        self._order(temp_journal, "alt", "AMKR geschlossen", 45.0, 60.0, "quote")
         self._order(temp_journal, "neu", "filled", 100.0, 100.5, "quote")
         assert temp_journal.slippage_report(nur_bereinigt=False)["n"].sum() == 2
 

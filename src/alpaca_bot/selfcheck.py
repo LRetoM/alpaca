@@ -50,6 +50,7 @@ CHARTER = {
         "Jede Strategie wird gegen Buy & Hold UND gegen die Basisrate gemessen.",
         "Jede RL-Politik wird gegen den Timing-Test gemessen, nicht gegen die Rendite.",
         "Live-Handel und Simulation nutzen DIESELBE Engine.decide().",
+        "Der Schattenbetrieb ruft keine Order-Funktion auf.",
         "Jede Entscheidung wird mit Begruendung protokolliert - auch die blockierten.",
         "Kosten werden immer mitgerechnet, nie nachtraeglich abgezogen.",
         "Keine Zugangsdaten im Code oder im Repository.",
@@ -213,6 +214,65 @@ def check_single_decision_path(report: CheckReport) -> None:
                 "statt der Engine. Simulation und Live wuerden auseinanderlaufen.",
                 path.name,
             )
+
+
+SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py", "patterns.py")
+"""Module, die zum Schattenbetrieb gehoeren und nie handeln duerfen."""
+
+
+def check_schatten_handelt_nicht(report: CheckReport) -> None:
+    """Kein Schattenmodul darf `trading` erreichen.
+
+    **Warum das eine eigene Regel bekommt (23.08.2026, §G19).** Diese
+    Zusicherung steht an drei prominenten Stellen - `CLAUDE.md`,
+    `README.md` und `BETRIEBSPLAN` §6 - und war bis heute an keiner
+    einzigen geprueft:
+
+        "Der Schattenbetrieb importiert trading.py bewusst NICHT -
+         er *kann* keine Order senden, nicht nur 'darf nicht'."
+
+    Nachgemessen: Sie stimmt. Kein Schattenmodul referenziert `trading`.
+    Das ist genau die Lage aus §G17 (der RL-Docstring behauptete, der
+    Timing-Test sei nicht abschaltbar - er stimmte auch, war aber
+    ungeprueft). Eine Zusicherung, die dieses Projekt sonst durch Tests
+    deckt, blieb hier eine Behauptung.
+
+    **Was diese Regel NICHT leistet - und das gehoert dazu.** Sie prueft
+    den Quelltext, nicht den Prozess. Zur Laufzeit ist
+    `alpaca_bot.trading` sehr wohl geladen: `import alpaca_bot.shadow`
+    fuehrt `__init__.py` aus, und das importiert `trading` mit. Aus
+    "kann nicht" wird damit streng genommen "tut nicht". Ein Import
+    allein sendet keine Order, und `trading` haelt zusaetzlich
+    `dry_run=True` als Standard und `_check_risk()` vor jedem Senden -
+    die Trennung ist also mehrfach abgesichert. Aber die staerkere
+    Formulierung ("kann nicht") traegt nur so weit, wie diese Pruefung
+    reicht: bis zum Quelltext.
+    """
+    report.checks_run += 1
+    for name in SCHATTEN_MODULE:
+        path = SRC / name
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            treffer = False
+            if isinstance(node, ast.ImportFrom):
+                treffer = (node.module or "").split(".")[-1] == "trading" or any(
+                    a.name == "trading" for a in node.names)
+            elif isinstance(node, ast.Import):
+                treffer = any(a.name.split(".")[-1] == "trading"
+                              for a in node.names)
+            if treffer:
+                report.add(
+                    "verstoss", "Der Schattenbetrieb ruft keine Order-Funktion auf",
+                    f"{name} importiert `trading`. Der Schattenbetrieb darf "
+                    f"Orders nicht einmal erreichen koennen - das ist der "
+                    f"Grund, warum er ohne Kapitalrisiko messen darf.",
+                    f"{name}:{node.lineno}",
+                )
 
 
 def check_no_shuffle_split(report: CheckReport) -> None:
@@ -387,6 +447,7 @@ def run_all() -> CheckReport:
     for check in (
         check_dry_run_defaults,
         check_single_decision_path,
+        check_schatten_handelt_nicht,
         check_rate_limiting,
         check_no_shuffle_split,
         check_no_secrets,

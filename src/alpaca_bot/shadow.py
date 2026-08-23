@@ -70,8 +70,13 @@ from .engine import (
 )
 
 SHADOW_DB = DATA_DIR / "shadow.sqlite"
-RAW_DIR = DATA_DIR / "shadow_raw"
 SHADOW_CACHE = CACHE_DIR / "shadow_bars"
+
+# `RAW_DIR = DATA_DIR / "shadow_raw"` stand hier bis zum 23.08.2026 und
+# wurde bei jedem `ShadowStore()` angelegt - aber NIE beschrieben. Seit
+# dem 31.07.2026 leer, und es sah aus wie das Gegenstueck zu
+# `journal_raw`. Ersetzt durch `ShadowStore.sichern()`, das eine echte,
+# transaktionskonsistente Kopie ablegt (BEFUNDE §G19 Fund 7).
 
 MARKET_SYMBOL = "SPY"
 
@@ -455,10 +460,75 @@ class ShadowStore:
     def __init__(self, path: Path = SHADOW_DB):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        RAW_DIR.mkdir(parents=True, exist_ok=True)
+        self.sicherung_dir = self.path.parent / "shadow_sicherung"
         with self._conn() as c:
             c.executescript(SCHEMA)
         self._migrate()
+
+    def sichern(self, behalten: int = 7) -> Path | None:
+        """Legt eine konsistente Kopie der Schattendatenbank an.
+
+        **Der Anlass (23.08.2026, BEFUNDE §G19 Fund 7).** Hier stand
+        vorher `RAW_DIR.mkdir(...)` - ein Verzeichnis `shadow_raw`, das
+        bei jedem `ShadowStore()` angelegt und **nie beschrieben** wurde.
+        Seit dem 31.07.2026 leer. Es sah aus wie das Gegenstueck zu
+        `journal_raw`, war aber keines.
+
+        Das ist nicht nur unordentlich. `shadow.sqlite` traegt 26 MB:
+        20.690 Vorhersagen, die gesamte Flottenmessung, den
+        Musterspeicher und den Versuchszaehler - die Datengrundlage der
+        Entscheidung vom 10.10.2026. Dafuer gab es keinerlei Sicherung,
+        nur ein leeres Verzeichnis, das eine vortaeuschte.
+
+        **Warum eine SQLite-Kopie und kein JSONL.** `journal.py` schreibt
+        JSONL, weil dort jede Zeile einzeln entsteht und der Verlust der
+        LAUFENDEN Aufzeichnung das Risiko ist. Der Schatten schreibt in
+        Schueben, einmal je Handelstag. Ein `.backup()` liefert dafuer
+        das Bessere: eine transaktionskonsistente, sofort benutzbare
+        Datenbank statt eines Rohstroms, den erst jemand zurueckspielen
+        muesste. Und es ist die einzige Form von Sicherung, die auch
+        wirklich einmal geprueft wurde - `sqlite3` uebernimmt das.
+
+        `behalten` begrenzt den Platzbedarf. Sieben Staende decken eine
+        Woche ab; wer einen Schaden laenger als eine Woche nicht bemerkt,
+        hat ein anderes Problem als die Zahl der Kopien.
+
+        Gibt den Pfad der Kopie zurueck, oder `None`, wenn die Sicherung
+        fehlschlug. **Geworfen wird nicht:** Der Ausfall der Sicherung
+        darf den Schattenbetrieb nicht stoppen - dieselbe Abwaegung wie
+        bei `journal._write_raw` (§G18 Fund 2). Gemeldet wird er
+        trotzdem, denn eine Sicherung, die still ausfaellt, ist genau
+        das, was hier gerade behoben wird.
+        """
+        import shutil
+
+        try:
+            self.sicherung_dir.mkdir(parents=True, exist_ok=True)
+            stempel = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            ziel = self.sicherung_dir / f"shadow_{stempel}.sqlite"
+
+            # `sqlite3.Connection.backup` statt `shutil.copy`: Eine
+            # Dateikopie waehrend eines laufenden Schreibvorgangs kann
+            # eine halb geschriebene Transaktion erwischen. Die
+            # Sicherung waere dann da und unbrauchbar - schlimmer als
+            # keine, weil man sich auf sie verlaesst.
+            quelle = sqlite3.connect(self.path, timeout=30)
+            kopie = sqlite3.connect(ziel)
+            try:
+                quelle.backup(kopie)
+            finally:
+                kopie.close()
+                quelle.close()
+
+            staende = sorted(self.sicherung_dir.glob("shadow_*.sqlite"))
+            for alt in staende[:-behalten] if behalten > 0 else []:
+                alt.unlink(missing_ok=True)
+            return ziel
+        except (OSError, sqlite3.Error, shutil.Error) as e:
+            print(f"  [Schatten] SICHERUNG FAELLT AUS: {type(e).__name__}: {e}. "
+                  f"Der Schattenbetrieb laeuft weiter, aber shadow.sqlite "
+                  f"hat derzeit keine Kopie.")
+            return None
 
     def _migrate(self) -> None:
         """Ergaenzt fehlende Spalten in bereits bestehenden Datenbanken.
