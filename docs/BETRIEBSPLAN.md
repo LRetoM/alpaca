@@ -524,6 +524,91 @@ laufende Messung deshalb nicht.
 
 ---
 
+### 7.1 Was der 10.10. liefert — vorab festgelegt (23.08.2026)
+
+Aus der Trennschärfe-Rechnung (`BEFUNDE.md` §G22) lässt sich vorher
+sagen, welche Fragen an diesem Tag beantwortet sein werden und welche
+nicht. **Das steht hier, damit am 10.10. niemand die Enttäuschung über
+Kriterium 1 mit einem Misserfolg verwechselt.**
+
+**Kommt sicher — hängt an keiner Signifikanzschwelle:**
+
+| Frage | Warum sie trägt |
+|---|---|
+| **Greift die dynamische Regel?** (Kriterium 3) | ~75 Ausstiege im Nenner, Standardfehler eines Anteils 5,3 % — die Bandbreite 10–60 % ist klar trennbar |
+| **Sind die verlängerten Trades im Plus?** (Kriterium 4) | ~22 verlängerte Trades, reine Vorzeichenfrage |
+| **Wie stark sinkt der Umschlag?** | Mittlere Haltedauer ist Arithmetik, keine Statistik (B04 zeigt es heute schon: 6,11 statt 4,47 Tage = 41 statt 56 Rundläufe/Jahr) |
+| **Wie groß ist die Streuung wirklich?** | Erst mit ~31 Tagen belastbar — heute steht sie auf 5 Tagen |
+| **Tragen die Ausführungskosten?** (§3.1) | bereits beantwortet, wird nur bestätigt |
+
+**Kommt wahrscheinlich nicht:**
+
+| Frage | Warum nicht |
+|---|---|
+| **Ist B11 messbar besser?** (Kriterium 1) | Nachweisbar wären 5,4–10,5 % kumuliert über 31 Tage. Bestehenswahrscheinlichkeit: 4 % bei wahrem Effekt 0,10 %/Tag, 25 % bei 0,20 %, 60 % beim heutigen Punktschätzer — der aber aus 5 Tagen stammt und dessen 95 %-Bereich von −0,35 bis +0,92 %/Tag reicht |
+| **Sagen B04, B07, B08 etwas?** | alle bei 0,2–0,4× ihrer Nachweisgrenze |
+| **Sagen B06, B09 etwas?** | **nie** — bitgleich mit ihrer Referenz (§G16, §E) |
+
+**Der wahrscheinlichste Ausgang:** Kriterien 2, 3 und 4 erfüllt,
+Kriterium 1 durchgefallen → es bleibt beim Zeitausstieg nach 5 Tagen.
+Das ist ein **Ergebnis**, keine verlorene Runde.
+
+---
+
+### 7.2 Der Plan nach dem 10.10.
+
+Welcher Zweig gilt, entscheidet die Auswertung selbst.
+
+**Zweig A — alle vier Kriterien erfüllt.** Dann geht `zeitausstieg_dynamisch`
+live, mit derselben Sorgfalt wie beim Intraday-Stop: Tests, Health-Check,
+vollständiger Dienstneustart, und danach `audit.py` und
+`shadow.pruefungen()` täglich, bis eine Woche ohne Abweichung vorliegt.
+`B11` läuft als Schattenkontrolle weiter.
+
+**Zweig B — Kriterium 1 durchgefallen, 3 und 4 erfüllt** (der erwartete Fall).
+Vier Schritte, in dieser Reihenfolge:
+
+1. **`B11` läuft weiter.** Er ist im Versuchszähler bereits bezahlt; ihn
+   stillzulegen wirft die Daten weg, ohne die Schwelle zu senken
+   (stillgelegte Bots zählen dauerhaft mit, §B2).
+2. **Neuen Termin aus der Trennschärfe ableiten, nicht aus dem Kalender.**
+   Am 10.10. steht erstmals eine belastbare Streuungsschätzung zur
+   Verfügung. `shadow_eval.trennschaerfe(..., n_tage=)` sagt dann, wie
+   viele Tage für 80 % Trefferwahrscheinlichkeit nötig sind. **Ergibt die
+   Rechnung mehr als ~12 Monate, ist `B11` in dieser Form nicht
+   entscheidbar** — dann wird er stillgelegt und die Frage neu gestellt,
+   statt Jahre zu warten.
+3. **Die Lehre aus §G22 auf jede künftige Anmeldung anwenden:**
+   Trennschärfe **vor** der Anmeldung abschätzen. Ein Bot, dessen Depot
+   stark vom Referenzbot abweicht, ist langsam entscheidbar — gemessen
+   1,1× Reduktion bei `B11` gegen 3,6× bei `B08`. Eine Idee, die sich als
+   *kleine* Änderung an einer bestehenden Regel formulieren lässt, ist der
+   Idee vorzuziehen, die das halbe Depot umbaut.
+4. **Erst Historienfilter, dann Flottenplatz.** `scripts/10_simulate.py`
+   kostet keinen Versuchszähler und darf verwerfen (§4). Der nächste
+   Kandidat ist die auffälligste nie gemessene Achse:
+
+> **`exit_score` (0,10) wurde nie gegengeprüft** — obwohl §E ihn
+> ausdrücklich als den Wert ausweist, der `target_atr` wirkungslos macht
+> („Ausstieg am selben Tag zum selben Kurs, nur mit anderem Etikett").
+> Er entscheidet damit faktisch über einen großen Teil der Ausstiege und
+> ist die einzige ungemessene Achse mit belegter Wirkung. Ebenfalls offen,
+> aber ohne solchen Beleg: `trail_after_atr` und `reenter_cooldown_days`
+> (§F beziffert deren Kosten immerhin).
+
+**Was in beiden Zweigen gilt:** Der zentrale Konflikt aus §A bleibt
+unberührt. Vorsprung +0,11 % je Trade gegen Rundlauf-Breakeven 0,142 %.
+
+> **Vorsicht mit dem Umschlag-Argument.** Weniger Rundläufe senken die
+> Kostenlast pro Jahr (B04: 5,9 % statt 8,0 % je Positionsplatz) — aber
+> sie senken den Bruttoertrag im gleichen Maß. Der Vergleich *je Trade*
+> ändert sich dadurch **nicht**. Nur wenn längeres Halten den Ertrag **je
+> Trade** hebt, verschiebt sich §A — und genau das braucht wieder
+> Statistik. Ein „B11 spart 2,4 Prozentpunkte Kosten pro Jahr" ist
+> richtig gerechnet und trotzdem kein Argument für die Live-Schaltung.
+
+---
+
 ## 8. Abbruchkriterien
 
 | Ereignis | Konsequenz |
