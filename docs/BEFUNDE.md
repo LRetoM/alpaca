@@ -3199,6 +3199,116 @@ gelten für die Vier-Faktor-Fassung. Für die live laufende Fassung gibt es
 **keine Mehrjahresmessung** — nur 19 Handelstage Papierbetrieb.
 
 
+## G25. Die Lernschleife ist offen — und nur ein Kanal hat Trennschärfe (23.08.2026)
+
+**Anlass:** die Frage, ob Speichern und Auswerten so funktionieren wie
+gedacht und ob sich der Bot auf lange Sicht verbessert. Erstmals nicht
+nach Einzelfehlern gesucht, sondern nach dem **Kreislauf als Ganzem**.
+
+### Die Speicherschicht ist in Ordnung
+
+Derselbe Vorgang über vier Datenbanken verfolgt:
+
+| | Anzahl |
+|---|---:|
+| Verkäufe im Journal (`executed=1`) | 61 |
+| Ausstiege in `state.exits` | 58 |
+| Einträge im Lebenslauf | 56 |
+| Käufe/Nachkäufe `executed=1` gegen echte Kauf-Orders | **122 = 122** |
+
+Abgleich nach Symbol und Tag: Journal → `state.exits` weicht in **einer**
+Position ab (AMKR 28.07., der bekannte Legacy-Fall mit drei Wiederholungen
+am selben Tag), `state.exits` → Lebenslauf in **zwei** (die
+`stop_intraday`-Zeilen aus §G21, ab jetzt geschlossen). Keine
+verschwundenen Vorgänge, keine erfundenen.
+
+**Speichern funktioniert.** Die Sorge ist an dieser Stelle unbegründet.
+
+### Der Kreislauf ist es nicht
+
+Geprüft, ob der Handelspfad **irgendein** gelerntes Artefakt liest:
+
+```
+grep patterns|lernkern|hypotheses|muster
+  in live.py, engine.py, daemon.py, signals.py   ->  0 Treffer
+```
+
+Und die Bilanz der vier Lernkanäle:
+
+| Kanal | Bestand | in die Handelslogik gelangt |
+|---|---|---|
+| Musterspeicher | 0 Zeilen | 0 |
+| Hypothesen | 3, **alle widerlegt** | 0 |
+| Lernkern | 3 Modelle, **alle verworfen** | 0 |
+| Flotte | 13 Bots, **0 bestanden** | 0 |
+
+**In der gesamten Projektlaufzeit hat keine einzige Messung die
+Handelslogik verändert.**
+
+Das ist zunächst **Absicht** und richtig so — `lernen()` schreibt es
+selbst hin: *„Was er ausdrücklich NICHT tut: Er ändert keine Handelsregel.
+Ein bestätigtes Muster ist eine Beobachtung mit Beleg und Verfallsdatum,
+kein Signal."* Ein System, das sich selbst umschreibt, wäre gefährlicher
+als eines, das stillsteht.
+
+**Die eine Änderung, die je durchkam, kam am Apparat vorbei.** Der
+Nachrichtenfaktor (`ReversalWeights.news = 0.10`, Commit `3c5dcd3`) wurde
+laut eigener Dokumentation *„auf ausdrücklichen Wunsch direkt in beide
+Bots eingebaut, OHNE vorherige Schattenbetrieb-Messung"*. Der einzige
+Baustein ohne Messung ist der einzige, der es in die laufende Logik
+geschafft hat — und §G24 zeigt, dass er die Rangfolge dreht.
+
+### Warum der Kreislauf nicht schließt
+
+§G23 hat es beziffert: Der Flottenvergleich über Tages-Equity kann nur
+Effekte ab 0,18–0,35 %/Tag finden. Wirtschaftlich entscheidend sind
+0,0065 %/Tag. Der Kanal, über den eine Idee laut CLAUDE.md in die
+Handelslogik gelangen soll, ist **28- bis 53-mal zu grob**.
+
+Damit ist die Schleife nicht nur offen, sondern strukturell blockiert.
+
+### Aber ein Kanal hat Trennschärfe — der IC
+
+Der Unterschied ist die **Zähleinheit**. Der Flottenvergleich mittelt
+31 Tagesdifferenzen. Der IC mittelt über **Tausende Vorhersagen je Tag**:
+
+| Handelstage | IC nachweisbar ab (t > 2, überlappungskorrigiert) |
+|---:|---:|
+| 13 (heute) | +0,136 — kein t-Wert berechenbar |
+| 31 | +0,081 |
+| **53 (10.10.)** | **+0,063** |
+| 100 | +0,048 |
+| 250 | +0,031 |
+
+**Gemessen: IC +0,0696 über 13 Tage.** Am 10.10. liegt die Nachweisgrenze
+bei +0,063 — der gemessene Wert liegt **knapp darüber**.
+
+Damit wird am 10.10. erstmals die Frage entscheidbar, für die der
+Schattenbetrieb überhaupt gebaut wurde (`shadow.py`-Docstring): **„Sortiert
+unsere Rangliste richtig?"**
+
+**Zwei Warnungen dazu.** Erstens ist IC +0,070 gegenüber dem besten je
+gemessenen Einzelfaktor (0,018 über 9 Jahre, §A) **verdächtig hoch** —
+dieselbe Unplausibilitätsprüfung wie in §G23. Zweitens ist der Wert aus
+13 Tagen; die Streuung des Tages-IC beträgt 0,173, also das
+Zweieinhalbfache des Mittelwerts.
+
+### Was daraus folgt
+
+Der Messapparat ist nicht kaputt — er ist **an der falschen Stelle
+angeschlossen**. Er hat Trennschärfe dort, wo er Vorhersagen zählt, und
+keine dort, wo er Depots vergleicht.
+
+| Frage | Kanal | Trennschärfe |
+|---|---|---|
+| Sortiert die Rangliste? | IC über Vorhersagen | **ja, ab ~53 Tagen** |
+| Ist Ausstiegsregel A besser als B? | Equity-Vergleich | **nein, nie** |
+| Trägt ein Faktor? | Historienlauf, 2.149 Ausstiege | ja (aber §G24) |
+
+Wer den Bot verbessern will, muss Fragen stellen, die der IC beantworten
+kann — also Fragen an die **Auswahl**, nicht an die **Ausstiegsmechanik**.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
