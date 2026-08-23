@@ -216,8 +216,32 @@ def check_single_decision_path(report: CheckReport) -> None:
             )
 
 
-SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py", "patterns.py")
-"""Module, die zum Schattenbetrieb gehoeren und nie handeln duerfen."""
+SCHATTEN_ZUSATZ = ("fleet.py", "patterns.py")
+"""Schattenmodule, deren Name nicht mit `shadow` beginnt."""
+
+
+def schatten_module() -> list[str]:
+    """Alle Module des Schattenbetriebs - per Suchmuster, nicht per Liste.
+
+    **Warum ein Glob und keine aufgezaehlte Liste (23.08.2026, §G20).**
+    Hier stand zuerst genau so eine Liste:
+
+        SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py",
+                           "patterns.py")
+
+    Am selben Tag wurde `shadow.py` in fuenf Module aufgeteilt. Der Code,
+    um den es geht, wanderte nach `shadow_schritte.py` - und die Regel
+    bewachte ab da die **Fassade** statt des Codes. Sie meldete weiter
+    gruen. Gefunden hat das nicht ein Test, sondern der Mutationstest:
+    Er baute `from . import trading` in `shadow_schritte.py` ein, und
+    niemand schlug an.
+
+    Das ist die Fehlerklasse aus §G15 in ihrer unangenehmsten Form - eine
+    Sicherung, die vom Aufraeumen selbst blind gemacht wird. Ein
+    Suchmuster hat sie nicht: Ein neues `shadow_*.py` ist automatisch
+    abgedeckt, ohne dass jemand daran denken muss.
+    """
+    return sorted({p.name for p in SRC.glob("shadow*.py")} | set(SCHATTEN_ZUSATZ))
 
 
 def check_schatten_handelt_nicht(report: CheckReport) -> None:
@@ -247,9 +271,12 @@ def check_schatten_handelt_nicht(report: CheckReport) -> None:
     die Trennung ist also mehrfach abgesichert. Aber die staerkere
     Formulierung ("kann nicht") traegt nur so weit, wie diese Pruefung
     reicht: bis zum Quelltext.
+
+    Geprueft werden alle `shadow*.py` plus `SCHATTEN_ZUSATZ` - siehe
+    `schatten_module()`, warum das ein Suchmuster und keine Liste ist.
     """
     report.checks_run += 1
-    for name in SCHATTEN_MODULE:
+    for name in schatten_module():
         path = SRC / name
         if not path.exists():
             continue

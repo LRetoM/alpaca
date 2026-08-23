@@ -206,10 +206,14 @@ MUTATIONEN = [
     # --- Konsistenz --------------------------------------------------------
     Mutation(
         "Schatten importiert Handelscode",
-        "src/alpaca_bot/shadow.py",
+        # Seit der Aufteilung vom 23.08.2026 (§G20) liegt der Kostenimport
+        # in `shadow_schritte.py`. Die Mutation muss dorthin, wo der Code
+        # steht - eine Mutation, deren Suchmuster ins Leere greift, meldet
+        # sich als "nicht anwendbar" und prueft nichts.
+        "src/alpaca_bot/shadow_schritte.py",
         "from .costs import DEFAULT_FEES, estimate_costs",
         "from .costs import DEFAULT_FEES, estimate_costs\nfrom . import trading  # MUTATION",
-        "test_konsistenz",
+        "test_konsistenz or test_sicherungen_runde5",
         "Der Schatten darf konstruktionsbedingt keine Order senden "
         "koennen - nicht nur 'darf nicht'.",
     ),
@@ -494,18 +498,19 @@ MUTATIONEN = [
     # --- Kostenkontrolle: die Kennzahl des Vertrags (§G16) ----------------
     Mutation(
         "Kostenkontrolle rechnet wieder den Mittelwert",
-        "src/alpaca_bot/shadow.py",
+        "src/alpaca_bot/shadow_pruefung.py",
         "        echt = float(werte.median())",
         "        echt = float(werte.mean())",
         "test_kostenkontrolle",
-        "BETRIEBSPLAN §3.1 und §8 nennen beide den MEDIAN. Ueber dieselben "
-        "162 Orders: Median +0,0 bps (Kriterium erfuellt), Mittel -71,7 bps "
-        "(Pruefung meldet FEHL) - die Differenz sind drei kaputte "
-        "IEX-Quotes.",
+        "BETRIEBSPLAN §3.1 und §8 nennen beide den MEDIAN. Ueber dieselbe "
+        "Grundmenge: Median +0,0 bps (Kriterium erfuellt), Mittelwert "
+        "deutlich negativ (Pruefung meldet FEHL) - die Differenz sind "
+        "einzelne kaputte IEX-Quotes. Konkrete Zahlen bewusst nicht "
+        "abgeschrieben, die Grundmenge waechst (§G19 Fund 2).",
     ),
     Mutation(
         "Slippage-Median wieder ueber Symbole statt Orders",
-        "src/alpaca_bot/shadow.py",
+        "src/alpaca_bot/shadow_pruefung.py",
         "        werte = Journal().slippage_werte().dropna()",
         "        werte = Journal().slippage_report()['median'].dropna()",
         "test_kostenkontrolle",
@@ -515,7 +520,7 @@ MUTATIONEN = [
     ),
     Mutation(
         "Kursanpassung prueft wieder die ganze Historie",
-        "src/alpaca_bot/shadow.py",
+        "src/alpaca_bot/shadow_pruefung.py",
         "    anteil_jung = float((frisch[\"data_check\"] == \"kurs_angepasst\").mean())",
         "    anteil_jung = float((df[\"data_check\"] == \"kurs_angepasst\").mean())",
         "test_kostenkontrolle",
@@ -697,12 +702,13 @@ MUTATIONEN = [
     Mutation(
         "Schatten darf wieder unbemerkt handeln",
         "src/alpaca_bot/selfcheck.py",
-        'SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py", "patterns.py")',
-        "SCHATTEN_MODULE = ()",
-        "test_sicherungen_runde5",
-        "Die Zusicherung steht in CLAUDE.md, README.md und BETRIEBSPLAN §6. "
-        "Eine leere Modulliste laesst die Regel gruen melden, ohne etwas zu "
-        "pruefen - die Fehlerklasse aus §G15.",
+        'return sorted({p.name for p in SRC.glob("shadow*.py")} | set(SCHATTEN_ZUSATZ))',
+        'return sorted({p.name for p in SRC.glob("shadow.py")} | set(SCHATTEN_ZUSATZ))',
+        "test_sicherungen_runde5 or test_konsistenz",
+        "GENAU der Fehler vom 23.08.2026: Nach der Aufteilung (§G20) lag "
+        "der Code in shadow_schritte.py, die Regel bewachte nur noch die "
+        "Fassade und meldete weiter gruen. Gefunden hat das kein Test, "
+        "sondern dieser Mutationslauf.",
     ),
 ]
 

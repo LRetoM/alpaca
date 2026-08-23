@@ -71,7 +71,7 @@ aus `BEFUNDE.md` §G15/§G16.
 |---|---:|---|
 | `test_protokoll.py` | 19 | `code_version` je Lauf *(war 2 Monate kaputt)*, `referenz_quelle`, Slippage schließt Legacy, Fallback **und Zeilen ohne Referenzquelle** aus (§G19), Dry-Run-Orders überschreiben sich nicht, Lebenslauf, Kapitalflüsse (DIV/INT sind **kein** Kapitalfluss). |
 | `test_journalherkunft.py` | 17 | **§G19:** Die JSONL-Sicherung liegt neben **ihrer** Datenbank — ein Testlauf darf das Produktivverzeichnis nicht berühren *(2.146 Fremddateien, 28,6 % aller Zeilen)*. Slippage zählt nur **verifizierte** Referenzen (Positivliste, `NULL` fällt heraus). `raw` speichert SQL-`NULL`, nicht den Text `'null'`. Der Protokollkopf trennt Live von Simulation. |
-| `test_sicherungen_runde5.py` | 19 | **§G19:** Der Regelabgleich prüft **Nachkäufe** mit — Score-Schwelle und Average-Down-Sperre *(110 von 304 Live-Entscheidungen waren ungeprüft)*. Die Schattendatenbank hat eine **echte**, transaktionskonsistente Sicherung. Kein Schattenmodul importiert `trading` — auch nicht lokal in einer Funktion, und die **Modulliste selbst** darf nicht leer sein. |
+| `test_sicherungen_runde5.py` | 19 | **§G19:** Der Regelabgleich prüft **Nachkäufe** mit — Score-Schwelle und Average-Down-Sperre *(110 von 304 Live-Entscheidungen waren ungeprüft)*. Die Schattendatenbank hat eine **echte**, transaktionskonsistente Sicherung. Kein Schattenmodul importiert `trading` — auch nicht lokal in einer Funktion, und **jedes** `shadow*.py` muss bewacht sein (§G20: die Aufteilung machte die Regel blind). |
 | `test_datenklarheit.py` | 14 | Wächter für **stumme Felder** (hört ein Feld auf, sich zu füllen?), `bars_held` gegen die Datumsangaben, Journal trennt Live von Simulation, Kontext an **allen** Entscheidungsarten (nicht nur `buy`). |
 | `test_monitoring.py` | 8 | Kontext im Protokoll, Kontext ändert **keine** Entscheidung, Liquiditätsdezile. |
 | `test_daten.py` | 6 | Bar-Cache-Schlüssel: `sha256` statt `hash()` *(pro Prozess randomisiert)*, Datum auf den Tag normalisiert. |
@@ -106,6 +106,23 @@ aus `BEFUNDE.md` §G15/§G16.
 | Datei | Tests | Kernfragen |
 |---|---:|---|
 | `test_werkzeuge.py` | 16 | **§G17:** Sperrzone ist nicht optional (auch im **Standardwert**). Der Timing-Test ist **nicht abschaltbar** — README führt ihn als eine der fünf Sicherungen. Er erkennt echtes Timing (Perzentil 100) und falsches (2). **Fehlalarmquote gemessen: 8,5 %** auf reinem Rauschen. Die RL-Kette läuft durch, ohne Trainingsdaten im Testfenster. |
+
+### 2.7a Umzüge — Struktur ändern, Verhalten nicht
+
+`scripts/29_umzug_pruefen.py` ist kein pytest-Test, sondern der Nachweis,
+den ein Umzug schuldet: Er vergleicht den **Bytecode** jeder verschobenen
+Funktion gegen den Stand davor (`co_code`, `co_consts` rekursiv,
+`co_names`, `co_varnames`). Gleicher Bytecode heißt gleiches Verhalten —
+unabhängig davon, welche Testfälle jemand ausgewählt hat.
+
+```
+git show <commit>:src/alpaca_bot/shadow.py > /tmp/vorher.py
+python scripts/29_umzug_pruefen.py /tmp/vorher.py
+```
+
+Bei der Aufteilung von `shadow.py` am 23.08.2026: **61 von 61 Funktionen
+bytegleich** (§G20). `co_names` ist dabei der eigentliche Wachhund — ein
+vergessener Import beim Modulwechsel steht dort und sonst nirgends.
 
 > Beide Module sind **Werkzeuge, keine Dauerläufer** — wie
 > `03_backtest.py`. Der Nutzungsnachweis überwacht sie bewusst nicht;

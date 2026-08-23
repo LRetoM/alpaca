@@ -128,8 +128,17 @@ class TestSchattenKannNichtHandeln:
         dieser Fall wurde stillschweigend uebersprungen. Der Mutationstest
         (Schritt 23) baute exakt diese Zeile ein und der Test blieb gruen.
         """
-        quelle = (PROJECT_ROOT / "src" / "alpaca_bot" / "shadow.py").read_text(
-            encoding="utf-8")
+        from alpaca_bot import selfcheck
+
+        # ALLE Schattenmodule, nicht nur `shadow.py`. Seit der Aufteilung
+        # vom 23.08.2026 (§G20) ist `shadow.py` nur noch die Fassade - der
+        # Code liegt in `shadow_schritte.py` und Geschwistern. Ein Test auf
+        # die Fassade allein blieb gruen, als der Mutationstest den Import
+        # in das echte Modul einbaute.
+        quelle = "\n".join(
+            (PROJECT_ROOT / "src" / "alpaca_bot" / name).read_text(encoding="utf-8")
+            for name in selfcheck.schatten_module()
+        )
         baum = ast.parse(quelle)
         importiert: set[str] = set()
         for k in ast.walk(baum):
@@ -146,7 +155,7 @@ class TestSchattenKannNichtHandeln:
                 for n in k.names:
                     importiert.add(n.name)
         verboten = {m for m in importiert if "trading" in m}
-        assert not verboten, f"shadow.py importiert Handelscode: {verboten}"
+        assert not verboten, f"Schattenmodul importiert Handelscode: {verboten}"
 
     def test_pruefung_erkennt_relativen_import(self):
         """Gegenprobe auf die PRUEFLOGIK selbst - ohne sie waere nicht

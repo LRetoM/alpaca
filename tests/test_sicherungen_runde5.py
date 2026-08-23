@@ -178,7 +178,7 @@ class TestSchattenHandeltNicht:
         selfcheck.check_schatten_handelt_nicht(r)
         assert not r.violations, [str(f) for f in r.violations]
 
-    def test_die_echte_modulliste_ist_nicht_leer(self):
+    def test_die_echte_modulliste_deckt_alle_schattenmodule_ab(self):
         """Der Mutationstest hat genau diese Luecke gefunden (23.08.2026).
 
         Alle Verstoss-Tests unten setzen `SCHATTEN_MODULE` per monkeypatch
@@ -191,15 +191,21 @@ class TestSchattenHandeltNicht:
         Argumente prueft, prueft die Voreinstellung nicht."* Zum zweiten
         Mal in diesem Projekt vom Mutationstest entlarvt.
         """
-        assert selfcheck.SCHATTEN_MODULE, (
+        bewacht = set(selfcheck.schatten_module())
+        assert bewacht, (
             "Eine leere Modulliste laesst die Regel gruen melden, ohne "
             "etwas zu pruefen - die Fehlerklasse aus §G15."
         )
-        assert "shadow.py" in selfcheck.SCHATTEN_MODULE, (
-            "shadow.py ist das Modul, um das es geht - der Schattenbetrieb "
-            "selbst."
+        # JEDES shadow*.py muss dabei sein. Genau hier lief es am
+        # 23.08.2026 schief: Die Aufteilung schob den Code nach
+        # `shadow_schritte.py`, die aufgezaehlte Liste kannte nur
+        # `shadow.py`, und die Regel bewachte ab da die Fassade.
+        vorhanden = {p.name for p in selfcheck.SRC.glob("shadow*.py")}
+        assert vorhanden <= bewacht, (
+            f"Nicht bewacht: {sorted(vorhanden - bewacht)}. Ein neues "
+            f"Schattenmodul darf der Regel nicht entkommen."
         )
-        for name in selfcheck.SCHATTEN_MODULE:
+        for name in bewacht:
             assert (selfcheck.SRC / name).exists(), (
                 f"{name} steht in der Liste, existiert aber nicht - die "
                 f"Regel prueft dann eine Datei weniger, ohne es zu melden."
@@ -214,7 +220,6 @@ class TestSchattenHandeltNicht:
         gefaelscht = tmp_path / "shadow.py"
         gefaelscht.write_text("from . import trading\n")
         monkeypatch.setattr(selfcheck, "SRC", tmp_path)
-        monkeypatch.setattr(selfcheck, "SCHATTEN_MODULE", ("shadow.py",))
         r = selfcheck.CheckReport()
         selfcheck.check_schatten_handelt_nicht(r)
         assert r.violations
@@ -223,7 +228,6 @@ class TestSchattenHandeltNicht:
         gefaelscht = tmp_path / "shadow.py"
         gefaelscht.write_text("import alpaca_bot.trading\n")
         monkeypatch.setattr(selfcheck, "SRC", tmp_path)
-        monkeypatch.setattr(selfcheck, "SCHATTEN_MODULE", ("shadow.py",))
         r = selfcheck.CheckReport()
         selfcheck.check_schatten_handelt_nicht(r)
         assert r.violations
@@ -232,7 +236,6 @@ class TestSchattenHandeltNicht:
         gefaelscht = tmp_path / "shadow.py"
         gefaelscht.write_text("from .trading import market_order\n")
         monkeypatch.setattr(selfcheck, "SRC", tmp_path)
-        monkeypatch.setattr(selfcheck, "SCHATTEN_MODULE", ("shadow.py",))
         r = selfcheck.CheckReport()
         selfcheck.check_schatten_handelt_nicht(r)
         assert r.violations
@@ -246,7 +249,6 @@ class TestSchattenHandeltNicht:
             "    from . import trading\n"
             "    return trading\n")
         monkeypatch.setattr(selfcheck, "SRC", tmp_path)
-        monkeypatch.setattr(selfcheck, "SCHATTEN_MODULE", ("shadow.py",))
         r = selfcheck.CheckReport()
         selfcheck.check_schatten_handelt_nicht(r)
         assert r.violations

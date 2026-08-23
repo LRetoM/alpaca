@@ -2580,6 +2580,125 @@ Regression: `tests/test_abnahmereferenz.py` (11),
 (19), sechs neue Mutationen — **65 von 65 gefangen**.
 
 
+## G20. `shadow.py` aufgeteilt — mit Nachweis statt Zusicherung (23.08.2026)
+
+**Anlass:** §G19 hielt fest, dass `shadow.py` fünf Verantwortungen in
+2.339 Zeilen trägt, und stellte den Umbau zurück — sechs Wochen vor dem
+Entscheidungstermin am 10.10.2026 schien er zu riskant. Auf Nachfrage
+geprüft, ob das stimmt. **Es stimmte nicht.** Ein reiner Umzug ist keine
+Änderung an der Handelslogik. Riskant ist nicht der Umzug, sondern der
+fehlende *Beweis*, dass es einer ist.
+
+### Der eigentliche Strukturfehler
+
+Die Selbstprüfungen des Schattens (~500 Zeilen) lagen **in der Datei,
+die sie prüfen**. Dieselbe Aufgabe existiert auf drei Ebenen, und nur
+bei einer lag der Prüfer im Geprüften:
+
+| Ebene | Prüfer | Wo |
+|---|---|---|
+| Live-Handelsregeln | `audit.py` | eigenes Modul |
+| Journal | `data_integrity.py` | eigenes Modul |
+| Schattenbetrieb | `pruefungen()` | **in `shadow.py`** |
+
+### Die Aufteilung
+
+```
+shadow_config.py      70 Zeilen   Einstellungen eines Laufs
+shadow_store.py      746 Zeilen   shadow.sqlite und ihr Schema
+shadow_daten.py      263 Zeilen   Universum, Bars, Snapshot
+shadow_schritte.py   846 Zeilen   die vier Schritte
+shadow_pruefung.py   530 Zeilen   die zehn Korrektheitsprüfungen
+shadow.py            139 Zeilen   Fassade + Landkarte
+```
+
+Abhängigkeiten laufen nur in eine Richtung: `config ← daten ← schritte`,
+`store ← schritte, pruefung`.
+
+**`ShadowConfig` bekam ein eigenes Modul, obwohl es nur eine Dataclass
+ist.** Nicht aus Ordnungsliebe: `_universum_symbole(cfg: ShadowConfig)`
+war die einzige Stelle, an der die Datenschicht auf die Schrittschicht
+zeigt. Ohne diese Trennung bliebe genau ein Zyklus übrig — und ein
+einziger Zyklus reicht, damit die Schichtung nur noch behauptet ist.
+
+**Die Fassade bleibt.** Zwölf Stellen importieren aus `alpaca_bot.shadow`.
+Ein Umzug, der gleichzeitig alle Aufrufer ändert, ist kein reiner Umzug
+mehr und damit nicht mehr nachweisbar.
+
+### Der Nachweis: Bytecode, nicht Tests
+
+`scripts/29_umzug_pruefen.py` vergleicht für **jede** verschobene
+Funktion das übersetzte Code-Objekt gegen den Stand davor: `co_code`,
+`co_consts` (rekursiv, auch verschachtelte Funktionen), `co_names`,
+`co_varnames`, Argumentzahlen, Flags.
+
+```
+61 von 61 Funktionen bytegleich.
+Der Umzug hat nichts am Verhalten geaendert.
+```
+
+**Warum die Testsuite als Nachweis nicht reicht.** Sie zeigt, dass die
+*geprüften Fälle* weiter stimmen — nicht, dass nichts anderes sich
+geändert hat. Genau dieser Unterschied ist die Fehlerklasse, an der
+dieses Projekt mehrfach gescheitert ist (§G15). Der Bytecode hängt nicht
+von der Auswahl der Testfälle ab.
+
+**`co_names` ist dabei der eigentliche Wachhund:** Ein Modulwechsel
+ändert, *woher* ein globaler Name kommt. Ein vergessener Import oder ein
+Name, der still auf etwas anderes fällt, steht dort — und sonst nirgends.
+
+Gegenproben: `pruefbericht()` an echten Daten Zeile für Zeile identisch,
+Testsuite grün, Selbstprüfung 0 Verstöße, Mutationstest 65/65.
+
+### Der Umzug hat eine Sicherung blind gemacht — gefunden vom Mutationstest
+
+**Der wichtigste Fund dieser Runde, und er kam nicht von einem Test.**
+
+§G19 hatte am selben Tag die Verfassungsregel 9 eingeführt („Der
+Schattenbetrieb ruft keine Order-Funktion auf"), mit einer aufgezählten
+Modulliste:
+
+```python
+SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py", "patterns.py")
+```
+
+Nach dem Umzug lag der bewachte Code in `shadow_schritte.py`. **Die Regel
+bewachte ab da die Fassade und meldete weiter grün.** Ebenso
+`tests/test_konsistenz.TestSchattenKannNichtHandeln`, das `shadow.py`
+fest verdrahtet las.
+
+Gefunden hat das der Mutationslauf: Er baut `from . import trading` in
+das echte Modul ein — und niemand schlug an. Die Testsuite war zu diesem
+Zeitpunkt vollständig grün.
+
+Das ist §G15 in seiner unangenehmsten Form: **eine Sicherung, die vom
+Aufräumen selbst blind gemacht wird.** Und es ist ein Argument gegen
+aufgezählte Listen in Prüfungen, nicht gegen das Aufräumen.
+
+**Behoben:** `selfcheck.schatten_module()` sucht per Muster
+(`shadow*.py` plus `SCHATTEN_ZUSATZ`) statt aufzuzählen — von vier
+bewachten Modulen auf neun. Ein neues Schattenmodul ist automatisch
+abgedeckt, ohne dass jemand daran denken muss. `test_konsistenz` nutzt
+dieselbe Quelle. Die Mutation bricht jetzt das **Suchmuster**
+(`shadow*.py` → `shadow.py`), also genau den Fehler von heute.
+
+### Was der Umzug sonst noch mitnahm
+
+`subprocess` und `Decision` wurden importiert und nirgends benutzt —
+Reste aus der Zeit, als `code_version()` den Git-Aufruf selbst machte.
+Beim Neuaufbau der Importe fielen sie weg.
+
+### Was der Umzug NICHT geändert hat
+
+Kein Ausdruck, keine Zeile Logik, kein Schema, keine Datenbank. Die
+laufende Flottenmessung ist unberührt — sie liegt in `shadow.sqlite`,
+und die vier Schritte sind idempotent (§G14), ein Dienstneustart kostet
+sie nichts.
+
+Regression: `scripts/29_umzug_pruefen.py` (bleibt als Werkzeug für den
+nächsten Umzug), eine geänderte Mutation — **65 von 65 gefangen**.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
