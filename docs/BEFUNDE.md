@@ -2997,6 +2997,98 @@ Regression: `tests/test_trennschaerfe.py` (12 Tests), zwei neue
 Mutationen.
 
 
+## G23. Kriterium 1 kann nur Effekte finden, die es nicht geben kann (23.08.2026)
+
+**Anlass:** die Frage nach konkreten Szenarien in Kapital statt in
+t-Werten. Beim Umrechnen kam eine Zahl heraus, die den ganzen
+Flottenaufbau betrifft.
+
+### Die Strategie in Geld, bei echten Kosten
+
+Depot 109.701 $, 90 % investiert auf 15 Plätze = **6.582 $ je Position**.
+Mittlere Haltedauer gemessen **4,45 Handelstage** über 56 Trades.
+
+| | Betrag |
+|---|---:|
+| Rundläufe pro Jahr | 850 |
+| Bruttoertrag (+0,11 % je Trade, §A) | +6.155 $ |
+| Kosten (0,142 % Rundlauf, §A) | −7.946 $ |
+| **Netto** | **−1.791 $/Jahr = −1,6 %** |
+
+Im Papierdepot fällt nichts davon an — deshalb sieht es dort gut aus.
+Um bei echtem Geld auf ±0 zu kommen, müsste der Vorsprung je Trade von
+**0,110 % auf 0,142 %** steigen: **+0,032 Prozentpunkte**.
+
+### Die Zahl, um die es geht
+
+Diese Lücke, aufs Depot und auf den Tag umgerechnet:
+
+```
+wirtschaftlich entscheidend :  0,0065 %/Tag   (= 1.797 $/Jahr)
+```
+
+Und was Kriterium 1 am 10.10. bei 31 Tagen nachweisen könnte (§G22):
+
+| Streuungsschätzung | nachweisbar ab | Faktor |
+|---|---:|---:|
+| günstige (B04) | 0,180 %/Tag | **28× zu groß** |
+| B11s eigene | 0,346 %/Tag | **53× zu groß** |
+
+**Umgekehrt gelesen ist es noch deutlicher.** Ein Bestehen von
+Kriterium 1 am 10.10. würde bedeuten:
+
+| Streuungsschätzung | impliziter Mehrertrag |
+|---|---:|
+| günstige | ~49.900 $/Jahr = **45 % p.a.** gegenüber B09 |
+| B11s eigene | ~95.800 $/Jahr = **87 % p.a.** |
+
+**Ein bestandenes Kriterium 1 wäre damit kein Erfolg, sondern ein
+Warnsignal.** Eine Strategie mit +0,11 % Vorsprung je Trade kann keine
+45 % p.a. Zusatzertrag aus einer geänderten Ausstiegsregel erzeugen. Wer
+das misst, hat mit hoher Wahrscheinlichkeit einen Fehlalarm vor sich —
+und die Schwelle von 2,95 schützt davor gerade **nicht**, weil sie
+Mehrfachtestung abfängt, nicht Unplausibilität.
+
+### Wie lange die Messung bräuchte, um das Relevante zu sehen
+
+```
+guenstige Streuung :  23.875 auswertbare Tage  = 118 Jahre
+B11s Streuung      :  88.082 auswertbare Tage  = 437 Jahre
+```
+
+**Das ist keine Frage der Geduld.** Der gepaarte Vergleich über
+Tages-Equity kann nur **große** Effekte finden. Kleine, wirtschaftlich
+entscheidende sind für ihn unsichtbar — bei jeder realistischen Laufzeit.
+
+### Was daraus folgt
+
+**Der Fehler liegt nicht im Code.** `vergleich_gepaart` rechnet
+nachweislich korrekt (§G22: Verteilung deckt sich mit t(34), p = 0,16).
+Der Fehler liegt in der **Wahl der Messgröße**: 31 Tagesdifferenzen mit
+0,265 % Rauschen können einen Effekt von 0,0065 % nicht auflösen. Das
+Signal-Rausch-Verhältnis beträgt 1:40.
+
+**Was der Vertrag trotzdem leistet.** Kriterien 2, 3 und 4 hängen nicht
+am t-Wert:
+
+* **Kriterium 3** ist ein Anteil über ~75 Ausstiege — Standardfehler
+  5,3 %, die Bandbreite 10–60 % ist klar trennbar.
+* **Kriterium 4** ist eine Vorzeichenfrage über ~22 verlängerte Trades.
+* Die **mittlere Haltedauer** ist Arithmetik (B04 zeigt sie heute schon:
+  6,11 statt 4,45 Tage).
+
+Diese drei beantworten *„greift die Regel und wie oft"*. Sie beantworten
+nicht *„lohnt sie sich"*. Die zweite Frage ist über die Flotte in
+vertretbarer Zeit **nicht** beantwortbar.
+
+**Das Instrument mit Trennschärfe existiert bereits:** der Historienlauf.
+§G11 hat über **2.149 Zeitausstiege** gemessen, was der Kurs danach tat —
+marktbereinigt, nach Ausstiegstag gruppiert, mit klarem Ergebnis (jeder
+Punktschätzer negativ). Zweitausend Trades tragen, was einunddreißig
+Tagesdifferenzen nicht tragen. Deshalb steht im `BETRIEBSPLAN` §4 „erst
+Historienfilter" — dieser Befund beziffert, warum.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
