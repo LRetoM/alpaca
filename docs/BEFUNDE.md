@@ -3571,6 +3571,40 @@ Deshalb bindet auch die Schwelle kaum: Die Differenz beträgt im Mittel
 0,60–0,78, weil der gehaltene Wert bei ~0 steht. Zwischen 0,10 und 0,30
 liegt praktisch kein Unterschied (1.200 gegen 1.188 Tausche).
 
+### Vier Kriterien geprüft — alle negativ
+
+Nach dem Befund oben wurde das Auswahlkriterium austauschbar gemacht und
+mit drei Alternativen gemessen (5 Jahre, 400 Symbole, 1.253 Handelstage,
+Kandidatenschwelle 0,60):
+
+| Kriterium für „schwächste Position" | wählt Gewinner | Mittel %/Tag | t | Rendite p. a. |
+|---|---:|---:|---:|---:|
+| *Grundlauf ohne Tausch* | — | — | — | **+10,98 %** |
+| `score` — niedrigster Umkehr-Score | **80 %** | −0,0045 | −0,50 | +9,51 % |
+| `gewinn` — schlechtester Stand | 1 % | −0,0085 | −1,13 | — |
+| `rueckstand` — weiteste ATR unter dem Höchststand | 2 % | −0,0044 | −0,56 | +9,61 % |
+| `stagnation` — geringster Fortschritt je Tag | 1 % | −0,0117 | −1,53 | +7,71 % |
+
+**Alle vier sind negativ.** Kein einzelnes Ergebnis ist signifikant, aber
+das Vorzeichen ist über vier völlig verschiedene Operationalisierungen
+hinweg stabil — einschließlich zweier, die exakt das Gegenteil auswählen
+(80 % Gewinner gegen 1 %).
+
+Das ist die aussagekräftigere Form: Bei Mehrfachtestung (§B2) ist die
+Gefahr, den besten von vier Rauschzügen für einen Befund zu halten. Hier
+ist **auch der beste negativ**.
+
+**Und der Drawdown steigt durchweg:** −9,7 % im Grundlauf gegen −12,1 %
+bis −14,7 % in allen Tauschvarianten. Mehr Umschlag, mehr Risiko.
+
+**Die Erklärung ist arithmetisch, nicht strategisch.** Jeder Tausch
+kostet einen zusätzlichen Rundlauf (0,142 %, §A). Der eintauschende
+Kandidat müsste diesen Betrag verlässlich einspielen — und der IC ist
+dafür zu klein und zu unsicher (§G26: nachweisbar ab +0,081, gemessen
++0,070). Solange die Rangliste nicht belastbar sortiert, ist jeder
+zusätzliche Umschlag eine sichere Kosten- gegen eine unsichere
+Ertragsposition.
+
 ### Was daraus folgt
 
 **Die Idee ist nicht widerlegt, sondern falsch operationalisiert.** „Die

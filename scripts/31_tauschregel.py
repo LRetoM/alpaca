@@ -60,7 +60,7 @@ from alpaca_bot.engine import Decision, EngineConfig  # noqa: E402
 
 
 def tauscher(schwelle: float, protokoll: list,
-             cfg_max_positions: int = 15):
+             cfg_max_positions: int = 15, kriterium: str = "score"):
     """Baut den Haken fuer `simulate.run(nach_entscheidung=...)`.
 
     `protokoll` sammelt jeden Tausch, damit sich hinterher trennen laesst,
@@ -101,13 +101,47 @@ def tauscher(schwelle: float, protokoll: list,
             v = float(f["score"].iloc[-1])
             return v if np.isfinite(v) else None
 
-        # Schwaechste gehaltene Position nach AKTUELLEM Score
-        gehalten_scores = {s: score(s) for s in gehalten}
-        gehalten_scores = {s: v for s, v in gehalten_scores.items() if v is not None}
-        if not gehalten_scores:
+        # --- Welche Position ist die "schwaechste"? ---------------------
+        #
+        # DAS ist der Angelpunkt (§G28). Ueber den Score definiert, waehlt
+        # die Regel zu 80 % GEWINNER aus: Der Umkehr-Score misst "wie
+        # ueberverkauft", und eine erholte Position ist per Definition
+        # nicht mehr ueberverkauft - ihr Score faellt Richtung null. Das
+        # Kriterium ist deshalb austauschbar.
+        rang = {}
+        for sym in gehalten:
+            pos_s = portfolio.positions[sym]
+            preis = snapshot.last_price(sym)
+            if preis is None or preis <= 0:
+                continue
+            if kriterium == "score":
+                v = score(sym)
+                if v is None:
+                    continue
+                rang[sym] = v                        # klein = schwach
+            elif kriterium == "gewinn":
+                # Der schlechteste Stand - eine stopaehnliche Regel.
+                rang[sym] = pos_s.unrealized_pct(preis)
+            elif kriterium == "rueckstand":
+                # Abstand zum eigenen Hoechststand, in ATR. Dasselbe Mass,
+                # das `B11_dyn_ausstieg_live` zum Halten benutzt - hier
+                # umgekehrt zum Aussortieren.
+                f = signals.get(sym)
+                atr = (float(f["atr"].iloc[-1])
+                       if f is not None and "atr" in f and len(f) else 0.0)
+                hoch = max(pos_s.high_water or pos_s.entry_price, preis)
+                rang[sym] = -((hoch - preis) / atr) if atr > 0 else 0.0
+            elif kriterium == "stagnation":
+                # Lange gehalten und trotzdem nichts passiert.
+                rang[sym] = pos_s.unrealized_pct(preis) / max(pos_s.bars_held, 1)
+            else:
+                raise ValueError(f"unbekanntes Kriterium: {kriterium}")
+        if not rang:
             return decisions
-        schwach = min(gehalten_scores, key=gehalten_scores.get)
-        schwach_score = gehalten_scores[schwach]
+        schwach = min(rang, key=rang.get)
+        schwach_score = score(schwach)
+        if schwach_score is None:
+            schwach_score = 0.0
 
         # Bester freier Kandidat - dieselben Filter wie `_find_entries`
         bester, bester_score = None, -np.inf
@@ -127,7 +161,16 @@ def tauscher(schwelle: float, protokoll: list,
                 continue
             bester, bester_score = sym, v
 
-        if bester is None or (bester_score - schwach_score) < schwelle:
+        # Ausloeser: Beim Score-Kriterium die DIFFERENZ (so war die
+        # urspruengliche Idee formuliert). Bei den anderen Kriterien das
+        # NIVEAU des Kandidaten - eine Differenz waere dort sinnlos, weil
+        # die beiden Seiten verschiedene Groessen messen.
+        if bester is None:
+            return decisions
+        if kriterium == "score":
+            if (bester_score - schwach_score) < schwelle:
+                return decisions
+        elif bester_score < schwelle:
             return decisions
 
         pos = portfolio.positions[schwach]
@@ -194,6 +237,9 @@ def main() -> int:
     ap.add_argument("--schwellen", default="0.10,0.20,0.30",
                     help="Score-Differenzen, ab denen getauscht wird")
     ap.add_argument("--kapital", type=float, default=30_000.0)
+    ap.add_argument("--kriterium", default="score",
+                    choices=["score", "gewinn", "rueckstand", "stagnation"],
+                    help="Wonach die schwaechste Position gewaehlt wird")
     args = ap.parse_args()
 
     from alpaca_bot.shadow_daten import lade_bars, MARKET_SYMBOL
@@ -213,11 +259,12 @@ def main() -> int:
     protokolle = {}
 
     for sch in [float(x) for x in args.schwellen.split(",")]:
-        print(f"  Tausch ab Score-Differenz {sch:.2f} ...")
+        print(f"  Tausch [{args.kriterium}] ab {sch:.2f} ...")
         prot: list = []
         res = simulate.run(bars, engine_config=ecfg, sim_config=scfg,
                            market=markt, verbose=False,
-                           nach_entscheidung=tauscher(sch, prot))
+                           nach_entscheidung=tauscher(sch, prot,
+                                                     kriterium=args.kriterium))
         ergebnisse.append(kennzahlen(res, f"Tausch ab {sch:.2f}"))
         protokolle[sch] = prot
 
