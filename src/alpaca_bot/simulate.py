@@ -154,12 +154,27 @@ def run(
     start: str | None = None,
     end: str | None = None,
     verbose: bool = True,
+    nach_entscheidung=None,
 ) -> SimResult:
     """Spielt die Historie Tag fuer Tag durch.
 
     Args:
         bars: MultiIndex (symbol, timestamp) mit OHLCV.
         insider: optionale Insider-Merkmale je Symbol.
+        nach_entscheidung: optionaler Haken zum PRUEFEN einer Regelidee,
+            aufgerufen als `f(snapshot, portfolio, decisions, signals)` und
+            gibt die (moeglicherweise erweiterte) Entscheidungsliste zurueck.
+
+            **Wofuer das da ist und wofuer nicht.** Der Historienlauf ist
+            laut BETRIEBSPLAN §4 der billige Filter: Er darf eine Idee
+            VERWERFEN, nicht abnehmen, und er kostet keinen
+            Versuchszaehler. Ohne diesen Haken muesste man fuer jede
+            Variante die Schleife nachbauen - und ein Nachbau ist genau
+            der Fehler aus §G11 Fund 1, wo die Historiensimulation
+            unbemerkt eine andere Strategie fuhr als der Live-Bot.
+
+            Der Haken laesst `Engine.decide()` unberuehrt. Wer ihn nicht
+            uebergibt, bekommt bitgleich dasselbe wie vorher.
     """
     cfg = sim_config or SimConfig()
     engine = Engine(engine_config or EngineConfig())
@@ -304,6 +319,11 @@ def run(
             )
 
             decisions = engine.decide(snapshot, portfolio)
+            if nach_entscheidung is not None:
+                decisions = nach_entscheidung(
+                    snapshot, portfolio, decisions,
+                    {s: signal_frames[s].loc[:today] for s in active},
+                )
 
             for d in decisions:
                 decision_log.append({
