@@ -192,6 +192,7 @@ Fundamentaldaten), nicht aus einer weiteren Ableitung derselben Reihe.
 | **PEAD über Kursreaktion** (`H02`) | IC **−0,010** (t=−6,5) — Richtung entgegengesetzt. Sieht nach Umkehr aus, also dem, was der Bot ohnehin handelt. | 04.08.2026 |
 | **Symbol-Aufteilung auf mehrere Bots** | Mathematisch ≈ „ein Bot mit N·15 Positionen", nur mit **schlechterer Auswahl** (Rangliste künstlich in Töpfe zerschnitten). Zudem existieren keine 3×1.200 liquiden Symbole — nur 2.189 ab 1 Mio. $/Tag. | 04.08.2026 |
 
+| **Tauschregel: schwaechste Position gegen besseren Kandidaten** | Ueber 7 Jahre t = +0,85, ueber 5 Jahre t = −0,50 — Vorzeichen nicht stabil. Und die Regel verkauft zu **80 % Gewinner**: Der Umkehr-Score misst „wie ueberverkauft", eine erholte Position rutscht damit automatisch ans Ende der Rangliste. Nicht widerlegt, sondern falsch operationalisiert (§G28). | 24.08.2026 |
 | **18 neue Faktorkandidaten** (16.08.2026) | Struktur, Lücken, Volumen, Marktbezug — **keiner** besteht. Zwei erreichten \|t\|>2 (`bewegung_je_volumen` IC +0,013 t=2,06; `aufwaertstage_5` IC −0,012 t=−2,13), scheiterten aber an der Jahresstabilität (7/9 bzw. 3/9 Jahre). Gemessen über 8 Jahre, 789 Symbole, ~2.000 Handelstage. | 16.08.2026 |
 
 **Aufschlussreich am Vorzeichen:** `aufwaertstage_5` (−0,012),
@@ -3511,6 +3512,99 @@ Der richtige Weg steht in `BETRIEBSPLAN` §4: erst Historienfilter
 (`scripts/10_simulate.py`, kostet keinen Versuchszähler und darf
 verwerfen), und dort hat die Frage echte Trennschärfe — 2.149 Ausstiege
 statt 13 Tage.
+
+
+## G28. Die Tauschregel gemessen — sie verkauft Gewinner (24.08.2026)
+
+**Anlass:** die Idee, bei vollem Depot die schwächste laufende Position
+vorzeitig gegen einen deutlich besser bewerteten Kandidaten zu tauschen.
+Gemessen im Historienlauf (`scripts/31_tauschregel.py`), weil der keinen
+Versuchszähler kostet und Trennschärfe hat (BETRIEBSPLAN §4).
+
+### Das Ergebnis
+
+7 Jahre, 1.200 Symbole, 1.757 Handelstage:
+
+| Variante | Rendite | p. a. | max DD | Tausche |
+|---|---:|---:|---:|---:|
+| ohne Tausch | +19,8 % | +2,62 % | −29,2 % | 0 |
+| Tausch ab 0,10 | +30,8 % | +3,92 % | −32,0 % | 1.200 |
+| Tausch ab 0,30 | +33,1 % | +4,19 % | −31,6 % | 1.188 |
+| Tausch ab 0,60 | +19,1 % | +2,54 % | −32,3 % | 920 |
+
+Gepaart gegen den Grundlauf: **t = +0,72 / +0,85 / +0,02.**
+
+**Kein Befund** — aus vier unabhängigen Gründen:
+
+1. **Kein t-Wert kommt in die Nähe der Schwelle** (2,85).
+2. **Das Vorzeichen ist nicht stabil.** Über 5 Jahre und 400 Symbole
+   waren dieselben Regeln **negativ** (t = −0,50 bis −0,86). Ein Effekt,
+   der bei einem anderen Ausschnitt das Vorzeichen wechselt, ist Rauschen.
+3. **+1,3 pp p. a. liegen unter der Survivorship-Korrektur** (2–4 pp,
+   §G11). Das Skript sagt es selbst: „Ein Plus unterhalb dieser Größe ist
+   kein Befund."
+4. **Drei Schwellen sind drei Versuche** (§B2). Der beste von drei
+   Rauschzügen liegt erwartungsgemäß bei t ≈ 0,9.
+
+Auch der Drawdown ist unstabil: über 7 Jahre schlechter (−32,0 gegen
+−29,2 %), über 5 Jahre besser.
+
+### Der interessante Teil: WARUM es nicht wirkt
+
+| | |
+|---|---:|
+| Stand der getauschten Position | Median **+1,58 %**, Mittel +2,05 % |
+| **davon im Gewinn** | **80 %** |
+| Haltedauer bis zum Tausch | Median 3 Tage |
+| mittlere Score-Differenz | 0,60–0,78 |
+
+**Die Regel verkauft überwiegend Gewinner** — das Gegenteil ihrer
+Absicht.
+
+Der Grund ist strukturell und war vorher niemandem klar: Der
+Umkehr-Score misst **„wie überverkauft"**. Eine Position, die sich seit
+dem Einstieg erholt hat, ist per Definition nicht mehr überverkauft —
+ihr Score fällt Richtung null. **Die „schwächste" Position im Depot ist
+damit fast immer die, die am besten gelaufen ist.**
+
+Deshalb bindet auch die Schwelle kaum: Die Differenz beträgt im Mittel
+0,60–0,78, weil der gehaltene Wert bei ~0 steht. Zwischen 0,10 und 0,30
+liegt praktisch kein Unterschied (1.200 gegen 1.188 Tausche).
+
+### Was daraus folgt
+
+**Die Idee ist nicht widerlegt, sondern falsch operationalisiert.** „Die
+schwächste Position" über den Einstiegs-Score zu definieren, misst nicht
+Schwäche, sondern Erfolg. Wer die Idee weiterverfolgen will, braucht ein
+anderes Maß für „diese Position trägt nicht mehr" — etwa:
+
+* Rückstand gegenüber dem eigenen Höchststand (das prüft `B11` bereits),
+* Zeit ohne Fortschritt statt Score-Niveau,
+* oder den Score-**Verlauf** statt des Score-Standes.
+
+Der bestehende `exit_score`-Mechanismus tut bereits etwas Ähnliches — und
+gehört zu den drei Achsen, die **nie gegengeprüft** wurden (§G19
+Messstand).
+
+### Zwei eigene Fehler beim Bau, beide gefunden
+
+1. **Der erste Haken feuerte in 7 Jahren 40-mal.** Er sprang nur an, wenn
+   die Engine gar nichts kaufte. Gemessen ist das Depot an **55 %** der
+   Tage voll, die Engine kauft aber an **83 %** — `_find_entries` zieht
+   `being_sold` ab, ein Ausstieg macht im selben Durchgang einen Platz
+   frei. **„Voll" heißt nicht „kauft nicht".** Aufgefallen daran, dass
+   alle drei Schwellen bitgleiche Ergebnisse lieferten.
+2. **Ohne `gewinn_pct` im Protokoll** wäre der eigentliche Befund
+   unsichtbar geblieben. Die Renditezahlen allein hätten „kein Effekt"
+   gesagt, nicht „die Regel schneidet Gewinner ab".
+
+### Was am Handelsbot geändert wurde
+
+**Nichts.** `simulate.run` hat einen optionalen Haken
+`nach_entscheidung` bekommen, der `Engine.decide()` unberührt lässt; ohne
+ihn ist das Ergebnis bitgleich wie zuvor. Der Grund für einen Haken statt
+eines Schleifen-Nachbaus steht in §G11 Fund 1 — dort fuhr ein Nachbau
+unbemerkt eine andere Strategie als der Live-Bot.
 
 
 ## H. Betrieb — was sich bewährt hat

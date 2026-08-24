@@ -59,7 +59,8 @@ from alpaca_bot import simulate, statistik, universe  # noqa: E402
 from alpaca_bot.engine import Decision, EngineConfig  # noqa: E402
 
 
-def tauscher(schwelle: float, protokoll: list):
+def tauscher(schwelle: float, protokoll: list,
+             cfg_max_positions: int = 15):
     """Baut den Haken fuer `simulate.run(nach_entscheidung=...)`.
 
     `protokoll` sammelt jeden Tausch, damit sich hinterher trennen laesst,
@@ -68,12 +69,25 @@ def tauscher(schwelle: float, protokoll: list):
     """
 
     def haken(snapshot, portfolio, decisions, signals):
-        # Nur eingreifen, wenn die Engine NICHTS kaufen konnte. Sonst
-        # wuerde die Regel mit den normalen Kaeufen konkurrieren statt
-        # die Luecke zu fuellen, die sie schliessen soll.
-        if any(d.action in ("buy", "topup") for d in decisions):
-            return decisions
+        # Massgeblich ist das Depot NACH den Entscheidungen der Engine,
+        # nicht davor.
+        #
+        # Ein erster Entwurf sprang nur an, wenn die Engine gar nichts
+        # kaufen konnte - und feuerte dadurch in sieben Jahren ganze 40
+        # Mal. Gemessen: Das Depot ist an 55 % der Entscheidungstage voll,
+        # die Engine kauft aber an 83 %. Der Grund ist `being_sold`:
+        # `_find_entries` zieht die heute verkauften Symbole ab, ein
+        # Ausstieg macht also im selben Durchgang einen Platz frei. "Voll"
+        # heisst deshalb nicht "kauft nicht".
+        #
+        # Die Regel muss dort greifen, wo die Luecke wirklich ist: wenn
+        # das Depot auch NACH allen Kaeufen und Verkaeufen voll bleibt und
+        # trotzdem ein deutlich besserer Kandidat danebenliegt.
         verkauft = {d.symbol for d in decisions if d.action == "sell"}
+        gekauft = {d.symbol for d in decisions if d.action == "buy"}
+        gehalten = (set(portfolio.positions) - verkauft) | gekauft
+        if len(gehalten) < cfg_max_positions:
+            return decisions          # es ist noch Platz - kein Tausch noetig
         gehalten = set(portfolio.positions) - verkauft
         if len(gehalten) < 1:
             return decisions
@@ -98,7 +112,7 @@ def tauscher(schwelle: float, protokoll: list):
         # Bester freier Kandidat - dieselben Filter wie `_find_entries`
         bester, bester_score = None, -np.inf
         for sym in snapshot.bars:
-            if sym in portfolio.positions:
+            if sym in portfolio.positions or sym in gekauft:
                 continue
             preis = snapshot.last_price(sym)
             if preis is None or preis < cfg.min_price:
@@ -128,6 +142,13 @@ def tauscher(schwelle: float, protokoll: list):
             "rein": bester, "rein_score": bester_score,
             "differenz": bester_score - schwach_score,
             "gehalten_tage": pos.bars_held,
+            # Stand der verkauften Position IM MOMENT des Tauschs. Ohne
+            # dieses Feld bleibt unbeantwortbar, ob die Regel Verlierer
+            # aussortiert oder Gewinner abschneidet - und das ist der
+            # Unterschied zwischen "Idee gut umgesetzt" und "Idee misst
+            # das Falsche".
+            "gewinn_pct": pos.unrealized_pct(
+                snapshot.last_price(schwach) or pos.entry_price),
         })
         return list(decisions) + [
             Decision(symbol=schwach, action="sell",
@@ -231,6 +252,10 @@ def main() -> int:
         print(f"    mittlere Score-Differenz : {p.differenz.mean():.3f}")
         print(f"    Haltedauer der Verkauften: Median {p.gehalten_tage.median():.0f} Tage")
         print(f"    je Jahr                  : {len(p)/args.years:.0f}")
+        if "gewinn_pct" in p:
+            print(f"    Stand der Verkauften     : Median {p.gewinn_pct.median()*100:+.2f} %, "
+                  f"Mittel {p.gewinn_pct.mean()*100:+.2f} %")
+            print(f"      davon im GEWINN        : {(p.gewinn_pct > 0).mean():.0%}")
 
     print("\n  ACHTUNG: Dieser Lauf darf die Idee VERWERFEN, nicht abnehmen.")
     print("  Survivorship-Bias hebt jedes Ergebnis um 2-4 pp pro Jahr")
