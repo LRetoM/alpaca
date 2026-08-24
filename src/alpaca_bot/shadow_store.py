@@ -617,15 +617,52 @@ class ShadowStore:
     def depot_speichern(self, bot_id: str, pos: Position, *,
                         entry_score: float | None = None,
                         reasons: dict | None = None) -> None:
+        """Schreibt eine Spiegelposition fort - OHNE die Einstiegsgruende zu verlieren.
+
+        **Der Fund vom 24.08.2026 (BEFUNDE §G27).** Hier stand
+        `INSERT OR REPLACE` mit den uebergebenen Werten. Von den drei
+        Aufrufern in `shadow_schritte._spiegel` gibt aber nur der Kauf
+        `entry_score` und `reasons` mit; der **taegliche Uebertrag** der
+        gehaltenen Positionen liest sie aus `meta` - und `meta` wird
+        EINMAL vor der Tagesschleife geladen. Ein im selben Lauf
+        gekaufter Wert steht dort nicht, also kam `None` an und
+        ueberschrieb den korrekten Wert vom Vortag.
+
+        Gemessen: `entry_score` in **0 von 130** Zeilen gefuellt,
+        `reasons` in 130 von 130 - mit **einem** eindeutigen Wert, `{}`.
+        Jede Position wird mindestens einmal uebertragen, also verliert
+        jede ihre Begruendung.
+
+        **Was dadurch unbeantwortbar war:** "War die gehaltene Position
+        schwaecher als der beste verworfene Kandidat?" Genau die Frage,
+        fuer die das Spiegelbuch existiert.
+
+        Deshalb jetzt `ON CONFLICT ... DO UPDATE` mit `COALESCE`: Ein
+        `None` laesst den bestehenden Wert stehen, statt ihn zu loeschen.
+        Eine Fortschreibung darf nie weniger Information hinterlassen als
+        sie vorfand - dieselbe Abwaegung wie bei `live.reconcile_fills`
+        (§G19 Fund 5).
+        """
         with self._conn() as c:
             c.execute(
-                "INSERT OR REPLACE INTO shadow_portfolio (bot_id, symbol, qty,"
+                "INSERT INTO shadow_portfolio (bot_id, symbol, qty,"
                 " entry_price, entry_date, stop_price, target_price, bars_held,"
-                " high_water, entry_score, reasons) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " high_water, entry_score, reasons) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(bot_id, symbol) DO UPDATE SET"
+                "   qty=excluded.qty, entry_price=excluded.entry_price,"
+                "   entry_date=excluded.entry_date, stop_price=excluded.stop_price,"
+                "   target_price=excluded.target_price, bars_held=excluded.bars_held,"
+                "   high_water=excluded.high_water,"
+                "   entry_score=COALESCE(excluded.entry_score, entry_score),"
+                "   reasons=COALESCE(excluded.reasons, reasons)",
                 (bot_id, pos.symbol, pos.qty, pos.entry_price,
                  pd.Timestamp(pos.entry_date).isoformat(), pos.stop_price,
                  pos.target_price, pos.bars_held, pos.high_water,
-                 entry_score, _json(reasons or {})),
+                 entry_score,
+                 # `None` statt `{}`, damit COALESCE greifen kann. Ein
+                 # leeres Dictionary waere ein WERT und wuerde die echten
+                 # Gruende ueberschreiben - genau der alte Fehler.
+                 _json(reasons) if reasons else None),
             )
 
     def depot_loeschen(self, bot_id: str, symbol: str) -> None:

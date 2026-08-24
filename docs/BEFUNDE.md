@@ -3406,6 +3406,113 @@ Schwelle, die beides zugleich abdecken soll, verwischt die Begründung.
 Wer den IC zitiert, findet die kalibrierte Grenze hier.
 
 
+## G27. Das Spiegelbuch vergaß, warum es gekauft hat (24.08.2026)
+
+**Anlass:** die Frage, ob der Bot eine schwache Position gegen einen
+besseren Kandidaten tauschen sollte. Um sie zu beantworten, braucht man
+den Score der gehaltenen Position. Er war nicht da.
+
+### Der Fund
+
+`shadow_portfolio`, 130 Zeilen:
+
+| Spalte | gefüllt | eindeutige Werte |
+|---|---:|---:|
+| `entry_score` | **0 / 130** | 0 |
+| `reasons` | 130 / 130 | **1** — immer `{}` |
+
+**Die Ursache.** `shadow_schritte._spiegel` ruft `depot_speichern` an drei
+Stellen. Nur der **Kauf** gibt `entry_score` und `reasons` mit. Der
+**tägliche Übertrag** der gehaltenen Positionen liest sie aus einem
+`meta`-Dictionary — und das wird **einmal vor der Tagesschleife** geladen:
+
+```python
+for sym, m in store.depot_positionen(bot.bot_id).items():
+    meta[sym] = m          # <- einmal, vor der Schleife
+...
+    store.depot_speichern(bot.bot_id, pos,
+                          entry_score=(meta.get(sym) or {}).get("entry_score"))
+```
+
+Ein im selben Lauf gekaufter Wert steht dort nicht. Also kam `None` an
+und überschrieb per `INSERT OR REPLACE` den korrekten Wert vom Vortag.
+`reasons` wurde am Übertrag gar nicht erst übergeben — und
+`_json(reasons or {})` machte daraus zuverlässig `{}`.
+
+Jede Position wird mindestens einmal übertragen. **Also verlor jede ihre
+Begründung, lückenlos.**
+
+### Warum es so lange unbemerkt blieb
+
+Beide Spalten sahen gefüllt aus. `reasons` zu 100 %, mit einem Wert, der
+wie Inhalt aussieht. Dieselbe Fehlerklasse wie `orders.raw` (§G19
+Fund 5) — nur eine Datenbank weiter. Der Stummheitswächter aus §G19 deckt
+`decisions.reasons` und `orders` ab, nicht `shadow_portfolio`.
+
+### Was dadurch unbeantwortbar war
+
+Genau die Frage, für die das Spiegelbuch existiert:
+
+> **„War die gehaltene Position schwächer als der beste verworfene
+> Kandidat?"**
+
+Man sah, WAS gehalten wurde, aber nicht, mit welcher Begründung — und
+konnte es deshalb mit nichts vergleichen. Das Ranglisten-Buch zeichnet
+jeden verworfenen Kandidaten samt Score auf; die Gegenseite fehlte.
+
+### Behoben
+
+`depot_speichern` nutzt `ON CONFLICT ... DO UPDATE` statt
+`INSERT OR REPLACE`, mit `COALESCE` auf beiden Feldern: Ein `None` lässt
+den bestehenden Wert stehen, statt ihn zu löschen. `reasons` wird als
+`None` statt `{}` übergeben, damit `COALESCE` greifen kann — ein leeres
+Dictionary wäre ein **Wert** und würde weiter überschreiben.
+
+Kurswerte (`qty`, `bars_held`, `high_water`, Stop, Ziel) werden weiterhin
+**immer** fortgeschrieben. Geschützt sind nur die beiden Felder, die den
+Einstieg beschreiben und sich nie ändern.
+
+**Neu: Prüfung 11 „Einstiegsgründe im Spiegelbuch"** in
+`shadow.pruefungen()`. Sie prüft die Füllquote, nicht die Variation —
+anders als bei `orders.status` ist hier ein konstanter Wert nicht das
+Problem, sondern ein leerer.
+
+**Die Altdaten bleiben leer.** Nachtragen ginge nur aus den
+`predictions`, und deren Zuordnung zur Position ist nach einem Nachkauf
+mehrdeutig. Eine rekonstruierte Zahl wäre schlechter als eine fehlende
+(§G13 Fund 2). Ab dem nächsten Kauf füllt sich die Spalte von selbst.
+
+### Zur ursprünglichen Frage: lohnt sich Tauschen?
+
+Die Messung ist damit **noch nicht möglich**, aber der Rahmen steht.
+Was heute schon feststeht:
+
+* **Die Gelegenheit ist real und groß.** `Engine._find_entries` bricht
+  bei vollem Depot sofort ab (`if slots <= 0: return []`) — es werden gar
+  keine Kandidaten mehr bewertet. Im Schatten liegen täglich **53 bis 232**
+  Kandidaten über `min_score`, gekauft werden 3.
+* **Die nötige Score-Differenz wäre klein.** Aus der Dezilrechnung: pro
+  0,10 Score-Punkte rund +0,94 % auf 5 Tage. Ein zusätzlicher Rundlauf
+  kostet 0,142 %. Rechnerisch trüge sich ein Tausch ab **0,015**
+  Score-Differenz — der Anreiz wäre fast immer gegeben.
+* **Und genau das ist die Falle.** Die Dezilspreizung stammt aus 1.269
+  Vorhersagen über **13 Handelstage**. Nach §B1 gruppiert: mittlere
+  Spreizung +1,51 Prozentpunkte, **t = 1,52 naiv**, überlappungskorrigiert
+  nicht einmal berechenbar. Vier der 13 Tage sind negativ (−5,33 bis
+  +9,62). Der mittlere Fünf-Tages-Ertrag aller Zeilen liegt bei +3,17 % —
+  das Fenster war stark positiv, die Spreizung also zu einem großen Teil
+  Marktbewegung.
+
+**Solange der IC nicht belastbar ist (§G26: nachweisbar ab +0,081,
+gemessen +0,070), ist Tauschen eine Wette auf eine unbestätigte
+Rangliste — bezahlt mit sicheren Zusatzkosten.**
+
+Der richtige Weg steht in `BETRIEBSPLAN` §4: erst Historienfilter
+(`scripts/10_simulate.py`, kostet keinen Versuchszähler und darf
+verwerfen), und dort hat die Frage echte Trennschärfe — 2.149 Ausstiege
+statt 13 Tage.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

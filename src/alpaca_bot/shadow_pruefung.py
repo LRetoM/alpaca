@@ -153,7 +153,51 @@ def pruefungen(store: ShadowStore | None = None, *,
 
     # --- 10. Handelt der Spiegel ueberhaupt wie der Live-Bot? ---
     out.append(_pruefe_handelsrhythmus(s))
+
+    # --- 11. Merkt sich das Spiegelbuch, WARUM es gekauft hat? ---
+    out.append(_pruefe_einstiegsgruende(s))
     return out
+
+
+def _pruefe_einstiegsgruende(s: ShadowStore) -> Befund:
+    """Traegt jede Spiegelposition ihren Einstiegsscore und ihre Gruende?
+
+    **Der Fund vom 24.08.2026 (§G27).** `entry_score` war in **0 von 130**
+    Zeilen gefuellt, `reasons` in 130 von 130 - mit einem einzigen
+    eindeutigen Wert, `{}`. Ursache: Der taegliche Uebertrag der
+    gehaltenen Positionen las beides aus einem `meta`-Dictionary, das
+    EINMAL vor der Tagesschleife geladen wird. Ein im selben Lauf
+    gekaufter Wert stand dort nicht, also kam `None` an und
+    ueberschrieb per `INSERT OR REPLACE` den korrekten Wert.
+
+    Ohne diese Felder ist die Frage unbeantwortbar, fuer die das
+    Spiegelbuch existiert: **"War die gehaltene Position schwaecher als
+    der beste verworfene Kandidat?"** Man sieht, WAS gehalten wird, aber
+    nicht, mit welcher Begruendung - und kann es deshalb mit nichts
+    vergleichen.
+
+    Geprueft wird die Fuellquote, nicht die Variation: Anders als bei
+    `orders.status` (§G19 Fund 5) ist hier ein konstanter Wert nicht das
+    Problem, sondern ein LEERER.
+    """
+    port = s.table("shadow_portfolio")
+    if port.empty:
+        return Befund(11, "Einstiegsgruende im Spiegelbuch", True,
+                      "Noch keine Positionen.")
+    ohne_score = int(port["entry_score"].isna().sum())
+    leere_gruende = int((port["reasons"].fillna("").astype(str).str.strip()
+                         .isin(("", "{}", "null"))).sum())
+    n = len(port)
+    ok = ohne_score == 0 and leere_gruende == 0
+    if ok:
+        return Befund(11, "Einstiegsgruende im Spiegelbuch", True,
+                      f"Alle {n} Positionen tragen Score und Begruendung.")
+    return Befund(
+        11, "Einstiegsgruende im Spiegelbuch", False,
+        f"{ohne_score} von {n} Positionen ohne `entry_score`, "
+        f"{leere_gruende} ohne Begruendung. Damit laesst sich nicht "
+        f"vergleichen, ob eine gehaltene Position schwaecher war als ein "
+        f"verworfener Kandidat - die Kernfrage des Spiegelbuchs (§G27).")
 
 LIVE_SPIEGEL_BOT = "B09_nachkauf"
 
