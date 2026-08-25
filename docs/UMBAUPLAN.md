@@ -156,34 +156,48 @@ Gemessen am 24.08.2026:
 
 **Zu tun:**
 
-1. `scripts/32_lernlauf.py --jahre 25` als Standard etablieren.
+1. ~~`scripts/32_lernlauf.py --jahre 25` als Standard etablieren.~~
+   **Erledigt anders, siehe Punkt 3** — der Standard ist 15 geblieben
+   (er stand schon vorher auf 15, das war der Skriptdefault).
 2. Prüfen, wie viele Symbole des Universums 25 Jahre tragen (gemessen:
    63 % von 120; bei 15 Jahren 78 %).
-3. **Entscheiden und dokumentieren**, ob 15 oder 25 Jahre der Standard
-   werden. Argument für 15: mehr Symbole, jüngere Regime. Für 25: mehr
-   Bewertungsfenster.
-4. Den Bar-Cache prüfen — 25 Jahre × 1.200 Symbole sind erheblich mehr
-   Daten (§G11 Fund 4: der Cache konnte einmal nie treffen).
+3. **[x] Entschieden (25.08.2026): 15 Jahre bleiben der Standard.**
+   Ausschlag gaben mehr Symbolabdeckung (78 % gegen 63 %) und näher an
+   der heutigen Marktstruktur liegende Regime. Das Argument für 25 Jahre
+   (mehr Bewertungsfenster für den Walk-Forward-Test) bleibt gültig,
+   aber 12 Jahresscheiben reichen für einen t-Wert (siehe Schritt 4).
+   `--jahre 25` bleibt als expliziter Zusatzlauf möglich, ist nur nicht
+   der Default.
+4. **[x] Bar-Cache geprüft (25.08.2026).** `shadow_daten.lade_bars` hat
+   einen EIGENEN, bereits korrekten Tages-Cache (sha256-Schlüssel über
+   das sortierte Symbolset, Datum im Dateinamen, hält die letzten 3
+   Stände) — das ist NICHT derselbe Cache, der in §G11 Fund 4 kaputt
+   war (der lag in `data.get_bars`/`universe.fetch_history`, wird vom
+   Lernlauf nicht benutzt). Kein Fix nötig.
 
-### Schritt 4 — Lernlauf ausbauen (2–3 Std)
+### Schritt 4 — Lernlauf ausbauen (2–3 Std) — [x] erledigt 25.08.2026
 
-`scripts/32_lernlauf.py` existiert und läuft. Was fehlt:
+`scripts/32_lernlauf.py` existiert und läuft. Umgesetzt:
 
-1. **Ergebnisse persistieren.** Bisher nur CSV. Nötig ist eine Tabelle
-   `lernlauf.sqlite` mit: Lauf-Datum, `code_version`, Bot, Jahr,
-   Rendite, Trades, Parameter. Ohne `code_version` lässt sich später
-   nicht sagen, welcher Codestand welches Ergebnis erzeugt hat (§G5).
-2. **Gepaarten t-Wert je Bot** gegen die Basis, nicht nur Jahresrenditen.
-   Vorbild: `shadow_eval.vergleich_gepaart`.
-3. **Trennschärfe je Bot ausweisen** — `shadow_eval.trennschaerfe`
-   sinngemäß auf den Historienlauf übertragen. Ein „durchgefallen" ohne
-   Nachweisgrenze ist eine irreführende Auswertung (§G22).
-4. **Batch über mehrere Signalgruppen.** Aktuell teilen sich alle 14 Bots
-   eine Gruppe, weil keiner die Gewichte ändert. Sobald Gewichtsvarianten
-   dazukommen, muss die Gruppierung greifen — sie ist implementiert
-   (`signal_schluessel`), aber ungetestet mit mehreren Gruppen.
+1. **[x] Ergebnisse persistieren.** Neu: `alpaca_bot.lernlauf_store`
+   (`lernlauf.sqlite`, fünf Tabellen: `laeufe`, `jahresergebnisse`,
+   `bot_vergleiche`, `walkforward_zeilen`, `kandidaten`). Jeder Lauf
+   trägt `code_version` (§G5).
+2. **[x] Gepaarten t-Wert je Bot** gegen die Basis. Neu:
+   `alpaca_bot.lernlauf_eval.paarweiser_test` — dieselbe Rechnung wie
+   `shadow_eval.vergleich_gepaart` (Tagesdifferenz zweier Equity-Kurven),
+   aber ohne ShadowStore-Bindung, weil der Lernlauf keinen eigenen
+   Versuchszähler hat.
+3. **[x] Trennschärfe je Bot ausweisen** — `alpaca_bot.lernlauf_eval.trennschaerfe`,
+   sinngemäß `shadow_eval.trennschaerfe` (§G22).
+4. **[x] Batch über mehrere Signalgruppen.** Neuer Bot `ohne_regime`
+   ändert `market_regime_filter` über die Gewichte (Sonderschlüssel
+   `_weights` in `BOTS`, Muster wie `fleet._bot_aus_zeile` für
+   `B06_ohne_regime`) — damit laufen erstmals ZWEI Signalgruppen statt
+   einer, und `signal_schluessel` ist mit echten mehreren Gruppen
+   geprüft, nicht nur mit einer.
 
-### Schritt 5 — Kandidatenregister (1–2 Std)
+### Schritt 5 — Kandidatenregister (1–2 Std) — [x] erledigt 25.08.2026
 
 Was die Historie überlebt, darf **nicht direkt live**. Es braucht eine
 Zwischenstufe mit Voranmeldung (§J Regel 2):
@@ -199,6 +213,11 @@ Tabelle `kandidaten`:
 `n_varianten_getestet` ist Pflicht: Ein Kandidat aus 14 Varianten ist
 nicht dasselbe wie einer aus einer gezielten Hypothese, und die Schwelle
 muss das abbilden.
+
+**Umgesetzt** als `alpaca_bot.kandidatenregister` (Tabelle `kandidaten`
+in `lernlauf.sqlite`, s. o.) mit erzwungenem Statusweg (`gefunden` ->
+`im_schatten`|`verworfen` -> `abgenommen`|`verworfen`, kein Überspringen)
+und Pflicht-Hypothese. CLI: `scripts/33_kandidaten.py`.
 
 ### Schritt 6 — Rückkopplung zum Live-Bot (Regel, kein Code)
 
@@ -222,22 +241,35 @@ Fall.
 
 Der Umbau ist fertig, wenn:
 
-- [ ] `python scripts/22_tests.py` grün
-- [ ] `python scripts/23_mutationstest.py` — alle Mutationen gefangen
-- [ ] `python scripts/18_health_check.py` grün
-- [ ] `scripts/32_lernlauf.py --jahre 25` läuft durch und schreibt nach
-      `lernlauf.sqlite`
-- [ ] Der Walk-Forward-Block weist aus, ob die Auswahl ins nächste Jahr
-      trägt — **mit t-Wert und Nachweisgrenze**
-- [ ] Der Live-Bot ist **unverändert** (`git diff` auf `engine.py`,
-      `live.py`, `daemon.py` zeigt keine Logikänderung)
-- [ ] Ein Regressionstest sichert die Walk-Forward-Eigenschaft: Eine
+- [x] `python scripts/22_tests.py` grün — 25.08.2026, 456 von 456 (beide
+      Schichten, inkl. 23 neuer Tests aus `tests/test_lernlauf.py` und
+      `tests/test_kandidatenregister.py`)
+- [x] `python scripts/23_mutationstest.py` — alle Mutationen gefangen —
+      25.08.2026, **71 von 71**, inkl. der neuen Mutation
+      „Walk-Forward sieht das Bewertungsjahr mit"
+- [x] `python scripts/18_health_check.py` grün — 25.08.2026, 🟢 GRÜN
+      (die gelbe Datenintegritäts- und Regelabgleich-Notiz dort ist
+      unverändert vorbestehend und betrifft den Live-Bot, nicht diesen
+      Umbau)
+- [x] `scripts/32_lernlauf.py` (15-Jahre-Standard) läuft durch und
+      schreibt nach `lernlauf.sqlite` — siehe §G32 in `BEFUNDE.md` für
+      Lauf-ID und Ergebnis
+- [x] Der Walk-Forward-Block weist aus, ob die Auswahl ins nächste Jahr
+      trägt — **mit t-Wert und Nachweisgrenze** — siehe §G32
+- [x] Der Live-Bot ist **unverändert** (`git diff` auf `engine.py`,
+      `live.py`, `daemon.py`, `trading.py` zeigt keine Zeile Änderung —
+      geprüft 25.08.2026, dieser Umbau betraf ausschließlich
+      `scripts/32_lernlauf.py`, `scripts/33_kandidaten.py` (neu) und die
+      neuen Module `lernlauf_eval.py`, `lernlauf_store.py`,
+      `kandidatenregister.py`)
+- [x] Ein Regressionstest sichert die Walk-Forward-Eigenschaft: Eine
       Mutation, die das Bewertungsjahr in die Auswahl aufnimmt, muss
-      rot werden
+      rot werden — `tests/test_lernlauf.py::TestWalkForwardSiehtBewertungsjahrNicht`,
+      gefangen von der Mutation oben
 
 Der letzte Punkt ist der wichtigste. Ohne ihn ist die Trennung eine
 Behauptung — und dieses Projekt hat mit Behauptungen schlechte
-Erfahrungen gemacht (§G17, §G19, §G24).
+Erfahrungen gemacht (§G17, §G19, §G24). Er ist jetzt keine mehr.
 
 ---
 

@@ -779,6 +779,48 @@ MUTATIONEN = [
         "und das ist ein max(). Ein zu hoher Wert kommt NIE zurueck und "
         "verschiebt Stop und Verlaengerungsregel dauerhaft.",
     ),
+
+    # --- Lernlauf: Walk-Forward darf das Bewertungsjahr nicht sehen --------
+    # Umbau vom 25.08.2026 (docs/UMBAUPLAN.md Schritt 4). Der letzte und
+    # wichtigste Abnahmepunkt des Umbaus (§4): "Ohne ihn ist die Trennung
+    # eine Behauptung." Diese Mutation laesst die Auswahl fuer Jahr k auch
+    # Jahr k selbst sehen - genau das Leck, gegen das Walk-Forward gebaut
+    # ist (BEFUNDE §B2, §B4).
+    Mutation(
+        "Walk-Forward sieht das Bewertungsjahr mit",
+        "src/alpaca_bot/lernlauf_eval.py",
+        "vorherige_jahre = [s[0] for s in scheiben[:idx]]",
+        "vorherige_jahre = [s[0] for s in scheiben[:idx + 1]]",
+        "test_lernlauf",
+        "Fliesst das Bewertungsjahr in die eigene Auswahl ein, ist die "
+        "Frage 'traegt die Auswahl ins naechste Jahr' nicht mehr gestellt "
+        "- der Lernlauf waere dann nur ein Rueckblick, der sich selbst "
+        "bestaetigt, keine Vorhersageprobe.",
+    ),
+
+    # --- Runde 10, 25.08.2026: Kontext im Intraday-Stop (§G36) ------------
+    Mutation(
+        "Intraday-Stop schreibt wieder ohne Auswertungskontext",
+        "src/alpaca_bot/live.py",
+        '                **stop_kontext.get(sym, {}),\n                **stop_regime,\n',
+        "",
+        "test_stopkontext",
+        "Der Intraday-Stop feuert per Konstruktion im Einbruch. Ohne "
+        "regime_markt/sektor/liq_dezil fehlen der Auswertung ausgerechnet "
+        "die Verlusttrades der schlechten Marktphasen - also die Zeilen, "
+        "die 'in welcher Marktlage traegt die Strategie?' beantworten.",
+    ),
+    Mutation(
+        "Fehlende Volatilitaet wird wieder als 'normal' erfunden",
+        "src/alpaca_bot/live.py",
+        'if vola != vola:      # NaN-Probe ohne numpy-Import\n            band = "unbekannt"',
+        'if False:\n            band = "unbekannt"',
+        "test_stopkontext",
+        "Bei zu wenigen Bars ist die Vola NaN; beide Schwellenvergleiche "
+        "sind dann False und der Wert faellt still auf 'normal' durch. "
+        "Eine erfundene Angabe, die wie eine Messung aussieht - dieselbe "
+        "Fehlerrichtung wie die 'erfundene Null' aus §G10.",
+    ),
 ]
 
 

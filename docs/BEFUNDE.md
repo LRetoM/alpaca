@@ -3885,6 +3885,475 @@ Point-in-Time-Universum nicht beziffern.
    er den einen Fehler nicht hat, der genau diese Idee begünstigt.
 
 
+## G32. DKS-Absturz am 25.08.2026 — echt, nicht der §G29-Kursfehler, und ein neuer Randfall gefunden
+
+**Anlass:** Nutzer meldete −2.300 $ unrealisiert auf DKS, Sorge vor einem
+zweiten Fall wie §G29 (Kursfehler) und ob von Hand verkauft werden muss.
+Live nachgeprüft statt vermutet.
+
+### Es war real — anders als §G29
+
+| | §G29 (24.08.) | Dieser Fall (25.08.) |
+|---|---|---|
+| Ursache | IEX-Feed rechnete `change_today` falsch | Dick's Sporting Goods meldete Q2-2026-Zahlen |
+| Beleg | 219 Minutenbars zeigten durchgehend 175,87–185,21 $ | Nachrichtenfeed: „Transcript: Dick's Sporting Goods Q2 2026 Earnings Conference Call" + „... Moving In Tuesday's Pre-Market Session"; Snapshot nach Handelsbeginn 143,10 $ (−20,3 % ggü. Vortagesschluss 179,64 $), danach weiter auf 135,05 $ |
+| Reale Kursbewegung? | **nein** | **ja** |
+
+### Der Stop hat richtig gegriffen
+
+`live.pruefe_stops_intraday()` verkaufte DKS um 16:00:51 Uhr (MESZ) zu
+135,90 $ (`referenz_quelle=quote`, Slippage −62,7 bps gegen den
+Erwartungspreis 135,05 $) — Stop lag bei 166,67 $, Einstand 180,81 $ vom
+21.08. Realisierter Verlust ≈ **2.694 $** auf 59,98 Stück. Das Depot ist
+das **Papierkonto** (`ALPACA_PAPER=True`) — kein echtes Geld betroffen.
+
+**Kein Eingriff von Hand nötig oder erfolgt** — genau wie
+`BETRIEBSPLAN.md` §5.3 vorschreibt. Der Mechanismus hat getan, wofür er
+gebaut ist.
+
+### Der Randfall, den die Prüfung dabei aufdeckte
+
+Zwei Minuten vor Handelsbeginn (9:28 ET) lieferte `data.snapshots('DKS')`
+noch `last=179,64` (Vortagesschluss) — der IEX-Feed hatte seit gestern
+keinen neuen Trade gesehen. Wäre in diesem Fenster ein Stop-Check
+gelaufen, hätte `_quote_plausibel` die echte, bereits stark gefallene
+Bid/Ask-Quote (~137 $) gegen diesen veralteten Referenzwert geprüft,
+eine Abweichung von >20 % gegen `_MAX_QUOTE_ABWEICHUNG` (2 %) gefunden
+und **den echten Kurs verworfen** — dieselbe Prüfung, die §G29s Fehler
+fängt, hätte hier einen echten Kurssturz maskiert. Sobald nach
+Handelsbeginn der erste echte Trade durch den Feed lief, aktualisierte
+sich die Referenz und der Stop griff korrekt.
+
+**Nicht behoben, absichtlich — kein Fix unter Zeitdruck.** Betroffen wäre
+nur ein sehr schmales Fenster (ein echter Kurssprung zwischen
+Vortagesschluss und dem ersten Trade nach Handelsbeginn, bei dünn über
+IEX gehandelten Werten). Ein Fix braucht eine überlegte Regel (z. B.:
+`data.snapshots()`-Referenz verwerfen, wenn ihr Zeitstempel vor dem
+heutigen Handelsbeginn liegt) und einen Regressionstest, nicht eine
+Änderung an der Handelslogik im laufenden Betrieb.
+
+**Zweiter Nebenbefund:** Der Takt „1800 s bei geschlossener Börse"
+bedeutet, dass der Daemon bis zu ~30 Minuten nach der tatsächlichen
+Öffnung noch im Ruhemodus stecken kann, bevor der nächste Zyklus prüft.
+Hier lag zwischen Handelsbeginn (15:30 MESZ) und der Verkaufsmeldung
+(16:00:51 MESZ) rund eine halbe Stunde. Für einen Stop ist das
+tolerierbar (kein Bracket-Order-Ersatz, siehe §G3), aber es ist eine
+Verzögerung, die bei einem schnelleren Absturz teurer werden kann — auch
+das ein Kandidat für eine spätere, gemessene Änderung, nicht für jetzt.
+
+---
+
+## G33. Erster vollständiger 15-Jahre-Lernlauf — 14 Achsen, keine bestanden, zwei auffällig (25.08.2026)
+
+**Anlass:** erster Produktivlauf von `scripts/32_lernlauf.py` nach dem
+Umbau (§G31/`UMBAUPLAN.md`), Standard-Zeitraum 15 Jahre, 800 Symbole
+angefragt (792 mit ausreichender Historie, `BRK.B` bei yfinance nicht
+abrufbar). Lauf-ID `8765e60b58c9`, persistiert in `lernlauf.sqlite`.
+3.767 Handelstage, 15 vollständige Jahresscheiben (2012–2026).
+
+### Gepaarter Vergleich gegen `basis` — keine Achse besteht
+
+Zufallsschwelle bei 225 Zellen (15 Bots × 15 Jahresscheiben): **t > 3,79**.
+Kein einziger der 14 Bots überschreitet sie:
+
+| Bot | t | Bemerkung |
+|---|---:|---|
+| `ohne_regime` | **+2,22** | staerkster positiver Wert, aber unter der Schwelle |
+| `halten_lang` | +2,05 | dito |
+| `dyn_ausstieg` | +1,86 | entspricht `B11_dyn_ausstieg_live` |
+| `trailing` | **−3,53** | staerkster Wert überhaupt, in der SCHÄDLICHEN Richtung |
+
+**0 von 14 Achsen bestanden** — deckt sich mit der Basisrate aus §B6
+(bislang 0 von 38 Versuchen im ganzen Projekt).
+
+### Walk-Forward — knapp unter der Schwelle, aber deutlich stabiler als der Probelauf
+
+```
+Ueber 12 ungesehene Jahre:
+  mittlere Differenz : +6,80 Prozentpunkte/Jahr
+  Jahre mit Vorsprung: 11 von 12
+  t = +3,49   (Schwelle 3,79)
+```
+
+**Urteil laut Vorgabe: KEIN BEFUND** (t unter der Schwelle) — das Skript
+hält sich an die vorab festgelegte Regel, obwohl die Zahl auffällig
+aussieht. Genau dafür ist die Schwelle vorher festgelegt worden, nicht
+nachträglich verhandelbar.
+
+Zum Vergleich der erste kleine Probelauf vom 24.08.2026 (8 Jahre, 120
+Symbole, `UMBAUPLAN.md` §5): dort mittlere Differenz **−0,25 pp/Jahr**,
+t = −0,11, Bot wechselte in 4 von 4 Übergängen. Hier: nur **2 von 11**
+Übergängen wechselten den Bot — die Auswahlsequenz war 2015 `stop_weit`,
+2016–2020 `halten_lang`, 2021–2026 `ohne_regime`. Deutlich stabiler,
+aber die Verfahrensfrage aus §5 bleibt bis zur nächsten Schwelle offen:
+**„knapp keine" ist kein Freibrief, es ist „noch kein Befund"**.
+
+### Der Survivorship-Vorbehalt trifft ausgerechnet die beiden Auffälligen
+
+`halten_lang` und `ohne_regime` sind beide Varianten, die Gewinner
+LÄNGER laufen lassen bzw. in fallenden Märkten weiterhandeln, statt in
+Cash zu gehen. Genau für diese Art Regel gilt der Vorbehalt aus
+`UMBAUPLAN.md` §1 in voller Stärke: Das Universum kennt nur heute
+gelistete Symbole — Fälle, in denen ein länger gehaltener „Gewinner"
+später kollabiert oder eine Position in einer echten Bärenmarkt-Erholung
+tatsächlich pleitegeht, fehlen systematisch. Beide Werte sind deshalb
+eine **Obergrenze mit Schlagseite**, keine Schätzung der wahren Wirkung.
+
+### `ohne_regime` — die erste echte Bärenmarkt-Messung dieser Achse
+
+`ohne_regime` entspricht exakt der laufenden `B06_ohne_regime` in der
+Live-Flotte (Regimefilter aus). Live wurde B06 bisher nur im
+durchgehenden Bullenmarkt beobachtet und war deshalb „wirkungslos, aber
+keine tote Achse" (§E). Dieser Lauf ist die erste Messung über echte
+Bärenmärkte (2018, 2022) — und dort schneidet `ohne_regime` auffällig
+gut ab (2022: −2,6 % gegen −19,7 % der Basis). **Folge: B06 bleibt
+laufen — genau wie in `UMBAUPLAN.md` §2 empfohlen — es braucht keinen
+neuen Flottenbot für diese Achse, sie ist bereits registriert.** Im
+Kandidatenregister als `K01_ohne_regime_15j` mit Status `gefunden`
+dokumentiert (hist_t 2,22, `n_varianten_getestet=14`).
+
+### `trailing` — das klarste Negativsignal
+
+`trail_after_atr=1,5` ist mit t=−3,53 der einzige Wert, der die Schwelle
+beinahe erreicht — in der falschen Richtung, bei −41,8 % Gesamtrendite
+über 15 Jahre (schwächstes Ergebnis aller 14 Achsen). `UMBAUPLAN.md`
+nannte `trail_after_atr` als „offen, aber ohne Beleg" — jetzt gibt es
+einen ersten, klar negativen Beleg. Im Kandidatenregister als
+`K02_trailing_15j` angemeldet und direkt auf Status `verworfen` gesetzt
+— kein Grund, dafür einen Flottenplatz zu belegen oder die Achse weiter
+zu verfolgen.
+
+### Was das nicht heißt
+
+Keiner der beiden Fälle ist ein Befund im Sinne der Projektregeln — beide
+liegen unter der Schwelle, und `ohne_regime`/`halten_lang` tragen den
+Survivorship-Vorbehalt in voller Stärke. Der Lauf hat **verworfen**
+(`trailing`) und **nichts Neues abgenommen** — genau die Rolle, die ihm
+`UMBAUPLAN.md` zuweist.
+
+---
+
+## G34. Der Bot sendet nur Marktorders — und der Spread ist 54 % der Kosten (25.08.2026)
+
+**Anlass:** die Frage, ob es in Foren/Fachquellen einfache Dinge gibt,
+an die wir nicht denken. Die Recherche hat einen gefunden, und er ist
+größer als alles, was die letzten 38 Faktorversuche zusammen erbracht
+haben — weil er **nicht auf der Ertragsseite** ansetzt, sondern auf der
+Kostenseite.
+
+### Der Fund im Code
+
+```
+grep -rn "limit_order" src/ scripts/   ->  nur die Definition, KEIN Aufruf
+```
+
+`trading.limit_order()` ist **implementiert und wird nirgends benutzt**.
+Der Live-Bot sendet ausschließlich `market_order` (bereits in §G3 als
+Nebensatz vermerkt: *„Der Live-Bot sendet ausschließlich `market_order`"*
+— dort ging es um fehlende Stop-Orders, die Kostenfolge wurde nie
+gezogen).
+
+### Warum das teuer ist — die Zerlegung
+
+Rundlauf über 10.000 $ bei 5 bps Spread (`costs.round_trip`):
+
+| Posten | Betrag | Anteil |
+|---|---:|---:|
+| **Spread (2× halbe Spanne)** | **5,00 $** | **54 %** |
+| Slippage (2× 2 bps) | 4,00 $ | 43 % |
+| SEC-Gebühr + FINRA TAF | 0,22 $ | 2 % |
+| Kommission (Alpaca) | 0,00 $ | 0 % |
+| **Summe** | **9,22 $** | |
+
+Eine Marktorder zahlt den Spread **per Konstruktion**: Kauf zum Brief-,
+Verkauf zum Geldkurs. Eine Limitorder kann ihn ganz oder teilweise
+**vereinnahmen** statt zu zahlen.
+
+### Was das für den zentralen Konflikt bedeutet
+
+`breakeven_move_pct()` nach Spread-Annahme, gegen den gemessenen
+Vorsprung von **+0,11 % je Trade** (§A):
+
+| effektiver Spread | Breakeven | gegen +0,11 % |
+|---:|---:|---|
+| 5,0 bps (heute) | 0,1423 % | **fehlt 0,032 pp** |
+| 4,0 bps | 0,1222 % | fehlt 0,012 pp |
+| **3,0 bps** | **0,1022 %** | **TRÄGT** |
+| 2,0 bps | 0,0822 % | trägt deutlich |
+
+**Die Lücke von 0,032 Prozentpunkten, die dieses Projekt seit Wochen mit
+neuen Faktoren zu schließen versucht, schließt sich vollständig bei einer
+Spread-Reduktion von 5 auf 3 bps.** Das ist keine neue Alpha-Quelle,
+sondern Arithmetik auf der Kostenseite.
+
+### Die Belege von außen
+
+* **Anand/Samadi/Sokobin, *Review of Finance* (FINRA-Daten):** Retail-
+  Limitorders haben **niedrigere Handelskosten** als marktnahe Orders —
+  robust gegen Kontrollen für Aktie, Zeitpunkt, Ordergröße und Broker.
+  **~65 % werden vollständig ausgeführt**, deutlich mehr als bei
+  institutionellen Orders. Der Grund ist ausgerechnet die Trägheit von
+  Privatanlegern: Sie stornieren nicht im Sekundentakt.
+* **Der Effekt ist am größten bei weiteren Spreads, höherer Volatilität
+  und kleineren Werten** — also exakt in unserem Universum. `universe.py`
+  handelt bewusst NICHT die 150 liquidesten Werte (§A), sondern 1.200
+  mittelgroße. Genau dort ist der Hebel am größten.
+* **Gegenbeleg, der mitgehört werden muss:** *„The Negative Drift of a
+  Limit Order Fill"* (arXiv 2407.16527) — adverse Selektion. Man wird
+  gerade dann ausgeführt, wenn der Kurs weiterläuft. Für eine
+  Umkehr-Strategie kann das in beide Richtungen wirken: besserer
+  Einstieg, oder ein fallendes Messer.
+
+### Warum das NICHT im Papierdepot geprüft werden kann
+
+**Der wichtigste Vorbehalt.** Alpacas Paper-Simulator füllt Limitorders
+laut eigener Dokumentation *„großzügig, sobald der Kurs die Marke
+berührt"* — es gibt keine Warteschlangenposition und keinen
+Markteinfluss. Genau der Teil, der bei Limitorders entscheidet
+(werde ich überhaupt ausgeführt?), ist im Papierdepot **unrealistisch
+optimistisch**. Ein Limitorder-Test im Papierdepot würde also genau das
+messen, was nicht stimmt.
+
+**Der gangbare Weg ist der Historienlauf:** `simulate.py` hat OHLC-Daten,
+also lässt sich prüfen, ob das Tagestief eine Limitmarke berührt hätte —
+mit einer *konservativen* Füllannahme (nur füllen, wenn der Kurs die
+Marke deutlich unterschreitet, nicht bei bloßer Berührung).
+
+### Status: nicht umgesetzt, bewusst
+
+Das ist eine **Änderung an der Handelslogik** und fällt damit unter die
+Sperre bis zum 10.10.2026 (`CLAUDE.md`, `BETRIEBSPLAN` §2.4). Angemeldet
+als Kandidat `K03_limit_statt_market`, Status `gefunden`. Der nächste
+Schritt ist ein Füllmodell in `simulate.py`, nicht eine Änderung an
+`live.py`.
+
+---
+
+## G35. Zwei neue Datenquellen gebaut — und drei eigene Fehler dabei gefunden (25.08.2026)
+
+**Anlass:** §C hält fest, dass der Faktorraum aus Kurs- und Volumendaten
+ausgeschöpft ist und neue Information von außen kommen muss. Nach EDGAR
+(§G32 ff.) sind jetzt zwei weitere registrierte, aber nie benutzte
+Quellen angebunden: **FRED** (`makro.py`) und **GDELT** (`gdelt.py`).
+
+### Die Designentscheidung, ohne die der Test wertlos wäre
+
+**Ein Makrowert ist an einem Tag für alle Symbole gleich.** Der
+Querschnitts-IC, mit dem dieses Projekt jeden Faktor prüft
+(`research._daily_cross_sectional_ic`), misst aber, ob ein Faktor die
+Symbole eines Tages richtig **sortiert** — eine Konstante sortiert
+nichts. Makrodaten durch `24_kandidaten_test.py` zu schicken würde
+garantiert IC ≈ 0 liefern, und das sähe wie ein Ergebnis aus.
+
+Deshalb ein eigener Test: `makro.regime_auswertung()` teilt die
+Handelstage nach dem Makrowert in Bänder und vergleicht die
+**Tagesrendite der Strategie** zwischen den Bändern (`scripts/35_regime_kandidat.py`).
+Gruppiert wird nach Monat, damit benachbarte Tage nicht als unabhängig
+zählen (§B1).
+
+### Die Revisionsfalle — warum nur die halbe FRED-Bibliothek nutzbar ist
+
+`pit.py` warnte bereits: Makro-Erstveröffentlichungen werden später
+revidiert. Heutige FRED-Werte auf historische Tage zu legen wäre
+Lookahead. `makro.py` trennt deshalb hart:
+
+| Klasse | Beispiele | Nutzbar? |
+|---|---|---|
+| `REIHEN_OHNE_REVISION` | VIX, Zinsen, Credit Spreads (Marktpreise) | **ja** — werden nie revidiert |
+| `REIHEN_REVIDIERT` | BIP, CPI, Arbeitslosenquote | **nein** — nur über ALFRED-Vintages |
+
+Ein Regressionstest (`test_revidierte_reihen_werden_nicht_geladen`) hält
+fest, dass die zweite Klasse nicht versehentlich in die erste rutscht.
+
+**Kein API-Schlüssel nötig:** Die revisionsfreien Reihen sind genau die
+marktbasierten, und die gibt es auch über yfinance (`^VIX`, `^TNX`,
+`^IRX`). Gemessen: 3 von 4 Reihen ohne Schlüssel verfügbar, nur
+`hy_spread` (Credit Spread) braucht FRED.
+
+### Drei eigene Fehler, beim Bauen gefunden und behoben
+
+**Fund 1: GDELTs Ratenlimit war im Projekt falsch eingetragen.**
+`ratelimit.QUOTAS` führte GDELT seit dem 28.07.2026 mit `per_minute=30`
+und der Notiz *„Kein offizielles Limit"* — eine unbelegte Annahme. GDELT
+antwortet bei diesem Tempo mit HTTP 429 und nennt sein Limit im
+Klartext: **„Please limit requests to one every 5 seconds"** — also
+0,2/s statt 0,5/s. Korrigiert, mit dem gemessenen Datum als `verified`.
+
+**Fund 2: `raise_for_status()` stand außerhalb des Retry-Lambdas.**
+
+```python
+resp = with_retry(lambda: requests.get(...))   # 429 wirft hier NICHT
+resp.raise_for_status()                        # erst hier - zu spät
+```
+
+`requests.get` liefert bei HTTP 429 ganz normal ein Response-Objekt
+zurück. `with_retry` sah also einen **Erfolg**, und der Backoff, der
+genau für 429 gebaut ist, lief **nie an**. Gemessen: drei GDELT-Abfragen
+in Folge, alle 429, null Wiederholungsversuche. Nach der Korrektur
+(Statusprüfung *innerhalb* des Lambdas, `base_delay=8`) liefen alle drei
+Abfragen durch. **Dieselbe Bauart steckt in `edgar.py`** — dort fällt es
+nicht auf, weil das Ratenlimit korrekt eingetragen ist.
+
+**Fund 3: eine stumme Spalte, sofort nach dem Bauen.** Die erste Fassung
+von `gdelt._als_frame` legte eine Spalte `artikel` an und füllte sie aus
+dem Feld `norm`. Das gibt es im Modus `timelinetone` nicht — gemessen:
+**923 von 923 Tagen leer**. Genau die Fehlerklasse aus §G13 („stumme
+Felder"), diesmal binnen Minuten nach dem Schreiben gefunden. Spalte
+entfernt statt mit `NaN` mitgeschleppt, Regressionstest
+`test_gdelt_legt_keine_stumme_artikelspalte_an`.
+
+### Stand
+
+13 neue Tests (`tests/test_makro_gdelt.py`), Schwerpunkt
+Zeitpunktsicherheit: Ein Merkmal darf sich nicht ändern, wenn man die
+Reihe hinter dem Stichtag abschneidet — der Test, der zentrierte Fenster
+und `bfill` sofort auffliegen lässt.
+
+### Fund 4: der eigene Test maß eine Tautologie — gefunden vor der Auswertung
+
+**Der wichtigste Fund dieses Umbaus, und er betrifft nicht die Daten,
+sondern die Frage.** Der erste Lauf über 8 Jahre und 800 Symbole (2.008
+Handelstage) lieferte für `vix_aenderung_5d`:
+
+| VIX-Änderung (5 Tage) | Ø Rendite/Tag | t | Monate |
+|---|---:|---:|---:|
+| stärkster Rückgang | **+0,2568 %** | **+4,79** | 96 |
+| leichter Rückgang | +0,1214 % | +1,97 | 96 |
+| leichter Anstieg | +0,0305 % | −0,33 | 95 |
+| stärkster Anstieg | **−0,3018 %** | **−5,31** | 89 |
+
+Monoton über alle vier Bänder, |t| bis 5,31, Spanne **0,5586 %/Tag** —
+um Größenordnungen mehr als alles, was dieses Projekt je gemessen hat.
+
+**Und vollständig wertlos.** Der Test verglich das Merkmal von Tag *t*
+mit der Rendite von Tag *t*. Ein steigender VIX **ist** ein fallender
+Markt, und ein Long-Depot verliert an fallenden Tagen. Gemessen wurde
+also: *„Wenn der Markt fällt, verlieren wir."* Handelbar ist das nicht —
+die VIX-Änderung eines Tages steht erst am Ende dieses Tages fest.
+
+**Behoben** durch `lag=1` als Vorgabe in `regime_auswertung`: Das Merkmal
+muss am **Vortagesschluss** feststehen, die Rendite wird am Folgetag
+gemessen. Nur so lautet die Frage *„hätte man es vorher wissen können?"*
+statt *„beschreibt es, was gleichzeitig passierte?"*.
+
+Gesichert durch `test_gleichzeitiger_zusammenhang_wird_mit_lag_nicht_gefunden`:
+Ein rein gleichzeitiger Zusammenhang muss mit `lag=0` ein |t| > 5 zeigen
+und mit `lag=1` unter 3 fallen. Fällt der Test um, ist die Tautologie
+zurück.
+
+**Einordnung.** Dieselbe Fehlerklasse wie §G11 Fund 6 (das Werkzeug lud
+zum verbotenen Fehlschluss ein) und §G24 (eine Zusicherung, die niemand
+nachgerechnet hat) — diesmal jedoch **vor** der Notierung als Befund
+gefunden, nicht Wochen danach. Der spektakuläre t-Wert war das Warnsignal:
+§G23 hält fest, dass eine Strategie mit +0,11 % Vorsprung je Trade keine
+Effekte dieser Größe erzeugen kann. Wer solche Zahlen sieht, hat fast
+immer einen Messfehler vor sich, keinen Fund.
+
+### Das Ergebnis des korrigierten Laufs: kein Befund
+
+8 Jahre, 800 Symbole, 2.008 Handelstage, 10 Merkmale × 4 Bänder =
+**40 Auswertungen**. Zufallsschwelle dafür: `sqrt(2·ln 40) + 0,5 ≈ 3,21`.
+
+| Merkmal | Spanne bestes–schlechtestes Band | max \|t\| |
+|---|---:|---:|
+| `vix_niveau` | 0,1519 %/Tag | **2,45** |
+| `vix_aenderung_5d` | 0,0630 %/Tag | 2,25 |
+| `zinsstruktur` | 0,1172 %/Tag | 1,85 |
+| `zins_aenderung_20d` | 0,0939 %/Tag | 1,24 |
+| GDELT (6 Merkmale) | 0,042–0,127 %/Tag | 1,94 |
+
+**Keines überschreitet die Schwelle.** Damit sind FRED und GDELT als
+Regimequelle vorerst durchgefallen — die 39. bis 48. erfolglose Messung
+dieses Projekts (§B6).
+
+**Wie stark die Tautologie den ersten Lauf getragen hatte**, zeigt
+`vix_aenderung_5d` am deutlichsten: Spanne **0,5586 %/Tag** gleichzeitig
+gegen **0,0630 %/Tag** versetzt. **89 % des scheinbaren Effekts waren
+reine Gleichzeitigkeit.**
+
+**Der einzige Punkt, der eine Notiz wert ist** (kein Befund, unter der
+Schwelle): `vix_niveau` verläuft monoton in der ökonomisch erwarteten
+Richtung — bei hohem VIX-Perzentil +0,0987 %/Tag (t = +2,45), bei
+niedrigem −0,0233 %/Tag (t = −2,28). Das deckt sich mit der im Modulkopf
+von `makro.py` vorab notierten Vermutung: Eine Umkehr-Strategie braucht
+Überreaktion, und Überreaktion gibt es in Panik häufiger als in Ruhe.
+Vorab notiert, damit es später keine nachträgliche Erzählung wird —
+aber t = 2,45 unter einer Schwelle von 3,21 ist der Normalfall, kein
+Fund.
+
+---
+
+## G36. Der Intraday-Stop protokollierte keinen Auswertungskontext (25.08.2026)
+
+**Anlass:** `18_health_check.py` sprang auf **ROT** — 8 Datenfehler,
+19 von 20 der jüngsten `sell`-Entscheidungen ohne `regime_markt`,
+`sektor` und `liq_dezil`.
+
+### Zwei Ursachen, die sich überlagerten
+
+| Ursache | Status |
+|---|---|
+| **Altbestand.** Bis Commit `dd16334` (22.08.2026) hing der Kontextblock nur an der Kaufschleife; `sell` und `topup` bekamen nichts (§G13 Fund 3). | seit 22.08. behoben — alte Zeilen bleiben natürlich leer |
+| **`live.pruefe_stops_intraday` baut gar keinen `MarketSnapshot`** und rief `_mit_kontext` deshalb nie auf. | **war weiterhin offen** |
+
+Der zweite Punkt ist derselbe Mechanismus wie §G21 (dort fehlte
+*demselben* Pfad der Lebenslauf): Eine Verbesserung wird an der
+Hauptstraße eingebaut und im Sonderpfad vergessen, weil der Code an
+`build_snapshot` klebte.
+
+**Warum das mehr als Kosmetik ist:** Der Intraday-Stop feuert per
+Konstruktion im Einbruch. Ohne `regime_markt` fehlen der Auswertung
+ausgerechnet die Verlusttrades der schlechten Marktphasen — also die
+Zeilen, die *„in welcher Marktlage trägt die Strategie?"* überhaupt erst
+beantworten könnten. Exakt dieselbe Fehlerrichtung wie §G21.
+
+### Behoben
+
+`_regime_aus_markt()`, `_symbolkontext()` und `_markt_reihe_fuer_regime()`
+sind aus `build_snapshot` herausgezogen und werden jetzt auch vom
+Intraday-Stop benutzt — einmal je Lauf, nicht je Symbol. Beide liefern
+bei einem Ausfall ein leeres Dictionary statt zu werfen: **ein fehlendes
+Protokollfeld darf niemals einen Stop-Verkauf verhindern.**
+
+### Beim Reparieren gefunden: eine erfundene Volatilitätsangabe
+
+Der neue Test `test_leere_reihe_erfindet_kein_volatilitaetsband` deckte
+sofort einen zweiten Fehler auf. Bei zu wenigen Bars ist die
+Volatilität `NaN`:
+
+```python
+"ruhig" if vola < 0.15 else "unruhig" if vola > 0.30 else "normal"
+```
+
+`NaN < 0.15` und `NaN > 0.30` sind **beide False** — der Wert fiel still
+auf `"normal"` durch. Eine erfundene Angabe, die in jeder Auswertung wie
+eine Messung aussieht: dieselbe Fehlerrichtung wie die *„erfundene Null"*
+aus §G10, die für `B04_halten_lang` ein „DURCHGEFALLEN" meldete, wo gar
+nichts messbar war. Behoben, steht jetzt als `unbekannt`.
+
+### Absicherung
+
+9 Regressionstests (`tests/test_stopkontext.py`), zwei neue Mutationen in
+`23_mutationstest.py` — **73 von 73 gefangen**. Die Handelsentscheidungen
+sind unberührt: Der Vergleich der extrahierten Funktionen gegen den alten
+Inline-Block ist bitgleich, solange ≥ 260 Bars vorliegen, und genau das
+verlangt `build_snapshot` ohnehin.
+
+### Warum der Health-Check trotzdem noch ROT meldet
+
+**Erwartetes Verhalten, kein unvollständiger Fix.** Der Prüfer sieht sich
+die **jüngsten 20** Entscheidungen je Aktionsart an. Davon stammen 19 aus
+der Zeit vor den beiden Reparaturen. Er wird grün, sobald 20 neue
+Verkäufe aufgelaufen sind — bei der aktuellen Handelsfrequenz einige
+Tage.
+
+**Der Prüfer wird dafür ausdrücklich NICHT angepasst.** Eine Schwelle zu
+lockern, damit die eigene Reparatur früher grün aussieht, ist genau das,
+wovor §B2 warnt („ein Register, das die Hürde senkt, gegen die es messen
+soll"). Die Zahl bleibt, bis die Daten sie einholen.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

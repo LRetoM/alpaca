@@ -379,6 +379,18 @@ Vorwärtsmessung zu warten:
 python scripts/10_simulate.py --min-score 0.45     # eine Achse ändern
 ```
 
+**Seit dem Umbau vom 25.08.2026 (`docs/UMBAUPLAN.md`) gibt es das
+batchfähige Gegenstück:** `scripts/32_lernlauf.py` fährt mehrere Bot-
+Konfigurationen gleichzeitig über 15 Jahre Historie (Standard), schreibt
+je Bot und Jahr nach `lernlauf.sqlite`, weist einen gepaarten t-Wert und
+eine Trennschärfe gegen die Basis aus und prüft per Walk-Forward, ob die
+historisch beste Auswahl ins nächste, ungesehene Jahr trägt. Was das
+übersteht, geht ins Kandidatenregister (`scripts/33_kandidaten.py`,
+`alpaca_bot.kandidatenregister`) — **nicht** direkt in die Flotte, siehe
+`docs/UMBAUPLAN.md` Schritt 6 für den vollständigen Weg. `10_simulate.py`
+bleibt für den schnellen Einzelachsen-Blick nützlich; `32_lernlauf.py`
+ist das Werkzeug, wenn mehrere Konfigurationen gegeneinander sollen.
+
 **Was das entscheidet — und was nicht.** Der Lauf darf eine Idee
 **verwerfen**. Er darf sie **nicht** abnehmen. Zwei Gründe:
 

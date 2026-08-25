@@ -112,9 +112,17 @@ QUOTAS: dict[str, Quota] = {
     ),
     "gdelt": Quota(
         name="GDELT DOC API",
-        per_minute=30,
-        note="Kein offizielles Limit. BigQuery-Variante: 1 TB Abfragen/Monat gratis.",
-        verified="2026-07-28",
+        per_second=0.2,
+        note=(
+            "1 Anfrage je 5 Sekunden - GEMESSEN am 25.08.2026, nicht "
+            "geschaetzt: Bei 30/min antwortete die API mit HTTP 429 und "
+            "dem Klartext 'Please limit requests to one every 5 seconds'. "
+            "Der vorherige Eintrag (30/min, 'kein offizielles Limit') war "
+            "eine unbelegte Annahme und damit zu schnell. "
+            "BigQuery-Variante: 1 TB Abfragen/Monat gratis."
+        ),
+        verified="2026-08-25",
+        docs="https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/",
     ),
     "wikipedia": Quota(
         name="Wikimedia Pageviews API",
