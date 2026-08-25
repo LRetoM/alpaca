@@ -585,32 +585,72 @@ def _pruefe_replay(s: ShadowStore) -> Befund:
                       f"FEHLGESCHLAGEN: {type(e).__name__}: {e}")
 
 def _pruefe_buchfuehrung(s: ShadowStore) -> Befund:
-    """Luecken werden gemeldet, nicht geschaetzt."""
+    """Luecken werden gemeldet, nicht geschaetzt - aber richtig eingeordnet.
+
+    **Die Verschaerfung vom 24.08.2026 (§G30).** Vorher galt jede
+    ueberfaellige Vorhersage ohne Einstiegskurs als FEHL. Am 24.08.2026
+    meldete das 10 Zeilen - alle zu **einem** Symbol (WBS) an **einem**
+    Stichtag (20.08.), waehrend 2.484 von 2.494 Vorhersagen desselben
+    Tages sauber eingebucht wurden. Nachgesehen: WBS hat nach dem
+    20.08. keine Kursdaten mehr, die letzte Bar ist flach
+    (open=high=low=close=77,57) - die Signatur eines ausgesetzten oder
+    eingestellten Wertes.
+
+    Diese zehn Zeilen lassen sich **nie** einbuchen. Die Pruefung haette
+    damit dauerhaft rot gestanden, und `pruefbericht` sagt: "Solange
+    Pruefungen fehlschlagen, sind die Zahlen des Schattenbetriebs nicht
+    zitierfaehig." Eine Warnung, die sich nicht abstellen laesst, entwertet
+    den ganzen Bericht (§G18 Fund 4).
+
+    **Das Kriterium, das trennt** - dasselbe wie beim Lebenslauf (§G21):
+    Ist die aelteste unbuchbare Vorhersage **neuer** als die juengste
+    eingebuchte? Dann hat der Einbuchungsschritt seither nicht gearbeitet
+    - ein laufender Ausfall. Liegt alles Unbuchbare davor, hat der Schritt
+    weitergearbeitet und einzelne Symbole schlicht keine Kurse mehr.
+
+    Kein Datum im Code, keine Ausnahmeliste: Die Grenze ergibt sich aus
+    den Daten und wandert mit.
+    """
     p = s.table("predictions")
     if p.empty:
         return Befund(8, "Buchfuehrung", True, "Noch keine Vorhersagen.")
 
     heute = pd.Timestamp.now(tz="UTC").normalize()
     a = pd.to_datetime(p["as_of"], format="mixed", utc=True)
-    # Vorhersagen, deren Folgetag laengst vorbei ist, muessen eingebucht sein.
     faellig = p[(a < heute - pd.Timedelta(days=4)) & p["entry_price"].isna()]
     o = s.table("shadow_outcomes")
     eingebucht = p[p["entry_price"].notna()]
     ohne_ergebnis = (len(eingebucht) - len(o)) if not eingebucht.empty else 0
 
-    probleme = []
-    if len(faellig):
-        probleme.append(f"{len(faellig)} ueberfaellige Vorhersage(n) ohne "
-                        "Einstiegskurs")
-    if ohne_ergebnis > 0:
-        probleme.append(f"{ohne_ergebnis} eingebuchte ohne Ergebnis "
-                        "(normal, solange der Horizont laeuft)")
+    if faellig.empty:
+        text = (f"{len(p):,} Vorhersagen, {len(eingebucht):,} eingebucht, "
+                f"{len(o):,} bewertet - keine Luecken.")
+        if ohne_ergebnis > 0:
+            text += (f" {ohne_ergebnis} eingebuchte ohne Ergebnis "
+                     f"(normal, solange der Horizont laeuft).")
+        return Befund(8, "Buchfuehrung", True, text)
+
+    juengste_eingebucht = (str(eingebucht["as_of"].max())[:10]
+                           if not eingebucht.empty else "")
+    faellig_tage = faellig["as_of"].astype(str).str[:10]
+    laufend = faellig[faellig_tage > juengste_eingebucht]
+    symbole = sorted(faellig["symbol"].dropna().unique())
+
+    if not laufend.empty:
+        return Befund(
+            8, "Buchfuehrung", False,
+            f"{len(laufend)} Vorhersage(n) NACH dem juengsten eingebuchten "
+            f"Stichtag ({juengste_eingebucht}) haben keinen Einstiegskurs - "
+            f"der Einbuchungsschritt hat seither nicht gearbeitet.")
+
     return Befund(
-        8, "Buchfuehrung", len(faellig) == 0,
-        "; ".join(probleme) if probleme else
+        8, "Buchfuehrung", True,
         f"{len(p):,} Vorhersagen, {len(eingebucht):,} eingebucht, "
-        f"{len(o):,} bewertet - keine Luecken.",
-    )
+        f"{len(o):,} bewertet. {len(faellig)} Zeile(n) zu "
+        f"{len(symbole)} Symbol(en) bleiben unbuchbar "
+        f"({', '.join(symbole[:5])}) - keine Kursdaten nach dem Stichtag, "
+        f"typisch fuer ausgesetzte oder eingestellte Werte. Nicht "
+        f"schaetzbar, deshalb benannt statt gefuellt.")
 
 def pruefbericht(store: ShadowStore | None = None, *,
                  mit_replay: bool = False) -> str:

@@ -3641,6 +3641,102 @@ eines Schleifen-Nachbaus steht in §G11 Fund 1 — dort fuhr ein Nachbau
 unbemerkt eine andere Strategie als der Live-Bot.
 
 
+## G29. Ein Drittel des Tagesverlusts war ein Datenfehler (24.08.2026)
+
+**Anlass:** die Frage, woran der Rückgang der letzten Tage liegt.
+Nachgerechnet — und ein Teil davon hat gar nicht stattgefunden.
+
+### Der Fund
+
+Das Depot meldete am 24.08.2026 **−2,07 %**. Aufgeschlüsselt:
+
+| Position | Broker-Kurs | letzter echter Trade | Abweichung | Unterschied im Depotwert |
+|---|---:|---:|---:|---:|
+| **DKS** | 150,50 | 179,64 | **−16,2 %** | **+1.748 $** |
+| KEYS | 316,99 | 310,66 | +2,0 % | −31 $ |
+| JBLU | 5,05 | 4,96 | +1,8 % | −158 $ |
+| übrige 11 | | | < 2 % | zusammen −216 $ |
+| | | | **Summe** | **+1.343 $** |
+
+Die zugehörige Quote war sichtbar kaputt: **Bid 171,49 / Ask 187,15**,
+Spanne 15,66 $ = 9 % des Kurses. `snapshots` und die Tagesbar sagen beide
+179,64.
+
+| | |
+|---|---:|
+| Kontowert gemeldet | 106.072 $ |
+| mit echten Kursen | **107.415 $** |
+| Tagesveränderung gemeldet | **−2,07 %** |
+| Tagesveränderung bereinigt | **−0,83 %** |
+| SPY am selben Tag | −0,28 % |
+
+**Rund 1,2 der 2,07 Prozentpunkte sind keine Kursbewegung, sondern ein
+Preisfehler.** Der reale Rückstand gegenüber dem Markt beträgt an diesem
+Tag etwa 0,55 Prozentpunkte.
+
+### Warum das mehr ist als ein Schönheitsfehler
+
+`risiko._kennzahlen` rechnet auf `konto["equity"]`, `positionswert()` auf
+`market_value` — beide kommen vom Broker und tragen den falschen Kurs
+weiter. Der ausgewiesene **Drawdown war um 1,2 Prozentpunkte zu groß**.
+Genau diese Zahl entscheidet bei 20 % über die automatische Vollsperre
+(BETRIEBSPLAN §6).
+
+Bei einer Position von 9.000 $ auf 106.000 $ Konto sind 1,2 pp verkraftbar.
+Bei einer größeren Position, oder wenn mehrere Kurse gleichzeitig
+danebenliegen, entscheidet ein Datenfehler über die Stilllegung des
+Handels.
+
+### Der Handelspfad war NICHT betroffen
+
+`live._quote_plausibel` prüft jede Quote gegen den letzten echten Trade
+(§G: SIMO/KGS, 04.08.2026) und hat hier korrekt gegriffen: Die Abweichung
+von 4,5 % lag über der 2-%-Schwelle, die Quote wurde verworfen, und der
+Intraday-Stop rechnete mit 179,64 statt 150,50. **Stop 166,67 — es wurde
+nicht verkauft.**
+
+Ohne diesen Schutz hätte ein Datenfehler eine gesunde Position mit
+−16 % ausgestoppt. Der Schutz existiert seit dem 04.08.2026 und hat heute
+zum ersten Mal nachweisbar einen echten Verlust verhindert.
+
+### Was geändert wurde — und was ausdrücklich nicht
+
+**Neu: `audit.check_positionspreise`.** Vergleicht jeden Positionspreis
+des Brokers gegen den letzten echten Trade und meldet Abweichungen über
+5 % samt Betrag im Depotwert. Die Schwelle ist bewusst milder als die
+2 % im Handelspfad: Dort entscheidet sie, welcher von zwei Kursen die
+Referenz ist (ein Fehlalarm kostet nichts), hier erzeugt sie einen
+Befund.
+
+**Nicht geändert: Der Kontowert wird nicht überschrieben.** Zwei Gründe:
+
+* Die Zahl des Brokers ist die verbindliche. Eine eigene Rechnung
+  danebenzustellen hieße, zwei Buchführungen zu haben — und bei
+  Abweichung wüsste niemand, welche gilt.
+* Für eine **Sperre** ist der pessimistischere Wert die sichere Richtung.
+  Er sperrt früher, nicht später.
+
+Gemeldet werden muss die Abweichung trotzdem: In der anderen Richtung
+würde derselbe Fehler einen **echten** Verlust verdecken.
+
+### Was der Tag sonst zeigt
+
+Die echten Bewegungen des Tages, nach Beitrag:
+
+```
+AUR   -8,6 %   -743 $   -0,69 pp
+TLN   -2,8 %   -305 $   -0,28 pp
+VIK   -1,4 %   -158 $   -0,15 pp
+...
+WMT   +2,7 %   +148 $   +0,14 pp
+JBLU  +1,4 %   +125 $   +0,12 pp
+```
+
+6 von 14 Positionen im Gewinn, Median −0,68 %. Kein einzelner Ausreißer
+außer AUR — das ist normale Streuung, kein Regelbruch. Der Regelabgleich
+meldet 0 Verstöße.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

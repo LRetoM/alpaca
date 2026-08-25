@@ -348,6 +348,89 @@ def check_state_consistency(report: AuditReport) -> None:
         )
 
 
+QUOTE_ABWEICHUNG_GRENZE = 0.05
+"""Ab welcher Abweichung ein Positionspreis als unglaubwuerdig gilt.
+
+Bewusst milder als `live._MAX_QUOTE_ABWEICHUNG` (2 %): Jene Schwelle
+entscheidet, welcher von zwei Kursen als Referenz dient, und ein
+Fehlalarm kostet dort nichts. Diese hier meldet einen Befund - sie soll
+grobe Ausreisser fangen, nicht normale Intraday-Bewegung."""
+
+
+def check_positionspreise(report: AuditReport) -> None:
+    """Deckt sich der Positionspreis des Brokers mit dem letzten echten Trade?
+
+    **Der Fund vom 24.08.2026 (BEFUNDE §G29).** Das Depot meldete an
+    diesem Tag -2,07 %. Davon waren **1,24 Prozentpunkte ein
+    Datenfehler**: Alpaca bepreiste DKS mit 150,50 $, waehrend der letzte
+    tatsaechlich gehandelte Kurs bei 179,64 $ lag - eine Abweichung von
+    -16,2 % auf einer Position von 9.000 $. Die zugehoerige Quote war
+    sichtbar kaputt (Bid 171,49 / Ask 187,15, Spanne 9 % des Kurses).
+
+    **Warum das mehr ist als ein Schoenheitsfehler.** `risiko._kennzahlen`
+    rechnet auf `konto["equity"]` und `positionswert()` auf
+    `market_value` - beides kommt vom Broker und traegt den falschen Kurs
+    weiter. Der gemeldete Drawdown war dadurch um 1,2 Prozentpunkte zu
+    gross. Bei der 20-%-Sperre entscheidet genau diese Zahl darueber, ob
+    der Handel stillgelegt wird.
+
+    **Warum trotzdem NICHT ueberschrieben wird.** Die Zahl des Brokers ist
+    die verbindliche - unsere eigene Rechnung danebenzustellen hiesse,
+    zwei Buchfuehrungen zu haben. Und fuer eine SPERRE ist der
+    pessimistischere Wert die sichere Richtung: Er sperrt frueher, nicht
+    spaeter. Gemeldet werden muss die Abweichung trotzdem, sonst bleibt
+    ein 16-%-Fehler unsichtbar - und in der anderen Richtung wuerde er
+    einen echten Verlust verdecken.
+
+    Der Handelspfad ist von diesem Fehler nicht betroffen:
+    `live._quote_plausibel` prueft jede Quote gegen den letzten Trade und
+    verwarf sie hier korrekt, weshalb der Intraday-Stop NICHT ausgeloest
+    hat (Stop 166,67, echter Kurs 179,64).
+    """
+    report.checks.append("Positionspreise decken sich mit echten Trades")
+
+    from . import account, data
+
+    try:
+        pos = account.positions()
+    except Exception as e:  # noqa: BLE001
+        report.add("auffaellig", "Positionspreise",
+                   f"Kontoabruf fehlgeschlagen: {type(e).__name__}")
+        return
+    if pos.empty:
+        return
+    try:
+        snap = data.snapshots(list(pos.index))
+    except Exception as e:  # noqa: BLE001
+        report.add("auffaellig", "Positionspreise",
+                   f"Kursabruf fehlgeschlagen: {type(e).__name__}")
+        return
+
+    fehlbetrag = 0.0
+    for sym, r in pos.iterrows():
+        try:
+            broker = float(r["current_price"] or 0)
+            letzter = float(snap.loc[sym, "last"] or 0)
+            qty = float(r["qty"] or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if broker <= 0 or letzter <= 0:
+            continue
+        abw = broker / letzter - 1
+        fehlbetrag += qty * (letzter - broker)
+        if abs(abw) > QUOTE_ABWEICHUNG_GRENZE:
+            report.add(
+                "auffaellig", "Positionspreis weicht vom letzten Trade ab",
+                f"Broker {broker:.2f}, letzter echter Trade {letzter:.2f} "
+                f"({abw:+.1%}, {qty * (letzter - broker):+,.0f} $ Unterschied "
+                f"im Depotwert). Kontowert und Drawdown rechnen auf dem "
+                f"Brokerkurs - eine Bewegung dieser Groesse ist damit "
+                f"moeglicherweise gar keine (§G29).",
+                symbol=str(sym),
+            )
+    report.stats["Preisdifferenz im Depotwert"] = f"${fehlbetrag:+,.2f}"
+
+
 def check_gaps(j: Journal, report: AuditReport, expected_interval_min: int = 15,
                days: int = 1) -> None:
     """Lief der Bot ohne Unterbrechung durch?"""
@@ -431,4 +514,5 @@ def run_audit(days: int = 7) -> AuditReport:
     check_exposure(report, equity, invested)
     check_exits(j, report)
     check_state_consistency(report)
+    check_positionspreise(report)
     return report

@@ -134,3 +134,50 @@ class TestWaechterMeldetVergesseneGruende:
         buch.depot_speichern("B00", _pos(), entry_score=None, reasons=None)
         b = sp._pruefe_einstiegsgruende(buch)
         assert "verworfener Kandidat" in b.text
+
+
+class TestBuchfuehrungTrenntAusfallVonAltlast:
+    """Prüfung 8: unbuchbare Symbole sind kein laufender Ausfall (§G30)."""
+
+    def _vorhersage(self, buch, bot, tag, symbol, entry_price=None):
+        """`decided_at` und `decision_price` sind NOT NULL.
+
+        `save_prediction` nutzt `INSERT OR IGNORE` - eine unvollstaendige
+        Zeile verschwindet also lautlos. Ein erster Testentwurf liess
+        beide Felder weg und bekam "Noch keine Vorhersagen" zurueck.
+        """
+        import uuid
+        buch.save_prediction({
+            "pred_id": uuid.uuid4().hex, "run_id": "r", "bot_id": bot,
+            "buch": "rangliste", "as_of": f"{tag}T00:00:00+00:00",
+            "decided_at": f"{tag}T20:00:00+00:00",
+            "symbol": symbol, "aktion": "buy", "score": 0.9,
+            "decision_price": 100.0, "entry_price": entry_price,
+            "code_version": "test",
+        })
+
+    def test_einzelnes_unbuchbares_symbol_ist_kein_ausfall(self, buch):
+        """WBS am 20.08.2026: 10 Zeilen, 2.484 desselben Tages eingebucht.
+
+        Waere das FEHL, stuende die Pruefung dauerhaft rot - die Zeilen
+        lassen sich nie einbuchen, weil es keine Kurse mehr gibt.
+        """
+        self._vorhersage(buch, "B00", "2026-01-05", "TOT", None)
+        self._vorhersage(buch, "B00", "2026-01-06", "GUT", 10.0)
+        b = sp._pruefe_buchfuehrung(buch)
+        assert b.ok, "Ein unbuchbares Altsymbol darf den Bericht nicht entwerten"
+        assert "TOT" in b.text, "Es muss trotzdem benannt werden"
+        assert "unbuchbar" in b.text
+
+    def test_luecke_nach_dem_juengsten_eingebuchten_ist_ein_ausfall(self, buch):
+        """Wenn seither NICHTS eingebucht wurde, steht der Schritt."""
+        self._vorhersage(buch, "B00", "2026-01-05", "ALT", 10.0)
+        self._vorhersage(buch, "B00", "2026-01-06", "NEU", None)
+        b = sp._pruefe_buchfuehrung(buch)
+        assert not b.ok
+        assert "nicht gearbeitet" in b.text
+
+    def test_ohne_luecken_bleibt_es_still(self, buch):
+        self._vorhersage(buch, "B00", "2026-01-05", "A", 10.0)
+        self._vorhersage(buch, "B00", "2026-01-06", "B", 11.0)
+        assert sp._pruefe_buchfuehrung(buch).ok
