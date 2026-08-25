@@ -821,6 +821,33 @@ MUTATIONEN = [
         "Eine erfundene Angabe, die wie eine Messung aussieht - dieselbe "
         "Fehlerrichtung wie die 'erfundene Null' aus §G10.",
     ),
+
+    # --- Runde 11, 25.08.2026: Limitorder-Fuellmodell (§G34) --------------
+    Mutation(
+        "Limitorder fuellt schon beim blossen Beruehren",
+        "src/alpaca_bot/simulate.py",
+        "    schwelle = marke * (1 - cfg.limit_puffer_bps / 10_000)",
+        "    schwelle = marke",
+        "test_limit_einstieg",
+        "Ohne Puffer zaehlt jeder Beruehrer der Marke als Ausfuehrung - "
+        "genau der Fehler, den Alpacas Papierdepot macht. Er laesst "
+        "Limitorders kuenstlich gut aussehen: die gesparte Spanne wird "
+        "kassiert, die verpassten Einstiege verschwinden.",
+    ),
+    Mutation(
+        "Limitkauf zahlt wieder den Spread",
+        "src/alpaca_bot/simulate.py",
+        "        spread_bps=0.0 if limit else cfg.spread_bps,\n"
+        "        slippage_bps=0.0 if limit else cfg.slippage_bps,",
+        "        spread_bps=cfg.spread_bps,\n"
+        "        slippage_bps=cfg.slippage_bps,",
+        "test_limit_einstieg",
+        "Der ganze Punkt der Limitorder ist der Wegfall von Spread und "
+        "Slippage. Bleiben sie stehen, misst der Vergleichslauf nur noch "
+        "die verpassten Einstiege - also garantiert ein schlechteres "
+        "Ergebnis, und zwar aus einem Grund, der nichts mit dem Ordertyp "
+        "zu tun hat.",
+    ),
 ]
 
 
