@@ -56,6 +56,91 @@ class LiveResult:
 MARKET_SYMBOL = "SPY"
 
 
+# ---------------------------------------------------------------------------
+# Auswertungskontext
+# ---------------------------------------------------------------------------
+# Diese beiden Funktionen beeinflussen KEINE Handelsentscheidung. Sie
+# machen eine Entscheidung im Nachhinein zuordenbar: "in welcher
+# Marktlage und bei welcher Werteklasse traegt die Strategie?" - laut
+# `docs/BEFUNDE.md` die wichtigste offene Frage des Projekts.
+#
+# **Warum sie seit dem 25.08.2026 eigene Funktionen sind.** Der Block
+# stand inline in `build_snapshot` und war damit nur dort verfuegbar.
+# Der Intraday-Stop (`pruefe_stops_intraday`) baut aber gar keinen
+# Snapshot - er schrieb seine Entscheidungen deshalb ohne jeden Kontext.
+# Dieselbe Fehlerklasse wie §G21 (dort fehlte dem Intraday-Stop der
+# Lebenslauf) und §G13 Fund 3 (dort fehlte `topup` der Kontext): Ein
+# Sonderpfad wird beim Nachziehen einer Verbesserung vergessen, weil der
+# Code an der Hauptstrasse klebt.
+def _regime_aus_markt(market, verbose: bool = False) -> dict:
+    """Marktlage aus der SPY-Reihe: bullisch/baerisch und Volatilitaetsband."""
+    try:
+        sma200 = market.rolling(200).mean()
+        ueber = bool(market.iloc[-1] > sma200.iloc[-1]) if len(market) >= 200 else None
+        vola = float(market.pct_change().tail(20).std() * (252 ** 0.5))
+        # `vola` ist NaN, sobald zu wenige Bars vorliegen. Ohne diese
+        # Pruefung sind BEIDE Vergleiche unten False und der Wert faellt
+        # still auf "normal" - eine erfundene Angabe, die wie eine
+        # Messung aussieht. Genau der Fehler aus §G10 ("eine erfundene
+        # Null"), gefunden am 25.08.2026 durch
+        # `test_regime_aus_kaputter_reihe_ist_leer_statt_zu_werfen`.
+        if vola != vola:      # NaN-Probe ohne numpy-Import
+            band = "unbekannt"
+        elif vola < 0.15:
+            band = "ruhig"
+        elif vola > 0.30:
+            band = "unruhig"
+        else:
+            band = "normal"
+        return {
+            "regime_markt": ("bullisch" if ueber else "baerisch")
+                            if ueber is not None else "unbekannt",
+            "regime_vola": band,
+        }
+    except Exception as e:  # noqa: BLE001 - Protokollfeld darf nie stoppen
+        if verbose:
+            print(f"      Regime nicht bestimmbar ({type(e).__name__})")
+        return {}
+
+
+def _symbolkontext(symbole: list[str], verbose: bool = False) -> dict[str, dict]:
+    """Sektor und Liquiditaetsdezil je Symbol.
+
+    Beide Nachschlagewerke sind billig: `sektoren` haelt einen Cache,
+    `liquiditaets_dezile` liest eine CSV. Der Aufruf lohnt sich deshalb
+    auch fuer ein einzelnes Symbol im Intraday-Stop.
+    """
+    try:
+        from . import universe as _uni
+
+        sek = _uni.sektoren(symbole, verbose=False)
+        dezile = _uni.liquiditaets_dezile(symbole)
+        return {sym: {"sektor": sek.get(sym, "unbekannt"),
+                      "liq_dezil": dezile.get(sym)} for sym in symbole}
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"      Kontext nicht ladbar ({type(e).__name__})")
+        return {}
+
+
+def _markt_reihe_fuer_regime(lookback_days: int = 400):
+    """SPY-Schlusskurse allein - fuer Pfade ohne vollen Snapshot.
+
+    Ein Abruf fuer ein Symbol. Der Intraday-Stop laeuft alle ~15 Minuten,
+    feuert aber selten; die Kosten sind vernachlaessigbar gegenueber dem
+    Nutzen, dass ein Stop-Verkauf ueberhaupt auswertbar wird.
+    """
+    try:
+        from . import data
+
+        bars = data.get_bars([MARKET_SYMBOL], lookback_days=lookback_days)
+        if bars is None or bars.empty:
+            return None
+        return bars.xs(MARKET_SYMBOL, level="symbol")["close"].astype(float)
+    except Exception:  # noqa: BLE001 - nie den Handel stoppen
+        return None
+
+
 def build_snapshot(
     symbols: list[str], lookback_days: int = 500, verbose: bool = False
 ) -> MarketSnapshot:
@@ -148,37 +233,8 @@ def build_snapshot(
         news_df = None
 
     # --- Auswertungskontext: Regime, Sektor, Liquiditaetsdezil ---
-    # Beeinflusst die Entscheidung NICHT, macht sie aber im Nachhinein
-    # zuordenbar. Ohne diese Felder ist am Depot nicht beantwortbar, in
-    # welcher Marktlage und bei welcher Werteklasse die Strategie traegt -
-    # die wichtigste offene Frage des Projekts.
-    regime: dict = {}
-    try:
-        sma200 = market.rolling(200).mean()
-        ueber = bool(market.iloc[-1] > sma200.iloc[-1]) if len(market) >= 200 else None
-        vola = float(market.pct_change().tail(20).std() * (252 ** 0.5))
-        regime = {
-            "regime_markt": ("bullisch" if ueber else "baerisch")
-                            if ueber is not None else "unbekannt",
-            "regime_vola": ("ruhig" if vola < 0.15
-                            else "unruhig" if vola > 0.30 else "normal"),
-        }
-    except Exception as e:  # noqa: BLE001 - Protokollfeld darf nie stoppen
-        if verbose:
-            print(f"      Regime nicht bestimmbar ({type(e).__name__})")
-
-    kontext: dict[str, dict] = {}
-    try:
-        from . import universe as _uni
-
-        sek = _uni.sektoren(list(per_symbol), verbose=False)
-        dezile = _uni.liquiditaets_dezile(list(per_symbol))
-        for sym in per_symbol:
-            kontext[sym] = {"sektor": sek.get(sym, "unbekannt"),
-                            "liq_dezil": dezile.get(sym)}
-    except Exception as e:  # noqa: BLE001
-        if verbose:
-            print(f"      Kontext nicht ladbar ({type(e).__name__})")
+    regime = _regime_aus_markt(market, verbose=verbose)
+    kontext = _symbolkontext(list(per_symbol), verbose=verbose)
 
     if verbose:
         print(f"      Stichtag: {as_of.date()} | {len(per_symbol)} Symbole "
@@ -676,6 +732,20 @@ def pruefe_stops_intraday(
     journal = Journal()
     verkauft: list[str] = []
 
+    # Auswertungskontext EINMAL je Lauf, nicht je Symbol (25.08.2026).
+    # Bis dahin schrieb dieser Pfad seine Verkaeufe voellig ohne Kontext:
+    # gemessen 19 von 20 der juengsten `sell`-Entscheidungen ohne
+    # `regime_markt`/`sektor`/`liq_dezil`, worauf `18_health_check.py`
+    # korrekt ROT meldete. Ein Stop-Verkauf ist genau der Fall, den man
+    # spaeter nach Marktlage auswerten will - er feuert im Einbruch.
+    #
+    # Beide Aufrufe sind so gebaut, dass ein Ausfall ein leeres
+    # Dictionary liefert statt zu werfen: Ein fehlendes Protokollfeld
+    # darf niemals einen Stop-Verkauf verhindern.
+    _markt = _markt_reihe_fuer_regime()
+    stop_regime = _regime_aus_markt(_markt) if _markt is not None else {}
+    stop_kontext = _symbolkontext(list(gehalten))
+
     with journal.run("stop_intraday", config={"n_positionen": len(gehalten),
                                               "dry_run": dry_run}) as run:
         for sym in gehalten:
@@ -700,6 +770,8 @@ def pruefe_stops_intraday(
                 "kurs_jetzt": round(ref.preis, 4),
                 "gewinn_pct": round(gewinn, 4),
                 "referenz_quelle": ref.quelle,
+                **stop_kontext.get(sym, {}),
+                **stop_regime,
             }
             if verbose:
                 print(f"      STOP INTRADAY {sym:<6} Kurs {ref.preis:.2f} "
