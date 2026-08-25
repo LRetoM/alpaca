@@ -155,12 +155,26 @@ def run(
     end: str | None = None,
     verbose: bool = True,
     nach_entscheidung=None,
+    signal_frames: dict[str, pd.DataFrame] | None = None,
 ) -> SimResult:
     """Spielt die Historie Tag fuer Tag durch.
 
     Args:
         bars: MultiIndex (symbol, timestamp) mit OHLCV.
         insider: optionale Insider-Merkmale je Symbol.
+        signal_frames: bereits berechnete Signale je Symbol. Die
+            Signalberechnung ist der teuerste Schritt und haengt NUR von
+            `reversal_weights` ab - nicht von Stop, Ziel, Frist oder
+            `min_score`. Wer mehrere Bots vergleicht, die sich nur in
+            Ausstiegsparametern unterscheiden, rechnet sie damit EINMAL
+            statt N-mal. Genau diese Ersparnis nutzt der Schattenbetrieb
+            schon ueber `fleet.signal_schluessel`; hier steht sie auch dem
+            Historienlauf zur Verfuegung.
+
+            **Vorsicht:** Wer Bots mit VERSCHIEDENEN Gewichten vergleicht,
+            darf die Rahmen nicht teilen - sonst rechnen beide mit den
+            Signalen des einen. `32_lernlauf.py` gruppiert deshalb nach
+            demselben Schluessel wie die Flotte.
         nach_entscheidung: optionaler Haken zum PRUEFEN einer Regelidee,
             aufgerufen als `f(snapshot, portfolio, decisions, signals)` und
             gibt die (moeglicherweise erweiterte) Entscheidungsliste zurueck.
@@ -198,19 +212,22 @@ def run(
     from .signals import build_reversal_frame, build_signal_frame
 
     ecfg = engine.cfg
-    if verbose:
-        print(f"    Berechne Signale ({ecfg.strategy}) fuer "
-              f"{len(per_symbol)} Symbole ...")
-    if ecfg.strategy == "reversal":
-        signal_frames = {
-            sym: build_reversal_frame(df, market, ecfg.reversal_weights)
-            for sym, df in per_symbol.items()
-        }
-    else:
-        signal_frames = {
-            sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
-            for sym, df in per_symbol.items()
-        }
+    if signal_frames is None:
+        if verbose:
+            print(f"    Berechne Signale ({ecfg.strategy}) fuer "
+                  f"{len(per_symbol)} Symbole ...")
+        if ecfg.strategy == "reversal":
+            signal_frames = {
+                sym: build_reversal_frame(df, market, ecfg.reversal_weights)
+                for sym, df in per_symbol.items()
+            }
+        else:
+            signal_frames = {
+                sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
+                for sym, df in per_symbol.items()
+            }
+    elif verbose:
+        print(f"    Signale uebernommen ({len(signal_frames)} Symbole)")
 
     # Gemeinsamer Handelskalender.
     calendar = sorted(set().union(*[set(df.index) for df in per_symbol.values()]))

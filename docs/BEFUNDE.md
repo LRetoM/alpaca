@@ -3805,6 +3805,86 @@ außer AUR — das ist normale Streuung, kein Regelbruch. Der Regelabgleich
 meldet 0 Verstöße.
 
 
+## G31. Die Historie ist 5- bis 9-mal feiner als der Vorwärtstest (24.08.2026)
+
+**Anlass:** der Einwand, warum bis zum 10.10. gewartet wird, wenn dieselben
+Bots auch auf Altdaten laufen könnten. Statt zu argumentieren gemessen —
+`B11_dyn_ausstieg_live` über sieben Jahre Historie statt 31 Schattentage.
+
+### Das Ergebnis
+
+Live-Konfiguration (`deploy_to_target`, `allow_topup`) gegen dieselbe
+Konfiguration plus `zeitausstieg_dynamisch`, 1.200 Symbole, 1.756
+Handelstage:
+
+| | Rendite | Trades |
+|---|---:|---:|
+| B09-Äquivalent (Live-Konfig) | +11,6 % | 4.403 |
+| **B11 (+ dynamischer Zeitausstieg)** | **+56,6 %** | **3.932** |
+
+Gepaart über die Tagesdifferenz:
+
+```
+Mittel      +0,0192 %/Tag
+Streuung     0,4176 %/Tag
+t           +1,92        über 1.756 Handelstage
+```
+
+### Die eigentliche Zahl: die Auflösung
+
+| Verfahren | nachweisbar ab | Beobachtungen |
+|---|---:|---:|
+| Schattenbetrieb am 10.10.2026 | 0,18–0,35 %/Tag | 31 Tage |
+| **Historienlauf** | **0,0378 %/Tag** | **1.756 Tage** |
+| wirtschaftlich entscheidend (§G23) | 0,0065 %/Tag | — |
+
+**Der Historienlauf ist 5- bis 9-mal feiner.** Der Grund ist Arithmetik:
+`sqrt(1756/31) = 7,5` bei praktisch gleicher Streuung (0,418 gegen
+0,509 %/Tag).
+
+Der Einwand war also berechtigt. Für eine **Vorauswahl** ist die Historie
+dem Vorwärtstest um Größenordnungen überlegen, und das Warten bringt für
+diese Frage nichts hinzu, was der Historienlauf nicht schneller liefert.
+
+### Was der Befund über B11 selbst sagt
+
+**t = 1,92** liegt unter der milden Schwelle 2 und weit unter
+`schwelle_sigma` (2,85). Kein Befund nach den Regeln des Projekts.
+
+Aber der gemessene Effekt von **+0,0192 %/Tag ist rund das Dreifache der
+wirtschaftlich entscheidenden Größe** (0,0065 %/Tag, §G23) — und er kommt
+mit **471 Trades weniger**, also geringeren Kosten. Das ist der bisher
+stärkste Hinweis, dass an B11 etwas dran sein könnte.
+
+### Der Vorbehalt, der sich hier NICHT herauskürzt
+
+Bei einem gepaarten Vergleich kürzt sich Survivorship normalerweise
+weitgehend heraus — beide Seiten handeln dasselbe Universum. **Bei dieser
+Frage aber nicht.**
+
+`B11` hält Gewinner **länger**. In einem Universum, aus dem alle
+untergegangenen Firmen fehlen, sieht „Gewinner länger halten"
+systematisch besser aus, als es war: Genau die Fälle, in denen ein
+laufender Gewinner später kollabiert, sind aus den Daten entfernt.
+`B09` mit fester Frist trifft dieser Fehler weniger, weil er ohnehin nach
+fünf Tagen verkauft.
+
+**Die +45 Prozentpunkte sind deshalb eine Obergrenze mit einer Schlagseite
+zugunsten von B11.** Wie groß sie ist, lässt sich ohne ein
+Point-in-Time-Universum nicht beziffern.
+
+### Was daraus folgt
+
+1. **Die Historie wird zum Hauptwerkzeug der Vorauswahl.** Sie ist
+   schneller *und* feiner. `scripts/32_lernlauf.py` setzt das um.
+2. **Der Vorwärtsbetrieb bleibt — genau wegen dieses Vorbehalts.** Er ist
+   die einzige Messung ohne Survivorship, und für eine Regel, die
+   Gewinner länger hält, ist das kein Detail, sondern der Kern.
+3. **Die Rollenverteilung ist damit gemessen begründet, nicht behauptet:**
+   Historie verwirft schnell und fein, der Vorwärtstest nimmt ab, weil nur
+   er den einen Fehler nicht hat, der genau diese Idee begünstigt.
+
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
