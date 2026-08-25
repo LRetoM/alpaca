@@ -3674,6 +3674,38 @@ Spanne 15,66 $ = 9 % des Kurses. `snapshots` und die Tagesbar sagen beide
 Preisfehler.** Der reale Rückstand gegenüber dem Markt beträgt an diesem
 Tag etwa 0,55 Prozentpunkte.
 
+### Wie der Fehler zustande kommt — nachgemessen
+
+Die rohen Positionsdaten von Alpaca zeigen die Rechnung:
+
+```
+lastday_price     179,33     <- korrekt (Vortagesschluss)
+change_today       -0,17013  <- FALSCH
+current_price     148,82     = 179,33 x (1 - 0,17013)
+```
+
+Alpaca markiert die Position also mit `Vortagesschluss × (1 + Tagesänderung)`.
+Der Vortageskurs stimmt; **die Tagesänderung von −17,01 % ist der Fehler.**
+Die tatsächliche Bewegung beträgt +0,2 % (179,33 → 179,64).
+
+Gegengeprüft an **219 Minutenbars** des Tages: DKS lief durchgehend
+zwischen **175,87 und 185,21**. Ein Kurs um 150 kam **kein einziges Mal**
+vor. Der Positionspreis wanderte während der Prüfung außerdem von 150,50
+über 148,84 auf 148,82 — er folgt also gar keinem realen Kurs.
+
+**Die Ursache ist bekannt und dokumentiert.** Das Konto läuft auf
+`Feed=iex`, und dieser Feed sieht nur **~2 % des US-Handelsvolumens**
+(`live._quote_plausibel`). Genau das war schon die Ursache der Ausreißer
+vom 04.08.2026 (SIMO 225 statt 261, KGS 50,67 statt 59,02). Ein einzelner
+fehlerhafter oder ungewöhnlicher Druck auf IEX genügt, damit
+`change_today` danebenliegt — und über die Multiplikation schlägt das
+voll auf den Positionswert durch.
+
+**Neu ist nur, wo es auftaucht.** Bisher betraf es die *Quote* im
+Handelspfad, und dagegen steht seit dem 04.08. `_quote_plausibel`. Hier
+betrifft es das *Position Marking* des Brokers — ein Feld, das der Bot
+nicht selbst berechnet und deshalb auch nicht plausibilisieren konnte.
+
 ### Warum das mehr ist als ein Schönheitsfehler
 
 `risiko._kennzahlen` rechnet auf `konto["equity"]`, `positionswert()` auf
