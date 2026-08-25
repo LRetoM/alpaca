@@ -211,12 +211,50 @@ def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
     stored = Store().load_positions()
     today = pd.Timestamp.now(tz="UTC").normalize()
 
+    # Positionskurse gegen den letzten ECHTEN Trade pruefen (§G29).
+    #
+    # Alpaca markiert eine Position mit `lastday_price x (1 + change_today)`.
+    # Am 24.08.2026 lieferte `change_today` fuer DKS -17,01 %, obwohl der
+    # Wert an diesem Tag zwischen 175,87 und 185,21 lief - der Kurs 148,82
+    # kam in 219 Minutenbars kein einziges Mal vor. Ursache ist der
+    # IEX-Feed, der nur ~2 % des US-Volumens sieht; derselbe Mechanismus
+    # wie bei SIMO/KGS am 04.08.2026.
+    #
+    # Der falsche Kurs landete hier in `high_water` - und das ist ein
+    # `max()`. Ein einmal zu HOCH gesetzter Hoechststand kommt **nie
+    # wieder herunter** und verschiebt damit dauerhaft den nachziehenden
+    # Stop und die Verlaengerungsregel.
+    #
+    # Geprueft wird gegen `snapshots()['last']` und nicht gegen die
+    # Tagesbar: Die Bar traegt den Schlusskurs von GESTERN, und eine
+    # echte Kursluecke (etwa nach Zahlen) waere davon nicht zu
+    # unterscheiden. Der letzte Trade ist eine zeitgleiche Beobachtung -
+    # genau die Ueberlegung aus `_quote_plausibel`.
+    echte_kurse: dict[str, float] = {}
+    if not pos_df.empty:
+        try:
+            snap = data.snapshots(list(pos_df.index))
+            for s in pos_df.index:
+                v = float(snap.loc[s, "last"] or 0)
+                if v > 0:
+                    echte_kurse[s] = v
+        except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
+            print(f"      Kursgegenprobe uebersprungen: {type(e).__name__}: {e}")
+
     positions: dict[str, Position] = {}
     for sym, row in pos_df.iterrows():
         if float(row["qty"]) <= 0:
             continue
         entry = float(row["avg_entry"])
         current = float(row.get("current_price") or entry)
+        letzter = echte_kurse.get(sym)
+        if letzter and current > 0:
+            abweichung = abs(current / letzter - 1)
+            if abweichung > _MAX_POSITIONSPREIS_ABWEICHUNG:
+                print(f"      KURS VERWORFEN {sym}: Broker {current:.2f}, "
+                      f"letzter Trade {letzter:.2f} ({current/letzter-1:+.1%}) "
+                      f"- rechne mit dem Trade (§G29)")
+                current = letzter
         meta = stored.get(sym)
 
         if meta:
@@ -305,6 +343,17 @@ Regel. Der Preis eines Fehlalarms ist zudem gering: Verworfen wird die
 Quote zugunsten des letzten Trades - ebenfalls ein echter Marktpreis,
 nur Sekunden alt. Es geht also nie um "Messung oder keine Messung",
 sondern nur darum, welcher von zwei echten Kursen die Referenz ist."""
+
+
+_MAX_POSITIONSPREIS_ABWEICHUNG = 0.05
+"""Ab welcher Abweichung der Brokerkurs einer Position verworfen wird.
+
+Milder als `_MAX_QUOTE_ABWEICHUNG` (2 %) und aus einem anderen Grund:
+Jene Schwelle waehlt zwischen zwei zeitgleichen Kursen, ein Fehlalarm
+kostet dort nichts. Diese hier verwirft den Wert des Brokers - eine
+echte Kursluecke (Zahlen, Uebernahme) soll dabei NICHT abgeschnitten
+werden. 5 % laesst normale Ereignisse durch und faengt Faelle wie DKS
+(-17 % ohne einen einzigen Trade in dieser Groessenordnung, §G29)."""
 
 
 def _quote_plausibel(symbol: str, kandidat: float) -> tuple[bool, float | None]:

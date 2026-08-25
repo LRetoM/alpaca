@@ -3731,6 +3731,42 @@ Ohne diesen Schutz hätte ein Datenfehler eine gesunde Position mit
 −16 % ausgestoppt. Der Schutz existiert seit dem 04.08.2026 und hat heute
 zum ersten Mal nachweisbar einen echten Verlust verhindert.
 
+### Der falsche Kurs kam bis in den Zustand des Bots
+
+`live.build_portfolio` bekommt die Momentaufnahme übergeben und
+**benutzte sie nie** — es las `row["current_price"]`, also genau das
+fehlerhafte Feld. Zwei Wege führten von dort weiter:
+
+```python
+current    = float(row.get("current_price") or entry)
+high_water = max(current, float(meta["high_water"]))
+```
+
+**`high_water` ist ein `max()`.** Ein einmal zu HOCH gesetzter
+Höchststand kommt **nie wieder herunter**. Er verschiebt dauerhaft den
+nachziehenden Stop (`trail_after_atr`) und die Verlängerungsregel von
+`B11` („weniger als 1 × ATR unter ihrem Höchststand"). Heute lag der
+Fehler zu niedrig und blieb folgenlos — die andere Richtung wäre
+irreparabel gewesen.
+
+**Behoben:** `build_portfolio` prüft jeden Positionskurs gegen
+`snapshots()['last']` und verwirft den Brokerwert bei über 5 %
+Abweichung.
+
+Warum gegen den letzten Trade und nicht gegen die Tagesbar: Die Bar
+trägt den Schlusskurs von **gestern**. Eine echte Kurslücke (Zahlen,
+Übernahme) wäre davon nicht zu unterscheiden. Der letzte Trade ist eine
+zeitgleiche Beobachtung — dieselbe Überlegung wie in
+`_quote_plausibel`.
+
+Warum 5 % und nicht 2 % wie im Handelspfad: Dort wird zwischen zwei
+zeitgleichen Kursen gewählt, ein Fehlalarm kostet nichts. Hier wird der
+Wert des Brokers verworfen — eine echte Kurslücke soll dabei nicht
+abgeschnitten werden.
+
+Fällt der Kursabruf aus, läuft der Bot mit dem Brokerwert weiter. Eine
+fehlende Prüfung darf keine Position verschwinden lassen.
+
 ### Was geändert wurde — und was ausdrücklich nicht
 
 **Neu: `audit.check_positionspreise`.** Vergleicht jeden Positionspreis

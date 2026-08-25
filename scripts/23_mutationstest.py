@@ -766,6 +766,19 @@ MUTATIONEN = [
         "Faelle gefunden. Ohne den Zuschlag meldet die Auswertung eine zu "
         "niedrige Nachweisgrenze und macht die Datenlage besser, als sie ist.",
     ),
+
+    # --- Runde 8, 24.08.2026 (§G29) ---------------------------------------
+    Mutation(
+        "Falscher Brokerkurs kommt wieder in den Zustand",
+        "src/alpaca_bot/live.py",
+        "            if abweichung > _MAX_POSITIONSPREIS_ABWEICHUNG:",
+        "            if False:",
+        "test_kurspruefung",
+        "Alpaca bepreiste DKS am 24.08.2026 mit 148,82, waehrend der Wert "
+        "zwischen 175,87 und 185,21 lief. Der Kurs landet in `high_water` - "
+        "und das ist ein max(). Ein zu hoher Wert kommt NIE zurueck und "
+        "verschiebt Stop und Verlaengerungsregel dauerhaft.",
+    ),
 ]
 
 
