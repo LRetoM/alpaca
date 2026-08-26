@@ -5024,6 +5024,93 @@ nicht mit einer niedrigeren Hürde.
 
 ---
 
+## G44. Die Spanne ist mit dem freien Feed nicht messbar (26.08.2026)
+
+**Vorab festgelegt** in `BETRIEBSPLAN` §3.4, geschrieben um 15:05 Uhr —
+25 Minuten vor Handelsbeginn, also bevor eine Zahl existierte.
+
+### Das Ergebnis
+
+Sechs Aufnahmen über das Live-Universum, 15:35–16:25 Uhr. Nur Quotes
+jünger als 120 s, Eröffnungsphase ausgeschlossen:
+
+| | bps |
+|---|---:|
+| 10 % | **4,9** |
+| 25 % | **11,9** |
+| **Median** | **268,0** |
+| 75 % | 722,0 |
+| 90 % | 1.132,1 |
+
+Nach Liquiditätsdezil liegt der Median zwischen 54 und 434 bps, **ohne
+erkennbare Ordnung** — Dezil 6 (dünn) hat mit 54 bps den *engsten*
+Median, Dezil 3 mit 434 den weitesten. Eine echte Spannenverteilung
+sähe monoton aus.
+
+### Das Urteil: nicht verwertbar
+
+268 bps sind 2,7 %. Das ist keine Geld-Brief-Spanne, das ist ein Feed,
+der die meisten unserer Werte nicht ernsthaft quotet. IEX sieht ~2 % des
+US-Volumens (§G29); bei allem außerhalb der größten Namen steht dort
+eine breite, wenn auch aktuelle Quote.
+
+**Es liegt nicht an veralteten Daten.** Genau dafür wurde das
+Quote-Alter mitgemessen: 4.655 von 5.777 Quotes waren älter als zwei
+Minuten und wurden verworfen. Der Median der **frischen** Quotes bleibt
+bei 268 bps. Die fehlende Monotonie über die Dezile ist der zweite
+Beleg.
+
+Nach der vorab festgelegten Regel (§3.4, Zeile „> 20 bps") gilt damit:
+**zweite Quelle nötig, vor jedem Schluss.** Diese Messung entscheidet
+nichts.
+
+### Was sie trotzdem beantwortet — und es ist der wertvollere Teil
+
+**Die Slippage-Messung des Projekts steht auf denselben Quotes.**
+`live._reference_price` nimmt beim Kauf den IEX-**Ask** als
+Bezugsgröße. Liegt der im Median 134 bps über der Mitte, sieht jede
+Ausführung dagegen günstig aus. Genau das zeigt §G39:
+
+| Referenzquelle | n | Median | Mittel |
+|---|---:|---:|---:|
+| `quote` (IEX Bid/Ask) | 97 | −1,0 bps | **−46,4 bps** |
+| `quote_verworfen` (letzter echter Trade) | 40 | **+11,8 bps** | +18,9 bps |
+
+Die −46 bps „günstiger als erwartet" im oberen Teil waren nie eine
+Ausführungsqualität. **Sie sind die Weite der IEX-Quote.** Damit ist die
+Teilmenge mit dem letzten echten Trade als Referenz die einzige
+belastbare — und sie sagt rund **+12 bps ungünstig**, gegen eine im
+Kostenmodell angesetzte halbe Spanne von 2,5 bps.
+
+### Die Einordnung, die daraus folgt
+
+Die Strategie braucht laut §3.4 eine Spanne von **≤ 3,4 bps**, um bei
+heutigem Umschlag auf null zu kommen. Die beiden verwertbaren Signale
+des Tages:
+
+* unterstes Zehntel der IEX-Quotes: **4,9 bps** — also schon dort, wo
+  der Feed am besten ist, über der Anforderung;
+* Ausführung gegen den letzten echten Trade: **~12 bps**.
+
+**Beide liegen über 3,4 bps.** Das ist kein Beweis — die erste Zahl ist
+eine Auswahl der besten Fälle, die zweite eine verzerrte Teilmenge
+(sie entsteht nur, wo die Quote um über 2 % danebenlag). Aber es gibt
+**keine** Messung, die in Richtung 3,4 bps zeigt.
+
+### Was als Nächstes zu tun wäre
+
+Eine Quelle, die die konsolidierte NBBO sieht. Kostenlos praktisch nur
+Tiingo (`ratelimit.QUOTAS`, 500 Abrufe/Tag, max. 1.000 Symbole/Monat) —
+das reicht für eine Stichprobe von ~200 Symbolen an mehreren Tagen, nicht
+für das ganze Universum. Für die Frage „liegt die Spanne über oder unter
+3,4 bps" genügt eine Stichprobe.
+
+**Nicht getan wurde:** `costs.py` anzufassen. Ein geänderter
+Kostenparameter bewertet jede vergangene und laufende Messung neu; das
+ist eine eigene, vorangemeldete Entscheidung (§3.4).
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
