@@ -145,16 +145,45 @@ def eine_aufnahme(symbole: list[str], dezile: dict[str, int],
     return df
 
 
-def bericht() -> str:
+EROEFFNUNG_MINUTEN = 20
+"""So lange nach Handelsbeginn zaehlt eine Aufnahme nicht.
+
+**Gemessen am 26.08.2026, nicht geschaetzt.** Die erste Aufnahme lief
+sieben Minuten nach der Eroeffnung und lieferte einen Median von 528 bps
+ueber 1.132 Symbole - das Hundertfache jeder plausiblen Spanne. In den
+ersten Minuten stehen viele Quotes noch nicht oder nur einseitig, und
+der IEX-Feed (~2 % des Volumens, §G29) braucht dafuer laenger als die
+konsolidierte NBBO. Eine Aufnahme aus dieser Phase misst die Traegheit
+des Feeds, nicht den Markt."""
+
+
+def bericht(*, mit_eroeffnung: bool = False) -> str:
     with _conn() as c:
         df = pd.read_sql("SELECT * FROM spannen", c)
     if df.empty:
         return "  Noch keine Messung. Bei offener Boerse laufen lassen."
 
+    if not mit_eroeffnung:
+        stempel = sorted(df["gemessen_am"].unique())
+        erster = pd.Timestamp(stempel[0])
+        grenze = erster + pd.Timedelta(minutes=EROEFFNUNG_MINUTEN)
+        behalten = [t for t in stempel if pd.Timestamp(t) >= grenze]
+        verworfen = len(stempel) - len(behalten)
+        if behalten and verworfen:
+            df = df[df["gemessen_am"].isin(behalten)]
+        elif not behalten:
+            return (f"  Alle {len(stempel)} Aufnahme(n) liegen in den ersten "
+                    f"{EROEFFNUNG_MINUTEN} Minuten nach Handelsbeginn und sind "
+                    f"damit nicht verwertbar.\n  Spaeter erneut messen, oder "
+                    f"--mit-eroeffnung zum Ansehen.")
+
     L = ["=" * 78, "  GELD-BRIEF-SPANNE IM LIVE-UNIVERSUM", "=" * 78]
     aufnahmen = df["gemessen_am"].nunique()
     L.append(f"  {len(df):,} Quotes aus {aufnahmen} Aufnahme(n), "
              f"{df['symbol'].nunique()} Symbole")
+    if not mit_eroeffnung:
+        L.append(f"  (Aufnahmen aus den ersten {EROEFFNUNG_MINUTEN} Minuten "
+                 f"nach Handelsbeginn sind ausgeschlossen)")
     L.append("")
 
     q = df["spanne_bps"].quantile([.10, .25, .50, .75, .90]).round(1)
@@ -206,12 +235,15 @@ def main() -> int:
                    help="Sekunden zwischen den Aufnahmen")
     p.add_argument("--bericht", action="store_true",
                    help="nur auswerten, nicht messen")
+    p.add_argument("--mit-eroeffnung", action="store_true",
+                   help=f"auch die ersten {EROEFFNUNG_MINUTEN} Minuten nach "
+                        f"Handelsbeginn mitzaehlen - NICHT verwertbar")
     p.add_argument("--trotz-geschlossener-boerse", action="store_true",
                    help="Messung erzwingen - das Ergebnis ist dann NICHT verwertbar")
     args = p.parse_args()
 
     if args.bericht:
-        print(bericht())
+        print(bericht(mit_eroeffnung=args.mit_eroeffnung))
         return 0
 
     try:
@@ -259,7 +291,7 @@ def main() -> int:
             time.sleep(args.abstand)
 
     print()
-    print(bericht())
+    print(bericht(mit_eroeffnung=args.mit_eroeffnung))
     return 0
 
 

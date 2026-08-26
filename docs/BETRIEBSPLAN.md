@@ -297,6 +297,83 @@ Kriterien sind kein 2:0.
 
 ---
 
+### 3.4 Die Spannen-Messung — vorab festgelegt am 26.08.2026, 15:05 Uhr
+
+**Diese Festlegung entsteht 25 Minuten vor Handelsbeginn und damit
+bevor eine einzige Zahl existiert.** Genau darum geht es: Nach der
+Messung wäre jede Einordnung eine Erzählung über ein bereits bekanntes
+Ergebnis.
+
+**Die Frage.** `costs.py:151` rechnet mit 5 bps Spanne — laut eigenem
+Quelltextkommentar der Wert „für Large Caps typisch", angewandt auf ein
+Universum, das Large Caps absichtlich meidet (`universe.py:87`, §G39).
+An dieser Zahl hängt der Breakeven, der zentrale Konflikt aus §A und
+jedes Backtestergebnis.
+
+**Gemessen wird** mit `scripts/37_spannen_messen.py`, sechs Aufnahmen im
+Abstand von zehn Minuten über das Live-Universum, aufgeschlüsselt nach
+Liquiditätsdezil. Maßgeblich ist der **Median über die Dezile 1–6** —
+dort kauft der Bot laut Journal.
+
+#### Die Zahl, um die es geht
+
+Bei 5 Tagen Haltedauer und ~50 Umschlägen im Jahr:
+
+| Spanne | Breakeven | Lücke zum Vorsprung (+0,110 %) | annualisiert |
+|---:|---:|---:|---:|
+| 3,0 bps | 0,102 % | −0,008 pp | +0,4 %/Jahr |
+| **3,4 bps** | **0,110 %** | **±0** | **±0** |
+| 5,0 bps (Annahme heute) | 0,142 % | +0,032 pp | −1,6 %/Jahr |
+| 8,0 bps | 0,203 % | +0,092 pp | −4,6 %/Jahr |
+| 10,0 bps | 0,243 % | +0,133 pp | −6,6 %/Jahr |
+| 15,0 bps | 0,343 % | +0,233 pp | −11,6 %/Jahr |
+| 20,0 bps | 0,443 % | +0,333 pp | −16,7 %/Jahr |
+
+**Die Strategie braucht bei heutigem Umschlag eine Spanne von 3,4 bps
+oder besser, um überhaupt bei null herauszukommen.** Die geltende
+Annahme von 5,0 bps liegt bereits darüber. Das ist keine neue
+Erkenntnis, sondern §A in einer Zahl — aber es zeigt, wie eng der
+Korridor ist, in dem diese Strategie funktionieren kann.
+
+#### Was welches Ergebnis bedeutet — festgelegt vor der Messung
+
+| Median Dezile 1–6 | Urteil | Was folgt |
+|---|---|---|
+| **≤ 5 bps** | Annahme bestätigt | Der zentrale Konflikt bleibt wie beschrieben. Weitersuchen ist vertretbar. |
+| **5–10 bps** | Annahme zu günstig | Die Lücke ist 3–4× größer als gedacht. Der Hebel ist **Umschlag**, nicht der nächste Faktor. `max_hold_days` wird zur Hauptfrage. |
+| **10–20 bps** | Annahme deutlich zu günstig | Kein Faktorfund dieser Größenordnung schließt das. Entweder radikal längere Haltedauer oder die Strategie ist in dieser Form nicht handelbar. |
+| **> 20 bps** | zweite Quelle nötig | Vor jedem Schluss gegen eine Nicht-IEX-Quelle prüfen. Bestätigt sie sich: **einstellen** ist die ehrliche Konsequenz, nicht Versuch 64. |
+
+#### Die Asymmetrie, die mitgelesen werden muss
+
+Der freie Feed ist IEX und sieht ~2 % des US-Volumens (§G29). Die
+gemessene Spanne ist deshalb eine **Obergrenze**, keine Punktschätzung.
+Daraus folgt eine bewusst ungleiche Beweislast:
+
+* **Ein gutes Ergebnis ist beweiskräftig.** Liegt schon die Obergrenze
+  bei ≤ 5 bps, ist die Frage entschieden.
+* **Ein schlechtes Ergebnis ist es nicht.** Über 20 bps kann ebenso gut
+  IEX sein wie der Markt. Dann braucht es eine zweite Quelle, bevor
+  irgendetwas daraus folgt.
+
+Diese Asymmetrie steht hier, **damit sie nicht nachträglich nur in die
+eine Richtung angewandt wird** — also nicht „das schlechte Ergebnis war
+ja nur IEX", während ein gutes Ergebnis unbesehen gilt.
+
+#### Was diese Messung ausdrücklich NICHT auslöst
+
+* **Kein neuer Wert in `costs.py`.** Ein geänderter Kostenparameter
+  bewertet jede laufende und jede vergangene Messung neu. Das ist eine
+  eigene, vorangemeldete Entscheidung — keine Nebenwirkung einer
+  Messung.
+* **Keine Rehabilitierung von `K03_limit_statt_market`.** Der Kandidat
+  ist nach vorab festgelegter Regel verworfen (§G40). Zeigt die Messung
+  eine weitere Spanne, ist der Weg eine **neue** Voranmeldung mit dem
+  gemessenen Wert und einem eigenen Zählerplatz (§B2).
+* **Keine Änderung an der Handelslogik vor dem 10.10.2026.**
+
+---
+
 ## 4. Zeitplan — wie lange laufen lassen
 
 B11 ist seit **18.08.2026** angemeldet. Alle Tagesangaben zählen ab dort.

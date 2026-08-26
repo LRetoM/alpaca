@@ -103,6 +103,14 @@ BOTS: dict[str, dict] = {
     "ziel_weit":        {"target_atr": 3.0},
     "halten_lang":      {"max_hold_days": 10},
     "halten_kurz":      {"max_hold_days": 3},
+    # Lange Horizonte (docs/TAKTIKWECHSEL.md §3). Die Kosten je Trade sind
+    # vom Horizont UNABHAENGIG - ein Rundlauf kostet 0,142 %, ob fuenf oder
+    # vierzig Tage gehalten wird. Der Vorsprung je Trade waechst dagegen,
+    # solange der Effekt nachlaeuft. Gesucht wird der Horizont, ab dem er
+    # ueber der Kostenschwelle liegt; von 0,110 % auf 0,142 % sind das
+    # +29 %, nicht die intuitive Verdopplung.
+    "halten_20":        {"max_hold_days": 20},
+    "halten_40":        {"max_hold_days": 40},
     "mehr_positionen":  {"max_positions": 25},
     "weniger_positionen": {"max_positions": 8},
     "schwelle_hoch":    {"min_score": 0.80},
@@ -111,6 +119,14 @@ BOTS: dict[str, dict] = {
     "exit_score_null":  {"exit_score": 0.0},
     "kein_cooldown":    {"reenter_cooldown_days": 0},
     "trailing":         {"trail_after_atr": 1.5},
+    # Positionsgroessen - die einzige Strukturachse, die bis zum 26.08.2026
+    # nie gemessen wurde (BEFUNDE §G42). Sie aendert die Kosten je Einheit
+    # Vorsprung, ohne den Umschlag zu aendern - anders als jede andere
+    # Achse hier. Alle drei teilen die Signalgruppe mit "basis", kosten
+    # also keinen zusaetzlichen Signaldurchlauf.
+    "gleichgewicht":    {"groessen_modus": "gleich"},
+    "score_gewicht":    {"groessen_modus": "score"},
+    "score_mal_vola":   {"groessen_modus": "score_vola"},
     # Signalgewicht statt EngineConfig-Feld - spiegelt den laufenden
     # Flottenbot B06_ohne_regime (siehe BEFUNDE §E) und ist zugleich die
     # einzige Achse, die die Signalgruppierung mit einer ZWEITEN Gruppe

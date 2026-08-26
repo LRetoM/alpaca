@@ -263,7 +263,11 @@ def main() -> int:
         for i, sym in enumerate(syms, 1):
             try:
                 df_sym = data.ohlcv(bars, sym)
-                trades = edgar.insider_trades(sym, since="2016-01-01", max_filings=120)
+                # Grenze grosszuegig: Ueberschreitung schliesst das Symbol
+                # aus (ZuVieleMeldungen), sie kuerzt es nicht mehr still auf
+                # die neuesten N - das erzeugte ein zeitverzerrtes Panel (§G41).
+                trades = edgar.insider_trades(sym, since="2016-01-01",
+                                              max_filings=1500)
                 if not trades.empty:
                     insider[sym] = edgar.insider_features(trades, df_sym.index, sym)
                 if i % 10 == 0:

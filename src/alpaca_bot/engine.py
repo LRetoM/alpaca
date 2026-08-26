@@ -249,6 +249,35 @@ class EngineConfig:
     min_score: float = 0.55
     """Ab wann gilt ein Wert als Kandidat."""
 
+    groessen_modus: str = "inverse_vola"
+    """Wie das freie Kapital auf die Kandidaten verteilt wird.
+
+    **Die einzige Strukturachse, die bis zum 26.08.2026 nie gemessen
+    wurde.** Alle 13 Flottenbots und alle 14 Lernlauf-Achsen variieren
+    Ein- und Ausstiegsregeln; wie VIEL ein Kandidat bekommt, war fest
+    verdrahtet.
+
+        inverse_vola   Gewicht = min(1.5, 0.03/atr_pct). Risikoparitaet:
+                       volatile Werte bekommen weniger. **Vorgabe, und
+                       bitgleich zum Verhalten vor dem 26.08.2026.**
+        gleich         Gewicht = 1.0 fuer jeden. Die Nullhypothese - hat
+                       die Volatilitaetsgewichtung ueberhaupt je etwas
+                       gebracht? Niemand hat es geprueft.
+        score          Gewicht = Score. Der Score entscheidet heute nur,
+                       OB gekauft wird und in welcher Reihenfolge, nicht
+                       wieviel. Traegt er Information (IC > 0, sonst gaebe
+                       es die Strategie nicht), liegt hier Kapital an der
+                       falschen Stelle.
+        score_vola     Beides multipliziert.
+
+    **Warum das die interessanteste verbliebene Achse ist:** Sie aendert
+    die Kosten je Einheit Vorsprung, OHNE den Umschlag zu aendern. Jede
+    andere Achse justiert Randbedingungen eines Vorsprungs, der zu klein
+    ist (BEFUNDE §A, §B6).
+
+    Zu messen im Historienlauf (`32_lernlauf.py`, 3.767 Handelstage), nicht
+    im Schatten (15 Tage) - und erst danach als Voranmeldung."""
+
     exit_score: float = 0.35
     """Faellt der Score darunter, wird verkauft - die These traegt nicht mehr."""
 
@@ -406,6 +435,7 @@ class EngineConfig:
             "max_position_pct": self.max_position_pct,
             "min_position_pct": self.min_position_pct,
             "min_score": self.min_score,
+            "groessen_modus": self.groessen_modus,
             "exit_score": self.exit_score,
             "stop_atr": self.stop_atr,
             "target_atr": self.target_atr,
@@ -510,6 +540,24 @@ class EngineConfig:
         )
         defaults.update(overrides)
         return cls(**defaults)
+
+
+def kandidatengewicht(atr_pct: float, score: float, modus: str) -> float:
+    """Relatives Gewicht eines Kandidaten nach `EngineConfig.groessen_modus`.
+
+    Rein relativ: `verteile_kapital` normiert anschliessend. Ein Gewicht
+    von 0 ist deshalb verboten - es wuerde die Position stumm auf null
+    setzen, statt sie klein zu machen. Der Score kann bei `min_score=0`
+    beliebig nahe an 0 liegen, darum die Untergrenze.
+    """
+    vola = _vola_gewicht(atr_pct)
+    if modus == "gleich":
+        return 1.0
+    if modus == "score":
+        return max(float(score), 0.05)
+    if modus == "score_vola":
+        return max(float(score), 0.05) * vola
+    return vola  # "inverse_vola" - die Vorgabe, unveraendert
 
 
 def _vola_gewicht(atr_pct: float) -> float:
@@ -742,7 +790,8 @@ class Engine:
             if luft < mindest:
                 continue
 
-            gewichte[sym] = _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+            gewichte[sym] = kandidatengewicht(
+                float(row.get("atr_pct", 0) or 0), score, cfg.groessen_modus)
             restluft[sym] = luft
             info[sym] = (score, row, price, pos)
 
@@ -1029,7 +1078,8 @@ class Engine:
         verteilt: dict[str, float] = {}
         if cfg.deploy_to_target:
             verteilt = verteile_kapital(
-                {sym: _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+                {sym: kandidatengewicht(float(row.get("atr_pct", 0) or 0),
+                                        _score, cfg.groessen_modus)
                  for sym, _score, row, _price in chosen},
                 frei=free, deckel=cap, mindest=mindest,
             )

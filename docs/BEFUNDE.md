@@ -4803,6 +4803,198 @@ gleiche Grenze und gleicher Wortlaut wie in Skript 34.
 
 ---
 
+## G41. Der EDGAR-Test schnitt zwei Drittel der Historie weg (26.08.2026)
+
+**Anlass:** Nutzerfrage, ob dem laufenden EDGAR-Test schon etwas zu
+entnehmen ist. Geprüft wurde bewusst **nur die Abdeckung**, kein IC und
+kein t-Wert (§B4). Die Abdeckung reichte.
+
+### Was auffiel
+
+Aus dem Zwischenstand bei 650 von 2.168 Symbolen:
+
+| | |
+|---|---|
+| Symbole mit Score ≠ 0 je Handelstag | Median **8** von 642 |
+| Tage mit ≤ 5 informativen Symbolen | **47 %** |
+| Median erste 250 Tage → letzte 250 Tage | **2 → 87** |
+
+Ein Faktor 40 in der Abdeckung über den Zeitraum.
+
+### Die Ursache — eine Zeile
+
+```python
+edgar.py:311   if max_filings:
+                   f = f.tail(max_filings)      # die NEUESTEN N
+```
+
+`--max-filings` stand auf **150**. Aus dem Plattencache nachgemessen
+(400 CIKs): **Median 436 Form-4-Meldungen je Symbol** seit 2018,
+**85 % der Symbole über 150.** Dem mittleren Symbol fehlten also rund
+**zwei Drittel** seiner Historie — und zwar immer die ältere Hälfte,
+weil `.tail()` von hinten nimmt.
+
+Sichtbar in den Daten: Von 344 Symbolen mit überhaupt einem
+Insiderkauf begannen **13 vor 2022 und 314 ab 2023**.
+
+### Warum das den Test zerstört hätte
+
+Die Prüfkette verlangt **Jahresstabilität** — ein Vorzeichenwechsel
+zwischen Jahren disqualifiziert. Bei zwei informativen Symbolen pro Tag
+ist der Jahres-IC eines frühen Jahres reines Rauschen; sein Vorzeichen
+kippt mit einer Münze. **Der Faktor wäre durchgefallen aus einem Grund,
+der nichts mit Insiderhandel zu tun hat.**
+
+Kein Lookahead — aber dieselbe Familie wie §G11 (Survivorship) und
+§G35 Fund 4 (Tautologie): eine Eigenschaft der Datenbeschaffung, die
+sich als Eigenschaft der Welt ausgibt.
+
+### Behoben
+
+`max_filings` ist keine Kürzung mehr, sondern eine **Laufzeitbremse mit
+Ausnahme**: `edgar.ZuVieleMeldungen`. Ein Symbol, dessen Historie nicht
+vollständig geladen werden kann, wird **ausgeschlossen**, nicht halbiert
+— ein halbes Panel ist schlimmer als kein Panel, weil es vollständig
+aussieht.
+
+* `34_edgar_kandidat.py` fängt die Ausnahme, zählt sie, und **warnt
+  laut, wenn über 25 % des Universums fehlen** (die Ausgeschlossenen
+  sind keine Zufallsstichprobe — es sind die Firmen mit den meisten
+  Insidern, also die größeren).
+* Neue Vorgaben: `--since 2022-09-01`, `--max-filings 400`. Nach
+  derselben Messung laufen damit ~90 % der Symbole vollständig durch.
+* **Zweiter Fundort:** `10_simulate.py:266` hatte dieselbe Zeile mit
+  `max_filings=120`. Nachgezogen.
+
+**Absicherung:** `tests/test_edgar_abschneiden.py`, 5 Tests (darunter
+einer, der die Vorgaben des Skripts gegen die gemessene
+Meldungsverteilung prüft), 1 Mutation.
+
+**Der Lauf vom 25.08. ist damit ungültig** und wird verworfen. Der
+Plattencache (1,2 GB) bleibt und macht den Neustart billiger.
+
+---
+
+## G42. Positionsgrößen — die Achse, die 63 Versuche lang nie variiert wurde (26.08.2026)
+
+**Der Fund ist eine Abwesenheit.** Alle 13 Flottenbots und alle 14
+Lernlauf-Achsen variieren Ein- und Ausstiegsregeln. **Wie viel Kapital
+ein Kandidat bekommt, war fest verdrahtet:**
+
+```python
+engine.py   _vola_gewicht(atr_pct) = min(1.5, 0.03 / atr_pct)
+```
+
+Der Score entscheidet heute, **ob** gekauft wird und in welcher
+Reihenfolge — **nicht wieviel**. Ein Kandidat mit Score 0,95 bekommt
+dasselbe wie einer mit 0,40, korrigiert nur um die Volatilität.
+
+### Warum das kein weiterer Faktorversuch ist
+
+Diese Achse ändert den Vorsprung je **Dollar** bei **unverändertem
+Umschlag**. Jede der 63 bisherigen Achsen justierte Randbedingungen
+eines Vorsprungs, der zu klein ist (§A). Diese verschiebt Kapital
+innerhalb desselben Vorsprungs.
+
+### Gebaut
+
+`EngineConfig.groessen_modus` mit vier Werten:
+
+| Wert | Gewicht |
+|---|---|
+| `inverse_vola` | `min(1.5, 0.03/atr_pct)` — **Vorgabe, bitgleich zu vorher** |
+| `gleich` | 1,0 — die Nullhypothese |
+| `score` | Score, Untergrenze 0,05 |
+| `score_vola` | Produkt aus beidem |
+
+An **beiden** Verteilungsstellen eingebaut (Neukauf und Nachkauf), im
+Konfigurations-Abzug protokolliert, drei neue Lernlauf-Achsen.
+
+**Die Beweislast bei einer Änderung an der Handelslogik:** 43 Tests,
+darunter ein parametrisierter über 35 Kombinationen aus ATR und Score,
+der zeigt, dass `inverse_vola` **rechnerisch identisch** zum alten
+`_vola_gewicht` ist. Dieselbe Beweisform wie beim §G20-Split. Plus zwei
+Mutationen.
+
+**Der Vorbehalt, vorab notiert:** `score` konzentriert das Kapital.
+`B07_mehr_positionen` zeigt bereits t = −2,16 — weniger Breite hat
+geschadet. Eine Verbesserung des Erwartungswerts bei höherer Streuung
+ist kein Fortschritt, wenn die Streuung die Nachweisbarkeit frisst.
+Zu messen im Historienlauf (3.767 Handelstage), nicht im Schatten (15).
+
+---
+
+## G43. Replikation erhöhte bisher die Hürde, statt sie zu stützen (26.08.2026)
+
+**Anlass:** Die Frage, ob die Zufallsschwelle zu streng gesetzt ist.
+
+### Die Schwelle selbst ist richtig — nachgerechnet
+
+`schwelle_sigma(n) = sqrt(2·ln n) + 0,5`:
+
+| n | Projekt | Bonferroni (5 %) | echte Familien-Fehlerrate |
+|---:|---:|---:|---:|
+| 16 | 2,85 | 2,96 | 6,8 % |
+| 40 | 3,22 | 3,23 | 5,0 % |
+| 225 | 3,79 | 3,69 | 3,3 % |
+
+Praktisch Bonferroni, bei kleinem n sogar **milder**. Harvey/Liu/Zhu
+fordern für neue Faktoren t > 3,0.
+
+**Die Gegenprobe entscheidet:** Bei Schwelle 2,0 und 63 Versuchen sind
+**2,9 Zufallstreffer** zu erwarten (Wahrscheinlichkeit für mindestens
+einen: 95 %). Die tatsächlichen Beinahe-Treffer — `ohne_regime` +2,22,
+`vix_niveau` +2,45, `halten_lang` +2,05, `dyn_ausstieg` +1,86 — sind
+**genau so viele, wie reines Rauschen liefert.**
+
+### Der echte Fehler liegt woanders
+
+**Jeder Test zählte als eigener Versuch — auch zweimal dieselbe Frage
+auf verschiedenen Daten.** `halten_lang`:
+
+```
+Schatten,      16 Handelstage    t = +1,16
+Historienlauf, 15 Jahre          t = +2,05
+```
+
+Nach alter Rechnung: zwei Versuche, beide unter der Schwelle, beide
+erhöhen die Hürde **für alle anderen laufenden Messungen**. Das ist
+verkehrt herum. Zwei übereinstimmende Läufe auf getrennten Daten sind
+ein **stärkerer** Beleg, nicht ein doppelt bestrafter.
+
+### Behoben
+
+`statistik.kombiniere_unabhaengig()` — Stouffer:
+`Z = Σ(wᵢ·zᵢ) / √(Σwᵢ²)`. Für die beiden oben: **t = +2,27**
+(gewichtet nach √Gruppenzahl: +2,12). Beides weiterhin unter 2,85 —
+`halten_lang` besteht auch kombiniert nicht, und das ist die richtige
+Antwort.
+
+**Zwei Dinge, die die Funktion ausdrücklich nicht tut:**
+
+1. **Sie senkt keine Schwelle.** Die Schwelle wird übergeben, nicht
+   gerechnet. Replikation spart einen Zählerplatz, keine Hürde.
+2. **Sie mittelt keinen Widerspruch weg.** Zeigen die Läufe
+   verschiedene Vorzeichen, ist das Ergebnis nie `belastbar` — dann ist
+   die Kombination keine Replikation, sondern eine Mittelung über einen
+   Widerspruch.
+
+**Die Bedingung, an der alles hängt:** Die Läufe müssen unabhängig
+sein. Zwei Auswertungen desselben Schattenbestands sind es nicht.
+Abhängige Läufe hier hineinzugeben baut einen t-Wert, der nur wie eine
+Replikation aussieht — dieselbe Fehlerklasse wie die Überlappung aus
+§B1/§G12, eine Ebene höher.
+
+**Was die Schwelle NICHT löst — und das ist der eigentliche Engpass:**
+§G23 und §G31. Das Messgerät löst 0,0378 %/Tag auf, entscheidend wären
+0,0065 %/Tag. Eine niedrigere Schwelle tauscht „findet nichts" gegen
+„findet Rauschen". Trennschärfe kauft man mit Breite (IR = IC·√BR),
+nicht mit einer niedrigeren Hürde.
+
+**Absicherung:** `tests/test_replikation.py`, 7 Tests, 1 Mutation.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

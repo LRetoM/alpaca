@@ -849,6 +849,53 @@ MUTATIONEN = [
         "zu tun hat.",
     ),
 
+    # --- Runde 12, 26.08.2026: EDGAR-Abschneiden und Positionsgroessen ---
+    Mutation(
+        "Form-4-Meldungen werden wieder still abgeschnitten",
+        "src/alpaca_bot/edgar.py",
+        "        if max_filings and len(f) > max_filings:\n"
+        "            raise ZuVieleMeldungen(",
+        "        if False and len(f) > max_filings:\n"
+        "            raise ZuVieleMeldungen(",
+        "test_edgar_abschneiden",
+        "Genau der Fehler aus §G41: Ohne die Ausnahme laedt das Symbol "
+        "nur die neuesten N Meldungen weiter, das Panel ist in den "
+        "frueheren Jahren leer und in den spaeteren voll. Der Faktor "
+        "faellt dann an der Jahresstabilitaet durch - aus einem Grund, "
+        "der nichts mit Insiderhandel zu tun hat.",
+    ),
+    Mutation(
+        "Positionsgroessen-Vorgabe gewichtet ploetzlich gleich",
+        "src/alpaca_bot/engine.py",
+        "    return vola  # \"inverse_vola\" - die Vorgabe, unveraendert",
+        "    return 1.0  # \"inverse_vola\" - die Vorgabe, unveraendert",
+        "test_positionsgroessen",
+        "Die Vorgabe MUSS bitgleich zum alten `_vola_gewicht` sein. Faellt "
+        "sie unbemerkt auf Gleichgewichtung, wird jede laufende Messung "
+        "stillschweigend zu einer anderen Messung - dieselbe Gefahr wie "
+        "beim §G20-Split, nur ohne Bytecode-Nachweis.",
+    ),
+    Mutation(
+        "Score-Gewicht darf wieder null werden",
+        "src/alpaca_bot/engine.py",
+        '        return max(float(score), 0.05)',
+        '        return float(score)',
+        "test_positionsgroessen",
+        "Ein Gewicht von 0 streicht die Position stumm, statt sie klein "
+        "zu machen - `verteile_kapital` normiert relativ. Der Kandidat "
+        "waere ausgewaehlt, protokolliert und bekaeme null Dollar.",
+    ),
+    Mutation(
+        "Replikation senkt die Schwelle",
+        "src/alpaca_bot/statistik.py",
+        "                       bool(abs(z) > schwelle and not hinweis), hinweis)",
+        "                       bool(abs(z) > schwelle / 2 and not hinweis), hinweis)",
+        "test_replikation",
+        "Replikation spart einen Zaehlerplatz, KEINE Huerde (§G43). Wer "
+        "hier die Schwelle senkt, hat aus einem Werkzeug gegen "
+        "Mehrfachtesten eines fuer Mehrfachtesten gemacht.",
+    ),
+
     # --- Runde 12, 26.08.2026: Verwaisung erst nach zwei Malen (§G37) -----
     Mutation(
         "Verwaisung wieder beim ersten Fehlen geloescht",

@@ -53,6 +53,30 @@ class EdgarError(RuntimeError):
     """EDGAR-Zugriff fehlgeschlagen."""
 
 
+class ZuVieleMeldungen(EdgarError):
+    """Ein Symbol hat mehr Form-4-Meldungen als die gesetzte Grenze.
+
+    **Warum das eine Ausnahme ist und kein stilles Abschneiden** (§G41).
+    Bis zum 26.08.2026 schnitt `insider_trades` bei Ueberschreitung
+    einfach ab - mit `f.tail(max_filings)`, also den NEUESTEN N. Das
+    Ergebnis war ein Panel, das in den frueheren Jahren praktisch leer
+    und in den spaeteren voll war: Bei `max_filings=150` und einem
+    Median von 436 Meldungen je Symbol fehlten dem mittleren Symbol
+    zwei Drittel seiner Historie, immer die aeltere Haelfte.
+
+    Gemessen am laufenden Kandidatentest: von 344 Symbolen mit
+    ueberhaupt einem Insiderkauf begannen 13 vor 2022 und 314 ab 2023.
+    Die Jahresstabilitaetspruefung haette dann Jahre bewertet, in denen
+    zwei Symbole Daten haben - und den Faktor aus einem Grund verworfen,
+    der nichts mit Insiderhandel zu tun hat.
+
+    Ein Symbol, dessen Historie nicht vollstaendig geladen werden kann,
+    gehoert deshalb AUSGESCHLOSSEN, nicht halbiert. Der Aufrufer muss
+    das entscheiden und zaehlen - darum eine Ausnahme statt einer
+    stillen Kuerzung.
+    """
+
+
 def _user_agent() -> str:
     """Pflicht-Header der SEC: Name und Kontakt-E-Mail.
 
@@ -301,14 +325,23 @@ def insider_trades(
     XML). Ein Symbol mit 400 Form-4-Meldungen kostet also 800 Requests -
     bei 8/s rund 100 Sekunden. Der Plattencache macht Wiederholungslaeufe
     praktisch kostenlos, der erste Lauf dauert.
+
+    `max_filings` ist eine LAUFZEITBREMSE, keine Kuerzung: Wird sie
+    ueberschritten, fliegt `ZuVieleMeldungen`. Der Aufrufer entscheidet
+    dann, ob er das Symbol ausschliesst oder die Grenze anhebt. Bis zum
+    26.08.2026 wurde hier still auf die neuesten N gekuerzt - siehe
+    `ZuVieleMeldungen` fuer den Schaden, den das angerichtet hat (§G41).
     """
     syms = [tickers] if isinstance(tickers, str) else list(tickers)
     rows: list[InsiderTrade] = []
 
     for sym in syms:
         f = filings(sym, "4", since=since)
-        if max_filings:
-            f = f.tail(max_filings)
+        if max_filings and len(f) > max_filings:
+            raise ZuVieleMeldungen(
+                f"{sym}: {len(f)} Form-4-Meldungen seit {since}, Grenze ist "
+                f"{max_filings}. Symbol ausschliessen oder Grenze anheben - "
+                f"Abschneiden erzeugt ein Panel mit Zeitverzerrung (§G41).")
         for _, r in f.iterrows():
             rows.extend(
                 parse_form4(r["cik"], r["accession"], r["accessionNumber"],

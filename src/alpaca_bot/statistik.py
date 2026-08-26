@@ -312,3 +312,88 @@ def noetige_gruppen(effekt: float, streuung: float, t_ziel: float = 2.0) -> int:
     if effekt == 0 or not np.isfinite(effekt):
         return 10**9
     return int(np.ceil((t_ziel * streuung / abs(effekt)) ** 2))
+
+
+@dataclass
+class Replikation:
+    """Ergebnis von `kombiniere_unabhaengig`."""
+    n_laeufe: int
+    t_einzeln: tuple[float, ...]
+    t_kombiniert: float
+    schwelle: float
+    belastbar: bool
+    hinweis: str = ""
+
+    def __str__(self) -> str:
+        einzeln = ", ".join(f"{t:+.2f}" for t in self.t_einzeln)
+        urteil = "BELASTBAR" if self.belastbar else "nicht belastbar"
+        return (f"  {self.n_laeufe} unabhaengige Laeufe: {einzeln}\n"
+                f"  kombiniert (Stouffer): t = {self.t_kombiniert:+.2f}  "
+                f"gegen Schwelle {self.schwelle}  [{urteil}]"
+                + (f"\n  {self.hinweis}" if self.hinweis else ""))
+
+
+def kombiniere_unabhaengig(t_werte, schwelle: float,
+                           *, gewichte=None) -> Replikation:
+    """Fasst t-Werte DERSELBEN Hypothese aus UNABHAENGIGEN Daten zusammen.
+
+    **Die Luecke, die das schliesst (BEFUNDE §G43).** Bis zum 26.08.2026
+    behandelte dieses Projekt jeden Test als eigenen Versuch - auch dann,
+    wenn zweimal dieselbe Frage auf verschiedenen Daten gestellt wurde.
+    Beispiel `halten_lang` (`max_hold_days=10`):
+
+        Schatten, 16 Handelstage 2026     t = +1,16
+        Historienlauf, 15 Jahre           t = +2,05
+
+    Nach der alten Rechnung waren das ZWEI Versuche: Beide unter der
+    Schwelle, und beide haben den Versuchszaehler erhoeht und damit die
+    Huerde fuer alle anderen. **Das ist genau verkehrt herum.** Eine
+    Hypothese, die auf zwei getrennten Datensaetzen dasselbe Vorzeichen
+    zeigt, ist staerker belegt als eine mit einem einzelnen t-Wert -
+    Replikation ist der Kern der Methode, nicht ihr Gegenteil.
+
+    Kombiniert wird nach **Stouffer**: `Z = sum(w_i * z_i) / sqrt(sum(w_i^2))`.
+    Fuer die beiden oben ergibt das t = +2,27.
+
+    **Wofuer das NICHT gilt - die Bedingung, an der alles haengt.** Die
+    Laeufe muessen **unabhaengig** sein. Zwei Auswertungen desselben
+    Schattenbestands sind es nicht; Historienlauf und Vorwaertsbetrieb
+    sind es weitgehend. Wer abhaengige Laeufe hier hineingibt, baut sich
+    einen t-Wert, der nur wie eine Replikation aussieht - dieselbe
+    Fehlerklasse wie die Ueberlappung aus §B1/§G12, nur eine Ebene hoeher.
+
+    **Und es senkt keine Schwelle.** `schwelle` wird uebergeben, nicht
+    berechnet: Wer eine Hypothese repliziert, spart sich den zusaetzlichen
+    Zaehlerplatz - er bekommt keine niedrigere Huerde.
+
+    Args:
+        t_werte: die t-Werte je Lauf, gleiche Richtung derselben Hypothese.
+        schwelle: die geltende Zufallsschwelle (`fleet.schwelle_sigma()`).
+        gewichte: optional, sinnvoll die Wurzel der jeweiligen Gruppenzahl -
+            ein Lauf ueber 3.767 Handelstage wiegt mehr als einer ueber 16.
+    """
+    t = np.asarray([float(x) for x in t_werte], dtype=float)
+    t = t[np.isfinite(t)]
+    if len(t) == 0:
+        return Replikation(0, (), float("nan"), schwelle, False,
+                           "keine verwertbaren t-Werte")
+    if len(t) == 1:
+        return Replikation(1, tuple(t), float(t[0]), schwelle,
+                           bool(abs(t[0]) > schwelle),
+                           "nur ein Lauf - das ist keine Replikation")
+
+    w = (np.ones(len(t)) if gewichte is None
+         else np.asarray([float(g) for g in gewichte], dtype=float))
+    if len(w) != len(t) or not np.all(np.isfinite(w)) or np.any(w <= 0):
+        raise ValueError("gewichte muessen positiv sein und zu t_werte passen")
+
+    z = float(np.sum(w * t) / np.sqrt(np.sum(w ** 2)))
+
+    hinweis = ""
+    if len(set(np.sign(t))) > 1:
+        hinweis = ("ACHTUNG: die Laeufe widersprechen sich im Vorzeichen - "
+                   "eine Kombination ist dann keine Replikation, sondern "
+                   "eine Mittelung ueber einen Widerspruch")
+    return Replikation(len(t), tuple(round(float(x), 4) for x in t),
+                       round(z, 4), schwelle,
+                       bool(abs(z) > schwelle and not hinweis), hinweis)

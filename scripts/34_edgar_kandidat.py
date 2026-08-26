@@ -98,7 +98,7 @@ def baue_edgar_panels(bars: pd.DataFrame, symbole: list[str], since: str,
     Zeile, weil die alte Fassung nur alle 10 Symbole druckte.
     """
     gesammelt: dict[str, dict[str, pd.Series]] = {}
-    n_ok = n_fehler = n_leer = 0
+    n_ok = n_fehler = n_leer = n_zu_viele = 0
     start = time.monotonic()
     kandidaten_symbole = [s for s in symbole if s != MARKT]
     gesamt = len(kandidaten_symbole)
@@ -123,6 +123,14 @@ def baue_edgar_panels(bars: pd.DataFrame, symbole: list[str], since: str,
 
         try:
             trades = edgar.insider_trades(sym, since=since, max_filings=max_filings)
+        except edgar.ZuVieleMeldungen:
+            # AUSSCHLIESSEN, nicht abschneiden (§G41). Ein halbes Panel ist
+            # schlimmer als kein Panel: Es sieht vollstaendig aus und ist
+            # systematisch in den frueheren Jahren leer.
+            n_zu_viele += 1
+            if verbose:
+                print(" zu viele Meldungen, AUSGESCHLOSSEN")
+            continue
         except edgar.EdgarError:
             raise  # SEC_USER_AGENT fehlt o.ae. - das darf den Lauf stoppen
         except Exception as e:  # noqa: BLE001 - Netz-/Parsingfehler einzelner Symbole
@@ -164,6 +172,7 @@ def baue_edgar_panels(bars: pd.DataFrame, symbole: list[str], since: str,
             with open(CHECKPOINT, "wb") as f:
                 pickle.dump({"i": i, "gesamt": gesamt, "n_ok": n_ok,
                             "n_fehler": n_fehler, "n_leer": n_leer,
+                            "n_zu_viele": n_zu_viele,
                             "gesammelt": gesammelt}, f)
             if verbose:
                 print(f"      [Zwischenstand gespeichert: {CHECKPOINT}]")
@@ -172,6 +181,16 @@ def baue_edgar_panels(bars: pd.DataFrame, symbole: list[str], since: str,
     if verbose:
         print(f"\n  {n_ok} Symbole verarbeitet in {dauer/60:.1f} Minuten "
               f"({dauer/max(n_ok,1):.1f}s/Symbol im Schnitt)")
+        anteil = n_zu_viele / max(gesamt, 1)
+        print(f"  {n_zu_viele} Symbole ({anteil:.0%}) wegen zu vieler "
+              f"Meldungen AUSGESCHLOSSEN, {n_leer} ohne Insiderkaeufe")
+        if anteil > 0.25:
+            print()
+            print("  WARNUNG: ueber ein Viertel des Universums fehlt. Das ist")
+            print("  keine Zufallsstichprobe - ausgeschlossen werden die")
+            print("  Symbole mit den MEISTEN Insidern, also tendenziell die")
+            print("  groesseren Firmen. Vor der Auswertung --max-filings")
+            print("  anheben oder --since verkuerzen (§G41).")
     return {k: pd.DataFrame(v) for k, v in gesammelt.items()}
 
 
@@ -180,10 +199,10 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--symbole", type=int, default=40)
     p.add_argument("--jahre", type=float, default=8.0)
-    p.add_argument("--since", default="2018-01-01",
+    p.add_argument("--since", default="2022-09-01",
                    help="Ab wann Form-4-Meldungen gezaehlt werden")
     p.add_argument("--horizont", type=int, default=5)
-    p.add_argument("--max-filings", type=int, default=150,
+    p.add_argument("--max-filings", type=int, default=400,
                    help="Obergrenze Form-4-Einreichungen JE SYMBOL "
                         "(0 = unbegrenzt). Schuetzt vor Grosskonzernen mit "
                         "sehr vielen meldepflichtigen Personen, die sonst "
