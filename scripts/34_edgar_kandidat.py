@@ -194,11 +194,42 @@ def baue_edgar_panels(bars: pd.DataFrame, symbole: list[str], since: str,
     return {k: pd.DataFrame(v) for k, v in gesammelt.items()}
 
 
+def _pruefe_fenster(jahre: float, since: str) -> None:
+    """Kursfenster und Meldungsfenster muessen zusammenpassen (§G41).
+
+    **Warum das eine harte Pruefung ist und keine Warnung.** Die
+    Insider-Merkmale existieren erst ab `--since`. Reicht das Kursraster
+    weiter zurueck, ist der Faktor dort konstant null - und genau das
+    war der Fehler vom 26.08.2026: ein Panel, das vollstaendig aussieht
+    und in den frueheren Jahren leer ist. Der Faktor faellt dann an der
+    Jahresstabilitaet durch, ohne dass es an den Daten liegt.
+
+    Die Korrektur an `--max-filings` allein reicht NICHT: Sie sorgt nur
+    dafuer, dass innerhalb des Meldungsfensters nichts fehlt. Ein zu
+    langes Kursfenster erzeugt dieselbe Verzerrung noch einmal.
+    """
+    beginn_kurse = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=jahre * 365.25)
+    beginn_meldungen = pd.Timestamp(since, tz="UTC")
+    luecke = (beginn_meldungen - beginn_kurse).days
+    if luecke > 90:
+        raise SystemExit(
+            f"\n  ABBRUCH: Das Kursfenster beginnt {luecke} Tage vor dem "
+            f"Meldungsfenster.\n"
+            f"    Kurse ab     {beginn_kurse.date()}  (--jahre {jahre:g})\n"
+            f"    Meldungen ab {beginn_meldungen.date()}  (--since {since})\n\n"
+            f"  In dieser Luecke ist der Insider-Faktor konstant null. Das ist\n"
+            f"  exakt die Zeitverzerrung aus §G41, nur an anderer Stelle.\n"
+            f"  Entweder --jahre auf ~{jahre - luecke/365.25:.1f} senken "
+            f"oder --since auf {beginn_kurse.date()} vorziehen.\n")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--symbole", type=int, default=40)
-    p.add_argument("--jahre", type=float, default=8.0)
+    p.add_argument("--jahre", type=float, default=4.0,
+                   help="Kurshistorie. MUSS zu --since passen, siehe "
+                        "_pruefe_fenster (§G41)")
     p.add_argument("--since", default="2022-09-01",
                    help="Ab wann Form-4-Meldungen gezaehlt werden")
     p.add_argument("--horizont", type=int, default=5)
@@ -214,6 +245,7 @@ def main() -> int:
                    help="Alle N Symbole einen Zwischenstand wegschreiben "
                         f"(0 = aus). Datei: {CHECKPOINT}")
     args = p.parse_args()
+    _pruefe_fenster(args.jahre, args.since)
     max_filings = args.max_filings or None
 
     # `load_universe(max_symbols=N)` sortiert nach Dollarumsatz und nimmt

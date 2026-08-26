@@ -4866,6 +4866,22 @@ aussieht.
 * **Zweiter Fundort:** `10_simulate.py:266` hatte dieselbe Zeile mit
   `max_filings=120`. Nachgezogen.
 
+### Zweite Stelle, an der dieselbe Verzerrung entsteht
+
+Beim Nachprüfen der neuen Vorgaben aufgefallen: `--jahre` (Kurshistorie)
+und `--since` (Meldungsfenster) waren **unabhängig voneinander**. Mit
+`--jahre 8 --since 2022-09-01` hätte das Kursraster vier Jahre weiter
+zurückgereicht als die Meldungen — der Faktor wäre dort konstant null
+gewesen, und die Zeitverzerrung wäre in exakt derselben Form
+zurückgekommen, nur an anderer Stelle.
+
+**Die Korrektur an `max_filings` allein reicht also nicht.** Sie sorgt
+nur dafür, dass innerhalb des Meldungsfensters nichts fehlt.
+
+`_pruefe_fenster()` bricht jetzt **hart ab**, wenn das Kursfenster mehr
+als 90 Tage vor dem Meldungsfenster beginnt, und nennt den korrigierten
+Wert. Vorgaben aufeinander abgestimmt: `--jahre 4.0`, `--since 2022-09-01`.
+
 **Absicherung:** `tests/test_edgar_abschneiden.py`, 5 Tests (darunter
 einer, der die Vorgaben des Skripts gegen die gemessene
 Meldungsverteilung prüft), 1 Mutation.
