@@ -848,6 +848,19 @@ MUTATIONEN = [
         "Ergebnis, und zwar aus einem Grund, der nichts mit dem Ordertyp "
         "zu tun hat.",
     ),
+
+    # --- Runde 12, 26.08.2026: Verwaisung erst nach zwei Malen (§G37) -----
+    Mutation(
+        "Verwaisung wieder beim ersten Fehlen geloescht",
+        "src/alpaca_bot/state.py",
+        "            bestaetigt = sorted(fehlend & vorher)",
+        "            bestaetigt = sorted(fehlend)",
+        "test_verwaisung_bestaetigt",
+        "GENAU der Fehler vom 21.08.2026: RMBS - eine einzige Order, nie "
+        "verkauft - fehlte einmal in account.positions() und wurde sofort "
+        "als verwaist geloescht. Die Position blieb mehrere Tage ohne "
+        "Stop, weil der Broker-Read sie danach wiederholt ausliess.",
+    ),
 ]
 
 

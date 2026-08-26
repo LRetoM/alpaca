@@ -112,6 +112,14 @@ CREATE TABLE IF NOT EXISTS kapitalfluesse (
     erkannt_am  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fluesse_ts ON kapitalfluesse(ts);
+
+-- Verdaechtigte, aber noch nicht bestaetigte Verwaisung (BEFUNDE §G37,
+-- 26.08.2026). Ueberlebt Neustarts absichtlich: Der Fehler, den sie
+-- verhindert, geschah GENAU bei einem Neustart.
+CREATE TABLE IF NOT EXISTS verdacht_verwaist (
+    symbol TEXT PRIMARY KEY,
+    seit   TEXT NOT NULL
+);
 """
 
 
@@ -166,12 +174,41 @@ class Store:
         werden kann - durch eine Bracket-Order, manuell im Dashboard oder
         durch einen Broker-Eingriff. Verwaiste Metadaten wuerden den Bot
         sonst glauben lassen, er halte etwas, das laengst verkauft ist.
+
+        **Erst nach ZWEI aufeinanderfolgenden Aufrufen loeschen** (BEFUNDE
+        §G37, 26.08.2026). Anlass: `account.positions()` liess RMBS - eine
+        einzige Order vom 20.08., nie verkauft, siehe `account.orders()` -
+        in seiner Antwort aus. Die Marken wurden daraufhin SOFORT geloescht,
+        und die Position blieb mehrere Tage ohne Stop, weil der naechste
+        Abgleich (`missing`-Ergaenzung in `daemon.recover()`) das Symbol
+        ebenfalls nicht als fehlend sah - der Broker-Read liess es
+        wiederholt aus, nicht nur einmal. Ein einzelnes Fehlen wird deshalb
+        nur vorgemerkt (Tabelle `verdacht_verwaist`, ueberlebt Neustarts -
+        genau bei einem Neustart geschah der urspruengliche Fehler). Erst
+        wer beim naechsten Aufruf IMMER NOCH fehlt, gilt als bestaetigt
+        verwaist. Taucht ein vorgemerktes Symbol dazwischen wieder auf,
+        wird der Verdacht automatisch verworfen (es steht dann nicht mehr
+        in `fehlend`).
         """
         stored = set(self.load_positions())
-        orphans = stored - broker_symbols
-        for sym in orphans:
-            self.drop_position(sym)
-        return sorted(orphans)
+        fehlend = stored - broker_symbols
+
+        with self._conn() as c:
+            vorher = {r["symbol"] for r in
+                      c.execute("SELECT symbol FROM verdacht_verwaist").fetchall()}
+
+            bestaetigt = sorted(fehlend & vorher)
+            for sym in bestaetigt:
+                self.drop_position(sym)
+
+            neu_verdaechtig = sorted(fehlend - set(bestaetigt))
+            c.execute("DELETE FROM verdacht_verwaist")
+            c.executemany(
+                "INSERT INTO verdacht_verwaist VALUES (?,?)",
+                [(s, dt.datetime.now(dt.UTC).isoformat()) for s in neu_verdaechtig],
+            )
+
+        return bestaetigt
 
     # --- Ausstiege und Sperrfrist ------------------------------------------
     def record_exit(

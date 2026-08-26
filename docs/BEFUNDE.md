@@ -4354,6 +4354,91 @@ soll"). Die Zahl bleibt, bis die Daten sie einholen.
 
 ---
 
+## G37. RMBS fünf Tage ohne Stop — ein Broker-Read hat eine echte Position ausgelassen (26.08.2026)
+
+**Anlass:** Routine-Statuscheck auf Nutzerfrage („laufen alle Bots
+richtig?"). `18_health_check.py` meldete 🔴: „Position ohne Zustand —
+RMBS — Stop/Ziel unbekannt, kann nicht regelkonform geschlossen werden."
+
+### Der Beleg — nicht vermutet, nachgeprüft
+
+`account.orders()` zeigt für RMBS **genau eine** Order: Kauf am
+20.08.2026, 14:17:30 UTC, 10,637824 Stück zu 91,53 $, Status `filled`.
+Keine zweite Order, kein Verkauf. Die Position wurde **nie geschlossen**.
+
+Trotzdem verzeichnet der Daemon-Log bei einem Neustart am 21.08.:
+
+```
+positionen_broker   14   metadaten_geladen   14   verwaist_entfernt   ['RMBS']
+```
+
+`state.sync_with_broker()` sah RMBS nicht in der Antwort von
+`account.positions()` und löschte Stop (77,39) und Ziel (104,36) sofort —
+nach der Logik „fehlt beim Broker → wurde verkauft". Diese Annahme war
+falsch, belegt durch die Bestellhistorie.
+
+### Warum es sich nicht von selbst korrigierte
+
+`daemon.recover()` läuft bei jedem Zyklus, in dem der Markt offen ist,
+und ergänzt fehlende Metadaten, wenn eine Position beim Broker auftaucht,
+aber lokal unbekannt ist (`missing = broker_symbols - stored`). Das hätte
+RMBS beim nächsten Handelstag automatisch wieder mit (geschätzten)
+Marken versehen müssen. Ist es aber nicht: Der Log zeigt für **jeden**
+Zyklus vom 21.08. bis zum Abend des 25.08. `positionen_broker` und
+`metadaten_geladen` exakt gleich (15=15) — RMBS fehlte in der
+Broker-Antwort **wiederholt**, nicht nur bei diesem einen Neustart. Erst
+ein manueller Abruf am Morgen des 26.08. (Marktschluss, ruhige Zeit)
+lieferte RMBS korrekt zurück (16 Positionen). Die genaue Ursache auf
+Alpaca-Seite (Pagination, Eventual Consistency, ein Rand des
+Fractional-Share-Handlings) ist von hier aus nicht feststellbar — nur die
+Wiederholung ist belegt.
+
+### Sofortmaßnahme
+
+Marken wiederhergestellt, mit den ECHTEN statt geschätzten Werten:
+Fülkurs 91,53 $ (Broker-`avg_entry`), Stop-/Zielabstand 14,84 % aus der
+ursprünglichen Kaufentscheidung (`reasons.stop_abstand_pct`, Journal-
+Eintrag der ausgeführten Order), High-Water 93,315 $ (höchstes Tageshoch
+seit Einstand, aus echten Bars). Kein Blindflug mit `entry * 0.93/1.10`
+nötig, weil die Herkunft — anders als bei einer wirklich unbekannten
+Altposition — vollständig rekonstruierbar war.
+
+### Root-Cause-Fix
+
+`state.sync_with_broker()`: Ein Symbol gilt jetzt erst nach **zwei
+aufeinanderfolgenden** Aufrufen als bestätigt verwaist, nicht nach dem
+ersten Fehlen. Neue Tabelle `verdacht_verwaist` — bewusst persistent
+(übersteht Neustarts), weil der Ursprungsfehler selbst bei einem
+Neustart passierte. Taucht ein vorgemerktes Symbol dazwischen wieder auf,
+verfällt der Verdacht automatisch.
+
+**Kosten der Änderung:** Eine wirklich verkaufte Position behält ihre
+(dann bedeutungslosen) Marken bis zu einem Zyklus länger — unschädlich,
+da `Engine` sie ohnehin nicht mehr im Broker-Depot sieht und keine
+Order darauf senden kann. Der Tausch (verzögerte, aber korrekte Löschung
+gegen sofortige, manchmal falsche Löschung) ist eindeutig richtig herum.
+
+### Absicherung
+
+4 Regressionstests (`tests/test_verwaisung_bestaetigt.py`), 1 neue
+Mutation in `23_mutationstest.py` („Verwaisung wieder beim ersten Fehlen
+gelöscht") — **76 von 76 gefangen**. `scripts/22_tests.py`: 496 von 496,
+beide Schichten grün. `18_health_check.py`: „Position ohne Zustand" weg,
+16 von 16 Positionen mit Zustand.
+
+### Einordnung
+
+Nur das Papierkonto betroffen (`ALPACA_PAPER=True`), kein echtes Geld.
+Aber in der Fehlerrichtung identisch mit §G29/§G32: eine Angabe, der der
+Bot vertraut (hier: Existenz einer Position im Broker-Read), war für
+einen Moment falsch, und der Bot hat das ungeprüft übernommen. Anders als
+bei einem Kursfehler (der sich beim nächsten Tick meist korrigiert) blieb
+der Schaden hier bestehen, bis eine gezielte Prüfung ihn fand — das ist
+der eigentliche Grund für den „erst beim zweiten Mal"-Fix: Eine einzelne
+fehlerhafte Momentaufnahme darf niemals dauerhafte Folgen haben.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
