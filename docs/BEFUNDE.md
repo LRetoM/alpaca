@@ -5111,6 +5111,90 @@ ist eine eigene, vorangemeldete Entscheidung (§3.4).
 
 ---
 
+## G45. Lernlauf mit 20 Achsen — 0 von 19, aber ein sauberes Muster (26.08.2026)
+
+15 Jahre, 800 Symbole, 3.768 Handelstage, 20 Achsen über 15
+Jahresscheiben. Lauf `d44ad22a8731`. **Zufallsschwelle bei 300 Zellen:
+|t| > 3,88.**
+
+### Ergebnis: keine Achse besteht
+
+| Achse | t | Richtung |
+|---|---:|---|
+| `ohne_regime` | **+2,02** | stärkste positive |
+| `halten_lang` (10 T) | +1,81 | |
+| `halten_40` | +1,80 | |
+| `score_gewicht` | **+1,75** | erste Größenmessung überhaupt |
+| `halten_20` | +1,50 | |
+| `gleichgewicht` | +1,42 | |
+| `dyn_ausstieg` | +1,37 | = laufendes `B11` |
+| `halten_kurz` (3 T) | +1,15 | |
+| … | | |
+| `score_mal_vola` | +0,36 | |
+| `trailing` | **−3,42** | einzige über der Schwelle — **schädlich** |
+
+Damit steht die Bilanz bei **0 von rund 68**.
+
+### Was die Zahlen trotzdem sagen
+
+**Erstens: Die Haltedauer zeigt keine Kante nach oben.** Alle vier
+Halte-Achsen (3, 10, 20, 40 Tage) liegen positiv zwischen +1,15 und
++1,81 — aber ohne Anstieg zum längeren Horizont hin. Die vorab in
+`docs/TAKTIKWECHSEL.md` §3 gestellte Frage („ab welchem Horizont
+übersteigt der Vorsprung je Trade die Kostenschwelle?") bekommt damit
+**keine positive Antwort**. 40 Tage sind nicht besser als 10.
+
+**Zweitens: Positionsgrößen wirken, aber schwach.** Erste Messung
+dieser Achse überhaupt (§G42). Score-Gewichtung (+1,75) schlägt
+Gleichgewichtung (+1,42) und das Produkt (+0,36). Die Rangfolge ist
+ökonomisch plausibel — mehr Kapital in bessere Kandidaten —, aber
+keiner der drei Werte trägt.
+
+**Drittens: `trailing` ist der reproduzierbarste Befund des Projekts —
+und er ist negativ.** −3,42 heute, −3,53 am 25.08. Zweimal über der
+Schwelle, beide Male schädlich. Das ist das einzige Ergebnis, das
+dieses Projekt je zuverlässig reproduziert hat.
+
+### Der Walk-Forward — zum zweiten Mal knapp darunter
+
+| | 25.08. (14 Achsen) | 26.08. (20 Achsen) |
+|---|---:|---:|
+| mittlere Differenz | +6,80 pp/Jahr | +5,37 pp/Jahr |
+| Jahre mit Vorsprung | 11 von 12 | **10 von 12** |
+| t | +3,49 | **+2,60** |
+| Schwelle | 3,79 | **3,88** |
+| Botwechsel | 2 von 11 | 2 von 11 |
+
+**Urteil laut Vorgabe: KEIN BEFUND.** Die Auswahl war stabil
+(`halten_40` sechs Jahre in Folge, dann `ohne_regime` viermal) — das
+Skript meldet hier also **nicht** die Instabilität, vor der es warnt.
+
+**Die Versuchung, die hier ausdrücklich ausgeschlagen wird:** Zwei
+Läufe, beide knapp unter der Schwelle, beide positiv — das sieht nach
+einem Fall für `statistik.kombiniere_unabhaengig` (§G43) aus. **Ist es
+nicht.** Beide Läufe rechnen auf denselben 15 Jahren, denselben
+Symbolen, denselben Kursen. Sie sind nicht unabhängig, sondern zwei
+Blicke auf dieselben Daten. Sie zu kombinieren wäre exakt die
+Fehlanwendung, vor der der Docstring der Funktion warnt — dieselbe
+Familie wie die Überlappung aus §B1.
+
+### Die Kosten der eigenen Erweiterung, beziffert
+
+Die fünf neu hinzugefügten Achsen haben das Raster von 225 auf 300
+Zellen vergrößert und **die Schwelle von 3,79 auf 3,88 gehoben**.
+Derselbe Walk-Forward-Wert wäre gestern gegen 3,79 gemessen worden.
+
+Das ist kein Argument gegen die Erweiterung — es ist die Rechnung, die
+§B2 beschreibt, hier zum ersten Mal in Zahlen sichtbar: **Jede
+zusätzlich geprüfte Idee macht es für alle anderen schwerer.**
+
+### Registriert
+
+`K04_halten_40` und `K05_score_gewicht`, beide **`verworfen`**, mit
+ihren t-Werten und dem Hinweis auf die vorab notierte Erwartung.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
