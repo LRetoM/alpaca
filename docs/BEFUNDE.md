@@ -433,19 +433,19 @@ dass die Messung etwas anderes misst als das, was passiert.
 | **Risiko-Dach** | ja (seit 15.08.) | nein | **offen** — Schatten kennt keine Sperre, überschätzt damit im Crash |
 | **PDT-Regeln** | ja (`compliance`) | nein | gering — greift erst unter 25.000 $ |
 | **Codeversion** | jetzt erfasst | jetzt erfasst | **behoben 15.08.** |
-| **Haltedauer-Zählung** | Werktage (`pd.bdate_range`) | echte Bars | **offen seit 26.08.** — §G38, greift erstmals am 07.09. |
+| **Haltedauer-Zählung** | echte Handelstage (`handelskalender`) | echte Bars | **behoben 26.08.** — §G38, vor dem ersten Auftreten am 07.09. |
 
 **Die zwei offenen Punkte überschätzen beide den Schatten**, nie den
 Live-Bot — die Messung ist also optimistisch, nicht pessimistisch. Das
 ist die ungefährlichere Richtung, aber es heißt: Ein im Schatten knapp
 bestandener Bot ist live noch nicht bestanden.
 
-**Nachtrag 26.08.2026:** Für die am 26.08. ergänzte letzte Zeile gilt
-dieser Trostsatz **nicht**. Die Haltedauer-Divergenz (§G38) überschätzt
-nicht den Schatten, sie lässt den Live-Bot in Feiertagswochen einen
-Handelstag früher verkaufen als jede Messung, gegen die er verglichen
-wird. Sie ist damit die erste Zeile dieser Tabelle, die die
-**Handelslogik** betrifft und nicht die Messbedingungen.
+**Nachtrag 26.08.2026:** Die letzte Zeile war die erste dieser Tabelle,
+die die **Handelslogik** betraf und nicht die Messbedingungen — der
+Live-Bot hätte in Feiertagswochen einen Handelstag früher verkauft als
+jede Messung, gegen die er verglichen wird. Für sie galt der Trostsatz
+oben also nicht. Noch am selben Tag behoben (§G38), bevor sie zum ersten
+Mal greifen konnte.
 
 ---
 
@@ -4537,23 +4537,36 @@ nachweislich nichts verändert.
 **Das erste Mal greift er am Montag, 07.09.2026 (Labor Day)** — und
 damit innerhalb des Messfensters, das am 10.10.2026 entschieden wird.
 
-### Status: dokumentiert, bewusst NICHT sofort behoben
+### Behoben am selben Tag — vor dem ersten Auftreten
 
-Eine Korrektur verschiebt live den Verkaufszeitpunkt und ist damit eine
-Änderung an der Handelslogik (`CLAUDE.md`). Sie gehört nicht in eine
-Schnellreparatur, sondern vor die Entscheidung, die ohnehin ansteht.
+Neues Modul `handelskalender.py`: Es holt den echten Börsenkalender von
+**Alpaca selbst** (3.290 Handelstage), also von derselben Stelle, die
+auch den Handel ausführt, und legt ihn auf Platte. Eine fest verdrahtete
+Feiertagsliste wäre die schlechtere Wahl — sie veraltet still, genau die
+Fehlerklasse, gegen die dieses Projekt seine Wächter gebaut hat.
 
-**Der naheliegende Weg** wäre nicht eine Feiertagsliste, sondern
-dieselbe Quelle wie in der Simulation: der Bar-Kalender des
-Marktsymbols (`SPY`), der ohnehin in jedem Zyklus geladen wird.
-Alternativ Alpacas `/v2/calendar`. Beides ist noch nicht angebunden —
-`account.market_clock()` liefert nur `is_open`/`next_open`, keine
-Kalenderhistorie.
+**Fünf Stellen rechneten dieselbe Größe:** `lifecycle.handelstage`,
+`live.build_portfolio`, `state.py`, `audit.py`, `nachbetrachtung.py`.
+Alle fünf nutzen jetzt `handelskalender.zwischen()`. Ein Test über den
+**Syntaxbaum** (nicht über den Text — sonst schlägt diese Erklärung hier
+selbst an) stellt sicher, dass keine sechste Zählweise zurückkommt.
 
-**Absicherung:** `tests/test_haltedauer_feiertage.py`, 4 Tests. Sie
-schreiben bewusst den **Ist-Zustand** fest (die 5), damit eine spätere
-Korrektur hier sichtbar auffliegt statt still zu passieren — dieselbe
-Bauart wie die Dokumentationstests in `test_limit_einstieg.py`.
+**Der bewusste Rückfall:** Ist der Kalender nicht abrufbar und nichts
+zwischengespeichert, wird wieder mit Werktagen gerechnet. Schlechter,
+aber nie schlechter als vorher — und ein Abbruch wäre hier die
+gefährlichere Wahl: Eine Haltedauer, die nicht berechnet werden kann,
+hielte Positionen unbegrenzt offen.
+
+**Warum das trotz der Sperre bis zum 10.10. richtig war.** Es ist keine
+Parameteränderung, sondern eine Korrektur, die `max_hold_days = 5`
+erstmals bedeuten lässt, was überall dokumentiert ist. Sie bringt Live
+**in** Übereinstimmung mit Schatten und Simulation, statt sie
+auseinanderzuführen. `B11` ist davon unberührt — es vergleicht zwei
+Schattenbots miteinander.
+
+**Absicherung:** `tests/test_haltedauer_feiertage.py`, 9 Tests. Die
+vorherige Fassung hielt bewusst den falschen Ist-Zustand fest und hat
+beim Umbau angeschlagen — genau dafür war sie gebaut.
 
 ---
 

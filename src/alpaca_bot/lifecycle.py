@@ -143,7 +143,15 @@ def handelstage(entry_date, exit_ts) -> int | None:
     Zeitausstieg (`max_hold_days`) rechnet in Handelstagen. Zwei
     verschiedene Zaehlweisen im selben System machen jede Auswertung nach
     Haltedauer unvergleichbar.
+
+    **Seit dem 26.08.2026 ueber den echten Boersenkalender** (§G38). Bis
+    dahin stand hier `pd.bdate_range`, das Montag bis Freitag zaehlt und
+    Feiertage NICHT kennt. Simulation und Schattenbetrieb zaehlen dagegen
+    Bars, und am Feiertag gibt es keine - in jeder Feiertagswoche verkaufte
+    der Live-Bot damit einen Handelstag frueher als jede Messung, gegen
+    die er verglichen wird.
     """
+    from .handelskalender import zwischen
     if not entry_date:
         return None
     try:
@@ -153,7 +161,7 @@ def handelstage(entry_date, exit_ts) -> int | None:
         ende = pd.Timestamp(exit_ts)
         if ende.tz is None:
             ende = ende.tz_localize("UTC")
-        return max(0, len(pd.bdate_range(start.normalize(), ende.normalize())) - 1)
+        return zwischen(start, ende)
     except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
         return None
 

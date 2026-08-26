@@ -42,7 +42,8 @@ def _handelstage_zwischen(a, b) -> int | None:
             s = s.tz_localize("UTC")
         if e.tz is None:
             e = e.tz_localize("UTC")
-        return max(0, len(pd.bdate_range(s.normalize(), e.normalize())) - 1)
+        from .handelskalender import zwischen
+        return zwischen(s, e)  # echte Handelstage (§G38)
     except Exception:  # noqa: BLE001
         return None
 

@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS spannen (
     mid          REAL,
     spanne_bps   REAL,
     liq_dezil    INTEGER,
+    quote_alter_s REAL,
     PRIMARY KEY (gemessen_am, symbol)
 );
 """
@@ -87,6 +88,20 @@ CREATE TABLE IF NOT EXISTS spannen (
 BATCH = 200
 """Symbole je Anfrage. Alpaca vertraegt mehr, aber ein kleinerer Batch
 haelt den Speicher flach und macht einen Teilausfall billig."""
+
+MAX_QUOTE_ALTER_S = 120.0
+"""Aelter als zwei Minuten ist keine zeitgleiche Beobachtung.
+
+**Der Grund, gemessen am 26.08.2026.** Der Median ueber das ganze
+Universum lag bei 248 bps - 2,5 % Spanne, was kein Markt ist. Das
+unterste Viertel lag bei 13 bps, das unterste Zehntel bei 5. Die
+Verteilung ist zweigipflig: Fuer einen Teil der Werte hat IEX eine echte
+beidseitige Quote, fuer den Rest steht eine alte da.
+
+IEX sieht ~2 % des US-Volumens (§G29). Bei duenn gehandelten Werten
+bedeutet das nicht 'weite Spanne', sondern 'seit Stunden kein Update'.
+Wer beides zusammenwirft, misst die Abwesenheit des Feeds und nennt sie
+Transaktionskosten."""
 
 MAX_PLAUSIBEL_BPS = 2000.0
 """Ueber 20 % Spanne ist keine Spanne mehr, sondern eine kaputte Quote.
@@ -97,12 +112,41 @@ wegfiltern, was die Messung zeigen soll. Ausgeschlossen wird nur, was
 keine Quote sein kann."""
 
 
+def _minuten_nach_eroeffnung(stempel: str) -> float:
+    """Minuten zwischen Handelsbeginn und dieser Aufnahme.
+
+    Bezug ist 09:30 **New Yorker Zeit** am selben Tag, nicht die erste
+    Aufnahme des Laufs: Ein Lauf, der selbst schon in der Eroeffnungsphase
+    beginnt, haette sonst seine eigene erste Aufnahme als Nullpunkt und
+    wuerde die naechsten 20 Minuten faelschlich mitverwerfen. Und ueber
+    `zoneinfo` statt einer festen UTC-Stunde, weil die USA und Europa die
+    Zeitumstellung an verschiedenen Tagen machen.
+    """
+    from zoneinfo import ZoneInfo
+
+    ny = ZoneInfo("America/New_York")
+    ts = pd.Timestamp(stempel)
+    if ts.tz is None:
+        ts = ts.tz_localize("UTC")
+    lokal = ts.tz_convert(ny)
+    eroeffnung = lokal.normalize() + pd.Timedelta(hours=9, minutes=30)
+    return (lokal - eroeffnung).total_seconds() / 60
+
+
 @contextmanager
 def _conn():
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     try:
         c.executescript(SCHEMA)
+        # CREATE TABLE IF NOT EXISTS ergaenzt keine Spalten. Ohne diese
+        # Nachruestung schlaegt jeder Schreibvorgang gegen eine aeltere
+        # Tabelle fehl - und zwar erst NACH der Messung, also nachdem die
+        # Quotes schon abgerufen waren.
+        vorhanden = {r[1] for r in c.execute("PRAGMA table_info(spannen)")}
+        for spalte, typ in (("quote_alter_s", "REAL"),):
+            if spalte not in vorhanden:
+                c.execute(f"ALTER TABLE spannen ADD COLUMN {spalte} {typ}")
         yield c
         c.commit()
     finally:
@@ -130,10 +174,19 @@ def eine_aufnahme(symbole: list[str], dezile: dict[str, int],
             bps = (ask - bid) / mid * 10_000
             if bps > MAX_PLAUSIBEL_BPS:
                 continue
+            alter = None
+            try:
+                qt = pd.Timestamp(r["timestamp"])
+                if qt.tz is None:
+                    qt = qt.tz_localize("UTC")
+                alter = (pd.Timestamp.now(tz="UTC") - qt).total_seconds()
+            except Exception:  # noqa: BLE001 - fehlender Zeitstempel ist kein Abbruch
+                pass
             zeilen.append({"gemessen_am": stempel, "symbol": sym,
                            "bid": bid, "ask": ask, "mid": mid,
                            "spanne_bps": bps,
-                           "liq_dezil": dezile.get(sym)})
+                           "liq_dezil": dezile.get(sym),
+                           "quote_alter_s": alter})
         if verbose:
             print(f"      Batch {i//BATCH+1}/{(len(symbole)-1)//BATCH+1}: "
                   f"{len(zeilen)} verwertbare Quotes bisher", flush=True)
@@ -165,17 +218,24 @@ def bericht(*, mit_eroeffnung: bool = False) -> str:
 
     if not mit_eroeffnung:
         stempel = sorted(df["gemessen_am"].unique())
-        erster = pd.Timestamp(stempel[0])
-        grenze = erster + pd.Timedelta(minutes=EROEFFNUNG_MINUTEN)
-        behalten = [t for t in stempel if pd.Timestamp(t) >= grenze]
-        verworfen = len(stempel) - len(behalten)
-        if behalten and verworfen:
-            df = df[df["gemessen_am"].isin(behalten)]
-        elif not behalten:
+        behalten = [t for t in stempel
+                    if _minuten_nach_eroeffnung(t) >= EROEFFNUNG_MINUTEN]
+        if not behalten:
             return (f"  Alle {len(stempel)} Aufnahme(n) liegen in den ersten "
                     f"{EROEFFNUNG_MINUTEN} Minuten nach Handelsbeginn und sind "
                     f"damit nicht verwertbar.\n  Spaeter erneut messen, oder "
                     f"--mit-eroeffnung zum Ansehen.")
+        df = df[df["gemessen_am"].isin(behalten)]
+
+    n_vor = len(df)
+    alt = df["quote_alter_s"] if "quote_alter_s" in df else None
+    frisch_bekannt = alt is not None and alt.notna().any()
+    if frisch_bekannt:
+        df = df[alt.notna() & (alt <= MAX_QUOTE_ALTER_S)]
+        if df.empty:
+            return (f"  Keine der {n_vor} Quotes ist juenger als "
+                    f"{MAX_QUOTE_ALTER_S:.0f} s. Bei diesem Feed ist die "
+                    f"Spanne nicht messbar.")
 
     L = ["=" * 78, "  GELD-BRIEF-SPANNE IM LIVE-UNIVERSUM", "=" * 78]
     aufnahmen = df["gemessen_am"].nunique()
@@ -184,6 +244,12 @@ def bericht(*, mit_eroeffnung: bool = False) -> str:
     if not mit_eroeffnung:
         L.append(f"  (Aufnahmen aus den ersten {EROEFFNUNG_MINUTEN} Minuten "
                  f"nach Handelsbeginn sind ausgeschlossen)")
+    if frisch_bekannt:
+        L.append(f"  (nur Quotes juenger als {MAX_QUOTE_ALTER_S:.0f} s - "
+                 f"{n_vor - len(df)} von {n_vor} als veraltet verworfen)")
+    else:
+        L.append("  ACHTUNG: Diese Messung enthaelt kein Quote-Alter. Eine "
+                 "alte\n  Quote ist von einer weiten nicht zu unterscheiden.")
     L.append("")
 
     q = df["spanne_bps"].quantile([.10, .25, .50, .75, .90]).round(1)

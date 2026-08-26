@@ -309,7 +309,8 @@ def check_exits(j: Journal, report: AuditReport) -> None:
         entry = pd.Timestamp(meta["entry_date"])
         if entry.tz is None:
             entry = entry.tz_localize("UTC")
-        held = len(pd.bdate_range(entry.normalize(), today)) - 1
+        from .handelskalender import zwischen as _hk_zwischen
+        held = _hk_zwischen(entry, today)  # echte Handelstage (§G38)
         if held > int(max_hold):
             report.add(
                 "verstoss", "Zeitausstieg",

@@ -702,8 +702,52 @@ unberührt. Vorsprung +0,11 % je Trade gegen Rundlauf-Breakeven 0,142 %.
 
 | Ereignis | Konsequenz |
 |---|---|
-| Health-Check zweimal in Folge ROT | Handel aus, Ursache klären |
+| Health-Check zweimal in Folge ROT | Handel aus, Ursache klären — **eine befristete Ausnahme siehe unten** |
 | Regelabgleich meldet Abweichung | Sofort aus — ein Regelbruch ist ein Logikfehler, kein Pech |
 | Slippage-Median > 15 bps über 30 Trades | Alle Backtest- und Schattenergebnisse neu bewerten |
 | Konto-Drawdown > 20 % | **automatische Vollsperre** durch `risiko.py`, Lösen nur von Hand |
 | `B11_dyn_ausstieg_live` verlängert > 60 % der Positionen | Regel greift zu oft, Schwelle war falsch kalibriert (= §3.3 Kriterium 3) |
+
+### 8.1 Die eine befristete Ausnahme — festgelegt am 26.08.2026
+
+**Der Widerspruch, um den es geht.** Der Health-Check steht seit dem
+25.08.2026 ROT, und er stand es an mehreren Tagen in Folge. Nach der
+Tabelle oben müsste der Handel aus sein. Er läuft weiter. Bis heute war
+das eine **stillschweigende** Übergehung eines vorab festgelegten
+Abbruchkriteriums — und damit dieselbe Art Aufweichung wie das Lockern
+einer Schwelle, nur aus der anderen Richtung.
+
+**Die Ursache ist bekannt und benannt.** `18_health_check.py` prüft die
+*jüngsten 20* Entscheidungen je Aktionsart auf ihre Kontextfelder
+(`regime_markt`, `regime_vola`, `sektor`, `liq_dezil`). Diese wurden am
+25.08. repariert (§G36, Commit 19:49). 19 der 20 jüngsten Zeilen stammen
+von davor. Der Prüfer meldet also korrekt einen Zustand, der bereits
+behoben ist und aus dem Fenster wandert.
+
+**Die Ausnahme, die hiermit gilt:**
+
+> Ein ROT, dessen Ursache **dokumentiert**, **behoben** und
+> **selbstheilend** ist, stoppt den Handel nicht — aber nur bis zu einem
+> hier genannten Stichtag.
+
+**Stichtag für diesen Fall: 10.09.2026.**
+
+Gerechnet: Es fehlen 19 neue Verkäufe bzw. Nachkäufe je Aktionsart. Im
+August lagen Median 15,5 und Mittel 17,4 Verkäufe plus Nachkäufe je
+Handelstag; selbst bei stark gedrosseltem Handel sind 19 in zehn
+Handelstagen erreicht. Der Puffer ist also großzügig, nicht knapp.
+
+**Ist der Health-Check am 10.09.2026 nicht grün, ist die Ursache eine
+andere als §G36 — und §8 greift ohne weitere Diskussion.**
+
+**Was diese Ausnahme ausdrücklich nicht ist:**
+
+* **Keine Lockerung des Prüfers.** An `18_health_check.py` wird nichts
+  geändert. Eine Schwelle zu senken, damit die eigene Reparatur früher
+  grün aussieht, bleibt verboten (§B2).
+* **Kein Muster für künftige Rotmeldungen.** Jede weitere Ausnahme
+  braucht einen eigenen Absatz hier, mit eigener Ursache und eigenem
+  Stichtag. Ohne Stichtag keine Ausnahme.
+* **Keine rückwirkende Rechtfertigung.** Zwischen dem 25.08. und heute
+  wurde das Kriterium übergangen, ohne dass es irgendwo stand. Das war
+  ein Fehler, und er steht deshalb hier.

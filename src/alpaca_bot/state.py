@@ -429,7 +429,8 @@ class Store:
                 entry = pd.Timestamp(m["entry_date"])
                 if entry.tz is None:
                     entry = entry.tz_localize("UTC")
-                held = max(0, len(pd.bdate_range(entry.normalize(), today)) - 1)
+                from .handelskalender import zwischen as _hk_zwischen
+                held = _hk_zwischen(entry, today)  # echte Handelstage (§G38)
                 lines.append(
                     f"    {sym:<6} Einstieg {m['entry_price']:>9.2f} | "
                     f"Stop {m['stop_price']:>9.2f} | Ziel {m['target_price']:>9.2f} | "

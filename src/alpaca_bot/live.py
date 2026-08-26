@@ -31,6 +31,7 @@ from .journal import Journal
 # 23.08.2026 in `lifecycle`, weil der Intraday-Stop sie ebenfalls braucht
 # und `live` nicht aus `daemon` importieren darf - `daemon` importiert
 # `live` (BEFUNDE §G21).
+from .handelskalender import zwischen as _handelskalender_zwischen
 from .lifecycle import handelstage as _handelstage
 
 
@@ -327,7 +328,9 @@ def build_portfolio(snapshot: MarketSnapshot) -> PortfolioState:
             stop, target = entry * 0.93, entry * 1.10
             high_water = max(entry, current)
 
-        held = int(len(pd.bdate_range(entry_date.normalize(), today)) - 1)
+        # Echte Handelstage, nicht Werktage (§G38) - dieselbe Zaehlweise
+        # wie `lifecycle.handelstage`, Simulation und Schattenbetrieb.
+        held = _handelskalender_zwischen(entry_date, today)
 
         positions[sym] = Position(
             symbol=sym,
