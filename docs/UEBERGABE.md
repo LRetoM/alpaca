@@ -5,6 +5,12 @@
 > weitergearbeitet werden muss. Es ersetzt nicht `BEFUNDE.md` — es zeigt,
 > wo dort nachzuschlagen ist.
 
+> **Nachtrag vom 26.08.2026, nachmittags — Abschnitt 11 am Ende lesen.**
+> Seit der Fassung oben ist der Limitorder-Lauf gelaufen (**kein
+> Befund**, `K03` verworfen), und drei Dinge sind dazugekommen, die hier
+> noch nicht stehen: §G38 (Haltedauer live ≠ Schatten), §G39 (die 5 bps
+> sind nie gemessen worden), §G40 (das Limitorder-Ergebnis).
+
 **Zuerst lesen, in dieser Reihenfolge:**
 
 1. `CLAUDE.md` — die Regeln, nicht verhandelbar
@@ -21,12 +27,12 @@
 |---|---|---|
 | **Live-Bot** (`12_daemon.py --live`) | 🟢 läuft | Neustart 26.08. 09:47. Kapital $106.097, **16 Positionen, alle mit Zustand**. Papierkonto (`ALPACA_PAPER=True`) |
 | **Schatten-Bot** (`16_shadow_daemon.py`) | 🟢 läuft | 8 Flottenbots, ~789 Symbole/Tag, verarbeitet Stichtag 25.08. |
-| **EDGAR-Lauf** (`34_edgar_kandidat.py`) | 🟡 läuft seit 25.08. 18:05 | **24 % (517/2168 Symbole)**, ~50 Std. Restlaufzeit. Checkpoint alle 50 Symbole |
+| **EDGAR-Lauf** (`34_edgar_kandidat.py`) | 🟡 läuft seit 25.08. 18:05 | **25 % (550/2168)** um 10:25, 0 Fehler, Ende ~28.08. Checkpoint alle 50 Symbole. **48 % der Symbole haben gar keine Insiderkäufe** — bei der Auswertung bedenken (§11.7) |
 
 **Prüfstand:**
 
 ```
-python scripts/22_tests.py        ->  496 von 496, beide Schichten grün
+python scripts/22_tests.py        ->  500 von 500, beide Schichten grün
 python scripts/23_mutationstest.py ->  76 von 76 gefangen
 python scripts/18_health_check.py  ->  ROT (siehe unten, erwartet)
 ```
@@ -51,10 +57,13 @@ registrierte Referenz, `B06` wartet auf einen Regimewechsel).
 ## 2. Die wichtigste Zahl für jede Planung
 
 ```
-0 von 48 Versuchen bestanden.
+0 von 48 Versuchen bestanden.        <- Stand vormittags; siehe §11
 ```
 
 38 bis zum 23.08. (§B6), dazu die 10 Makro-/GDELT-Bänder aus §G35.
+**Nachtrag:** Mit dem Limitorder-Lauf (§G40) sind es **0 von 49** —
+oder 0 von 63, wenn man die 14 Lernlauf-Achsen einzeln zählt. §B6
+führt beide Zählweisen; an der Null ändert keine davon etwas.
 **Das ist kein Scheitern, das ist die Basisrate.** §B3 nennt für
 publizierte Anomalien: ~65 % replizieren nicht, der Rest verliert im
 Mittel 58 % seiner Wirkung. Wer diese Bilanz für ungewöhnlich hält,
@@ -71,8 +80,14 @@ Lücke                 0,032 Prozentpunkte
 
 Keine der 14 geprüften Parameterachsen adressiert diesen Konflikt — sie
 justieren alle nur Randbedingungen eines Vorsprungs, der zu klein ist.
-**Die einzige gemessene Sache, die diese Lücke vollständig schließt, ist
-die Kostenseite** (§G34, siehe Abschnitt 5).
+~~**Die einzige gemessene Sache, die diese Lücke vollständig schließt,
+ist die Kostenseite** (§G34, siehe Abschnitt 5).~~
+
+**Überholt am 26.08. nachmittags.** Die Kostenseite ist jetzt gemessen
+und schließt die Lücke **nicht** (§G40, t = −0,008 bei der reinen
+Kostenmarke). Und die 0,142 % selbst stehen auf einer nie gemessenen
+Spread-Annahme (§G39). **Beide Seiten der Rechnung sind damit offen,
+nicht nur der Vorsprung.** Siehe Abschnitt 11.
 
 ---
 
@@ -560,3 +575,206 @@ Damit die nächste Sitzung es nicht neu entdeckt:
   gegen Schwelle 3,79 **noch nicht beantwortet**.
 * **Alles ist Papierkonto.** `ALPACA_PAPER=True`. Kein Ergebnis dieses
   Projekts ist je mit echtem Geld entstanden.
+
+---
+
+## 11. Nachtrag 26.08.2026 — Durchsicht und der Limitorder-Lauf
+
+Diese Durchsicht hatte den Auftrag: „was wurde vergessen, was steht aus,
+was ist falsch". Ergebnis: **Priorität 1 ist erledigt**, und dabei sind
+zwei Dinge aufgefallen, die vorher niemand geprüft hatte.
+
+### 11.1 Priorität 1 erledigt — Limitorder ist durchgefallen
+
+`python scripts/36_limit_vergleich.py` — 8 Jahre, 800 Symbole,
+1.492.071 Bars. Vollständig in **§G40**.
+
+| Marke | Rendite | je Trade | Füllquote | **t** |
+|---:|---:|---:|---:|---:|
+| Marktorder (heute) | +54,7 % | +0,2576 % | — | — |
+| 5 bps | +57,0 % | +0,3363 % | 81 % | **−0,008** |
+| 10 bps | +64,0 % | +0,3543 % | 79 % | +0,218 |
+| 25 bps | +70,6 % | +0,3281 % | 76 % | +0,423 |
+| 50 bps | +95,7 % | +0,3494 % | 70 % | +1,035 |
+
+**Schwelle 2,17, höchster Wert 1,035 → KEIN BEFUND.**
+`K03_limit_statt_market` steht auf **`verworfen`**, wie vorab festgelegt.
+
+**Die Renditespalte nicht falsch lesen.** +95,7 % gegen +54,7 % sieht
+nach der Lösung des zentralen Konflikts aus. Zwei Gründe, warum sie es
+nicht ist:
+
+1. Maßgeblich ist der **gepaarte t-Wert** über ~2.000 Tage, nicht die
+   Endrendite über acht Jahre.
+2. **Bei 50 bps wird nicht mehr die Kostenfrage gemessen.** Eine Marke
+   0,5 % unter dem Entscheidungskurs ist eine *andere Einstiegsregel*
+   („kaufe nur, wenn es morgen noch mal ein halbes Prozent tiefer
+   geht") — für eine Umkehr-Strategie plausibel besser, aber eine
+   Änderung an der Handelslogik mit eigenem Zählerplatz. Sauber
+   getrennt ist die Kostenfrage nur bei **5 bps**, und dort steht
+   **t = −0,008**.
+
+**Was der Lauf trotzdem belegt:** Füllquote 70–81 % gegen ~65 % aus der
+Literatur — das Modell ist eher großzügig als streng. Die Ersparnis
+kommt in der erwarteten Größenordnung an (+0,079 pp je Trade bei
+5 bps) und wird von **19 % verpassten Einstiegen** genau aufgefressen.
+
+### 11.2 §G39 — die 5 bps sind nie gemessen worden
+
+**Der wichtigste Fund des Tages.** `costs.py:151`, unverändert seit dem
+ersten Tag:
+
+```python
+# Ohne Quote: Spanne schaetzen. 5 bps ist fuer Large Caps typisch,
+# bei Nebenwerten sind 30-100 bps normal.
+```
+
+`universe.py:87` sagt, warum der Bot keine Large Caps handelt: *„bei den
+150 liquidesten Werten allein war derselbe Effekt NICHT nachweisbar"*.
+
+**Das Kostenmodell rechnet mit der Zahl für ein Segment, das die
+Strategie absichtlich meidet.** Und an dieser Zahl hängt alles: der
+Breakeven von 0,1423 %, der zentrale Konflikt aus §A, die §G34-Rechnung,
+`simulate.SimConfig.spread_bps`, jedes Backtest- und Lernlaufergebnis.
+
+Nicht „der Spread ist 30 bps" — **beide Enden sind unbelegt.**
+Tatsächlich gehandelt werden überwiegend die Liquiditätsdezile 3–4
+(n=25 protokollierte Käufe, §B4 beachten), also weder Large Cap noch
+Nebenwert.
+
+**Gebaut, um das zu beenden:** `scripts/37_spannen_messen.py`. Misst
+`(ask − bid) / mid` über das Live-Universum, aufgeschlüsselt nach
+Liquiditätsdezil, mehrere Aufnahmen über den Tag.
+
+```bash
+python scripts/37_spannen_messen.py --wiederholungen 6 --abstand 600
+python scripts/37_spannen_messen.py --bericht
+```
+
+**Es verweigert den Dienst bei geschlossener Börse** — außerhalb der
+Handelszeit sind die Spannen um ein Vielfaches weiter (im Test heute
+Vormittag: Median 1.010 bps). Frühestens **heute ab 15:30 Uhr**
+laufen lassen.
+
+**Der Vorbehalt steht im Ergebnis mit drin:** IEX sieht ~2 % des
+Volumens (§G29), die Zahl ist eine **Obergrenze**. Für die Frage
+„trägt der Vorsprung auch im ungünstigen Fall" ist genau das die
+richtige Größe.
+
+**Wenn die Messung eine wesentlich weitere Spanne zeigt,** ist das
+*keine* Rehabilitierung von `K03` — sondern eine **neue** Voranmeldung
+mit dem gemessenen Wert und einem eigenen Zählerplatz. Ein verworfener
+Kandidat wird nicht zurückgeholt, weil hinterher ein Vorbehalt gefunden
+wurde (§B2).
+
+### 11.3 §G38 — live zählt die Haltedauer anders als der Schatten
+
+```
+live.build_portfolio()   len(pd.bdate_range(einstieg, heute)) - 1   <- Werktage
+simulate / shadow        engine.update_position(), einmal je BAR    <- Handelstage
+```
+
+`pd.bdate_range` kennt **keine Börsenfeiertage**. `engine.update_position`
+wird vom Live-Pfad nie aufgerufen.
+
+Einstieg Do 03.09., Stichtag Do 10.09., dazwischen Labor Day:
+Live zählt **5**, echte Handelstage sind **4**. Ohne Feiertag stimmen
+beide überein — der Unterschied hängt am Feiertag, nicht an einem
+Off-by-one.
+
+**Folge:** `max_hold_days = 5` ist live in Feiertagswochen faktisch eine
+4-Tage-Regel. Neue Zeile in der §G4-Tabelle — und die erste dort, die
+die **Handelslogik** betrifft statt der Messbedingungen.
+
+**Noch ist nichts passiert:** Seit Handelsbeginn Ende Juli lag kein
+US-Börsenfeiertag. **Das erste Mal greift es am Montag, 07.09.2026** —
+innerhalb des Messfensters bis zum 10.10.
+
+**Bewusst nicht behoben.** Eine Korrektur verschiebt live den
+Verkaufszeitpunkt und ist damit eine Änderung an der Handelslogik.
+`tests/test_haltedauer_feiertage.py` (4 Tests) schreibt den Ist-Zustand
+fest, damit eine spätere Korrektur auffliegt statt still zu passieren.
+**Das ist eine Entscheidung, die vor dem 07.09. fallen muss.**
+
+### 11.4 Kleinere Korrekturen, erledigt
+
+| Was | Stand |
+|---|---|
+| `K01_ohne_regime_15j` stand auf `gefunden`, obwohl `B06` die Achse seit dem 29.07. im Schatten misst | auf **`im_schatten`** gesetzt |
+| `36_limit_vergleich.py` warnte nicht bei kleinen Läufen (§B4) — ein 40-Symbol-Lauf sah aus wie ein Ergebnis | `MECHANIK_GRENZE = 100`, gleicher Wortlaut wie Skript 34 |
+| §B6-Bilanz war beim Stand vom 23.08. stehengeblieben | fortgeschrieben, **0 von 49 bzw. 63** je Zählweise |
+
+### 11.5 Geprüft und in Ordnung — nicht noch einmal nachsehen
+
+* **`muster` hat 0 Zeilen** — kein Rückfall in §G14. `kandidaten_suchen`
+  legt erst ab **20 Handelstagen je Regimeschnitt** an; der größte
+  Schnitt (`regime_markt == 'aufwaerts'`) steht bei **15**. Noch etwa
+  fünf Handelstage.
+* **`bars_held = 0` in `position_meta`** bei 15 von 16 Positionen — die
+  Spalte wird live nicht gelesen, der Wert kommt zur Laufzeit aus
+  `entry_date`. Der Zeitausstieg funktioniert (JBLU 25.08.,
+  `tage_gehalten: 5`).
+* **Der DKS-Verkauf vom 25.08. ohne Auswertungskontext** ist **vor** dem
+  §G36-Fix passiert (Verkauf 14:00 UTC, Commit 19:49). Der Fix steckt
+  drin, hatte seither nur noch keinen Intraday-Stop zu protokollieren.
+* **Am 24.08. steht keine einzige Entscheidung im Journal** — der Bot
+  lief (19 `live_trade`-Läufe). Depot voll, nichts fällig. Kein Ausfall.
+* **B11 wächst** — 8 rohe Handelstage (14.–25.08.), einer je Handelstag.
+  Bis zum 10.10. kommen ~32 dazu; Kriterium 2 (20 auswertbare) wird
+  erreicht.
+
+### 11.6 Zwei Dinge, die eine Entscheidung von dir brauchen
+
+**1. Der Health-Check steht ROT — und §8 des Betriebsplans sagt, was
+dann zu tun ist.**
+
+> „Health-Check zweimal in Folge ROT → **Handel aus**, Ursache klären."
+
+Die Ursache ist bekannt, dokumentiert (§G36) und heilt von selbst, sobald
+20 neue Verkäufe aufgelaufen sind. Der Betriebsplan kennt diese
+Unterscheidung aber nicht — er sagt nur „zweimal ROT". Zurzeit wird ein
+vorab festgelegtes Abbruchkriterium **stillschweigend übergangen**. Das
+ist dieselbe Art Aufweichung wie das Lockern einer Schwelle, nur aus der
+anderen Richtung.
+
+**Vorschlag, der nichts lockert:** In §8 aufnehmen, dass ein ROT mit
+dokumentierter, selbstheilender Ursache den Handel nicht stoppt —
+**mit Stichtag**. Konkret: *„Ist der Health-Check am 10.09.2026 nicht
+grün, ist die Ursache eine andere als §G36, und §8 greift."* Damit ist
+die Ausnahme befristet und falsifizierbar statt unbefristet und
+stillschweigend. **Das ist dein Vertrag, deshalb habe ich ihn nicht
+angefasst.**
+
+**2. §G38 — vor dem 07.09. entscheiden.** Korrigieren (der Bar-Kalender
+von `SPY` liegt in jedem Zyklus ohnehin vor) oder bewusst stehenlassen
+und im Vergleich mitführen. Beides ist vertretbar, aber nach dem 07.09.
+wäre es eine Entscheidung mit Kenntnis der Folgen.
+
+### 11.7 Die nächsten Schritte, neu sortiert
+
+| # | Was | Wann |
+|---|---|---|
+| 1 | `37_spannen_messen.py --wiederholungen 6 --abstand 600` | **heute ab 15:30** |
+| 2 | §G38 entscheiden | vor dem **07.09.** |
+| 3 | Health-Check-Ausnahme in §8 festhalten | jetzt |
+| 4 | EDGAR abwarten, **nicht** auf Teilstände sehen (§B4) | ~28.08. |
+| 5 | §G32-Randfälle (`_quote_plausibel` vorbörslich, 1800-s-Takt) | offen |
+| 6 | Wikimedia Pageviews — einzige der vier ungenutzten Quellen mit revisionsfreien, zeitpunktgenauen Daten | offen |
+
+**EDGAR, Stand 26.08. 10:25:** 550 von 2.168 (25 %), 0 Fehler, Ende
+~28.08. **Achtung bei der Auswertung: 262 der bisher 550 Symbole
+(48 %) haben gar keine Insiderkäufe** — der Faktor ist dort konstant
+null. Das drückt die Querschnittsstreuung und gehört bei der Bewertung
+des IC bedacht, nicht erst hinterher.
+
+### 11.8 Prüfstand nach allen Änderungen
+
+```
+python scripts/22_tests.py         ->  500 von 500 (496 + 4 neue), beide Schichten gruen
+python scripts/23_mutationstest.py ->  76 von 76 gefangen
+python scripts/09_selfcheck.py     ->  10 Pruefungen, 0 Verstoesse
+python scripts/18_health_check.py  ->  ROT (§G36, siehe 11.6)
+```
+
+**An der Handelslogik wurde nichts geändert.** Kein Dienstneustart
+nötig, keine laufende Messung berührt.

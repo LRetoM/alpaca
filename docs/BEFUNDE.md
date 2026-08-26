@@ -122,7 +122,30 @@ keiner von ihnen allein sagt.
 | PEAD über Analysten / Kursreaktion (§C) | 2 | 0 (beide widerlegt) |
 | Symbol-Aufteilung auf mehrere Bots (§C) | 1 | 0 (widerlegt) |
 | ML-Modell gegen den Score (§G15) | 1 | 0 (verworfen) |
-| **Summe** | **38** | **0** |
+| **Summe (Stand 23.08.)** | **38** | **0** |
+
+**Fortschreibung nach dem 23.08.2026** — die Tabelle oben bleibt stehen,
+damit die Zahl von damals nachvollziehbar bleibt:
+
+| Versuch | Anzahl | bestanden | § |
+|---|---:|---:|---|
+| Lernlauf-Achsen, 15 Jahre (25.08.) | 14 | 0 | §G33 |
+| FRED-Makro + GDELT, Bänder (25.08.) | 10 | 0 | §G35 |
+| Limitorder statt Marktorder (26.08.) | 1 | 0 | §G40 |
+
+**Die Gesamtzahl hängt davon ab, wie die Überschneidung gezählt wird —
+und deshalb steht hier eine Spanne, keine glatte Zahl:**
+
+| Zählweise | Summe | bestanden |
+|---|---:|---:|
+| ohne die Lernlauf-Achsen (sie prüfen teils dieselben Achsen wie `B04`, `B06`, `B11` auf anderen Daten) | **49** | **0** |
+| mit allen 14 Lernlauf-Achsen als eigene Versuche | **63** | **0** |
+
+> `docs/UEBERGABE.md` nannte am 26.08. „48". Das war die erste Zählweise
+> vor dem Limitorder-Lauf. Welche der beiden man nimmt, ändert an der
+> Aussage nichts: **Der Zähler für „bestanden" steht in jeder Zählweise
+> auf null.** Wer aus der Uneindeutigkeit die kleinere Zahl wählt, senkt
+> die eigene Hürde — deshalb ist im Zweifel die größere maßgeblich.
 
 Die 13 Flottenbots im Detail:
 
@@ -410,11 +433,19 @@ dass die Messung etwas anderes misst als das, was passiert.
 | **Risiko-Dach** | ja (seit 15.08.) | nein | **offen** — Schatten kennt keine Sperre, überschätzt damit im Crash |
 | **PDT-Regeln** | ja (`compliance`) | nein | gering — greift erst unter 25.000 $ |
 | **Codeversion** | jetzt erfasst | jetzt erfasst | **behoben 15.08.** |
+| **Haltedauer-Zählung** | Werktage (`pd.bdate_range`) | echte Bars | **offen seit 26.08.** — §G38, greift erstmals am 07.09. |
 
 **Die zwei offenen Punkte überschätzen beide den Schatten**, nie den
 Live-Bot — die Messung ist also optimistisch, nicht pessimistisch. Das
 ist die ungefährlichere Richtung, aber es heißt: Ein im Schatten knapp
 bestandener Bot ist live noch nicht bestanden.
+
+**Nachtrag 26.08.2026:** Für die am 26.08. ergänzte letzte Zeile gilt
+dieser Trostsatz **nicht**. Die Haltedauer-Divergenz (§G38) überschätzt
+nicht den Schatten, sie lässt den Live-Bot in Feiertagswochen einen
+Handelstag früher verkaufen als jede Messung, gegen die er verglichen
+wird. Sie ist damit die erste Zeile dieser Tabelle, die die
+**Handelslogik** betrifft und nicht die Messbedingungen.
 
 ---
 
@@ -4436,6 +4467,339 @@ bei einem Kursfehler (der sich beim nächsten Tick meist korrigiert) blieb
 der Schaden hier bestehen, bis eine gezielte Prüfung ihn fand — das ist
 der eigentliche Grund für den „erst beim zweiten Mal"-Fix: Eine einzelne
 fehlerhafte Momentaufnahme darf niemals dauerhafte Folgen haben.
+
+---
+
+## G38. Die Haltedauer wird live anders gezählt als im Schatten (26.08.2026)
+
+**Anlass:** Durchsicht des Projekts auf Nutzerfrage („was wurde vergessen
+oder ist falsch"). Aufgefallen beim Nachrechnen, warum `bars_held` in
+`position_meta` bei 15 von 16 Positionen 0 steht.
+
+### Der Fund
+
+`bars_held` ist die Zahl, an der `max_hold_days = 5` hängt — der
+Zeitausstieg, der die Strategie definiert. Sie wird an **zwei
+verschiedenen Stellen unterschiedlich** gezählt:
+
+```
+live.build_portfolio()     len(pd.bdate_range(einstieg, heute)) - 1
+lifecycle.handelstage()    dieselbe Rechnung
+audit.py, state.py         dieselbe Rechnung
+
+simulate.py:344            engine.update_position() — einmal je BAR
+shadow_schritte.py:333     engine.update_position() — einmal je BAR
+```
+
+`engine.update_position()` (`engine.py:1106`, `pos.bars_held += 1`) wird
+vom **Live-Pfad nie aufgerufen**. Live leitet die Haltedauer aus dem
+Einstiegsdatum ab, Simulation und Schatten zählen echte Bars.
+
+**`pd.bdate_range` zählt Montag bis Freitag und kennt keine
+Börsenfeiertage.** Der Bar-Kalender kennt sie sehr wohl — ein Feiertag
+existiert dort schlicht nicht.
+
+### Gemessen, nicht hergeleitet
+
+Einstieg Do 03.09.2026, Stichtag Do 10.09.2026, dazwischen Labor Day
+(Mo 07.09., NYSE und Nasdaq geschlossen):
+
+| Zählweise | Wert |
+|---|---:|
+| `lifecycle.handelstage("2026-09-03", "2026-09-10")` | **5** |
+| echte Handelstage (04., 08., 09., 10.09.) | **4** |
+
+Dieselbe Kalenderspanne ohne Feiertag (17.–24.09.) liefert in beiden
+Zählweisen 5. **Der Unterschied hängt am Feiertag, nicht an einem
+generellen Off-by-one.**
+
+### Die Folge
+
+`engine.py:825` prüft `pos.bars_held >= cfg.max_hold_days`. In einer
+Feiertagswoche ist die Bedingung live nach dem **4.** echten Handelstag
+erfüllt, in Simulation und Schatten erst nach dem **5.**
+
+* **`max_hold_days = 5` ist live faktisch eine 4-Tage-Regel** — aber nur
+  in Feiertagswochen, also unregelmäßig.
+* Es ist eine **live/Schatten-Divergenz**, die in §G4 fehlte. Anders als
+  die beiden dort notierten offenen Punkte überschätzt sie nicht den
+  Schatten, sondern verändert die **Handelslogik selbst**.
+* Betroffen sind rund **10 Börsenfeiertage im Jahr**. Bei einem
+  5-Tage-Fenster und ~250 Handelstagen liegt grob jeder fünfte Trade in
+  einer Feiertagswoche.
+
+### Noch ist kein Schaden entstanden — und das Datum steht fest
+
+Der Live-Bot handelt seit Ende Juli 2026. Zwischen dem 30.07. und heute
+lag **kein einziger US-Börsenfeiertag**. Der Fehler hat also bisher
+nachweislich nichts verändert.
+
+**Das erste Mal greift er am Montag, 07.09.2026 (Labor Day)** — und
+damit innerhalb des Messfensters, das am 10.10.2026 entschieden wird.
+
+### Status: dokumentiert, bewusst NICHT sofort behoben
+
+Eine Korrektur verschiebt live den Verkaufszeitpunkt und ist damit eine
+Änderung an der Handelslogik (`CLAUDE.md`). Sie gehört nicht in eine
+Schnellreparatur, sondern vor die Entscheidung, die ohnehin ansteht.
+
+**Der naheliegende Weg** wäre nicht eine Feiertagsliste, sondern
+dieselbe Quelle wie in der Simulation: der Bar-Kalender des
+Marktsymbols (`SPY`), der ohnehin in jedem Zyklus geladen wird.
+Alternativ Alpacas `/v2/calendar`. Beides ist noch nicht angebunden —
+`account.market_clock()` liefert nur `is_open`/`next_open`, keine
+Kalenderhistorie.
+
+**Absicherung:** `tests/test_haltedauer_feiertage.py`, 4 Tests. Sie
+schreiben bewusst den **Ist-Zustand** fest (die 5), damit eine spätere
+Korrektur hier sichtbar auffliegt statt still zu passieren — dieselbe
+Bauart wie die Dokumentationstests in `test_limit_einstieg.py`.
+
+---
+
+## G39. Die 5 bps, auf denen die ganze Kostenrechnung steht, sind nie gemessen worden (26.08.2026)
+
+**Anlass:** Nachrechnen von §G34 vor dem Limitorder-Lauf. Die Kernaussage
+dort lautet: Bei 5 bps Spread liegt der Rundlauf-Breakeven bei 0,1423 %,
+bei 3 bps bei 0,1022 % — und damit unter dem gemessenen Vorsprung von
++0,110 %. Die Frage war nur: **woher kommt die 5?**
+
+### Der Fund steht als Kommentar im eigenen Quelltext
+
+`costs.py:151`, seit dem ersten Tag unverändert:
+
+```python
+# Ohne Quote: Spanne schaetzen. 5 bps ist fuer Large Caps typisch,
+# bei Nebenwerten sind 30-100 bps normal.
+half = last * (spread_bps if spread_bps is not None else 5.0) / 20_000
+```
+
+**Der Kommentar sagt selbst, dass 5 bps für ein anderes Marktsegment
+gilt als das, was der Bot handelt.**
+
+`universe.py:87` sagt, warum das Segment absichtlich ein anderes ist:
+
+> „…bei den 150 liquidesten Werten allein war derselbe Effekt NICHT
+> nachweisbar"
+
+Die Strategie handelt bewusst **nicht** dort, wo 5 bps typisch sind.
+Genau dieselbe Begründung führt §G34 als Argument **für** Limitorders an
+(„Der Effekt ist am größten bei weiteren Spreads … und kleineren Werten
+— also exakt unser Universum"). Beide Sätze stehen im selben Register.
+Zusammengelesen heben sie sich auf: Wenn unser Universum weite Spreads
+hat, dann ist 5 bps die falsche Zahl für den Breakeven.
+
+### Wo die Zahl überall drinsteckt
+
+| Ort | Wert |
+|---|---|
+| `costs.effective_price` (Vorgabe ohne Quote) | 5,0 bps |
+| `costs.round_trip`, `breakeven_move_pct` | 5,0 bps |
+| `simulate.SimConfig.spread_bps` | 5,0 bps |
+| `simulate.SimConfig.slippage_bps` | 3,0 bps |
+| §G4 „Kosten: 5 bps + 3 bps angenommen" | — |
+| §G34 Rundlaufrechnung, §A zentraler Konflikt | — |
+
+Damit hängt **jedes** Backtest- und Historienergebnis des Projekts an
+dieser einen ungemessenen Zahl — einschließlich des Lernlaufs (§G33),
+des Limitorder-Vergleichs (§G34) und der Aussage „Vorsprung +0,110 %
+gegen Breakeven 0,1423 %", die den zentralen Konflikt definiert.
+
+### Was tatsächlich gehandelt wird
+
+Liquiditätsdezile der protokollierten Live-Käufe (Dezil 1 = liquideste
+10 % des Universums; das Universum selbst ist bereits auf ≥ 1 Mio. $
+Tagesumsatz gefiltert):
+
+| Dezil | Käufe | Anteil |
+|---:|---:|---:|
+| 1 | 4 | 16 % |
+| 2 | 3 | 12 % |
+| 3 | 6 | 24 % |
+| 4 | 8 | 32 % |
+| 5 | 2 | 8 % |
+| 6 | 2 | 8 % |
+
+**n = 25** — klein, siehe §B4, das ist eine Beschreibung und keine
+Schätzung. Der Schwerpunkt liegt in den Dezilen 3–4. Das ist weder
+Large Cap noch Nebenwert, sondern dazwischen: der Bereich, für den der
+Quelltextkommentar **keine** Zahl nennt.
+
+### Was das NICHT heißt
+
+**Nicht** „der Spread ist 30 bps". Diese Zahl ist genauso ungemessen wie
+die 5. Der Befund ist ausdrücklich, dass **beide Enden** unbelegt sind
+und die tatsächliche Zahl dazwischen liegt.
+
+**Nicht** „der Limitorder-Lauf ist wertlos". Er vergleicht zwei Arme mit
+demselben Kostenmodell; die Differenz zwischen ihnen bleibt gültig. Was
+sich verschiebt, ist die **Höhe** des Breakevens, gegen den das Ergebnis
+gelesen wird — und damit die Frage, ob die gesparte Spanne reicht.
+
+**Nicht** „die Slippage-Messung beantwortet das". `journal.slippage_werte()`
+misst die Abweichung vom **Referenzkurs zum Orderzeitpunkt** (Ask beim
+Kauf, Bid beim Verkauf). Wer schon am Ask kauft, hat die halbe Spanne
+bereits bezahlt, bevor die Messung beginnt. Slippage und Spread sind
+zwei verschiedene Kosten; `BETRIEBSPLAN` §3.1 sagt das auch, zieht aber
+nur den Schluss „Spread fällt im Papierdepot nicht an" — nicht den
+zweiten, dass die im Backtest angesetzte Spread-Höhe damit weiterhin
+unbelegt ist.
+
+### Ein Nebenbefund zur Slippage-Messung
+
+Aufgeschlüsselt nach Referenzquelle zerfällt der Median von +0,0 bps in
+zwei gegenläufige Teilmengen (n = 137, Stand 26.08.2026):
+
+| Referenzquelle | n | Median | Mittel |
+|---|---:|---:|---:|
+| `quote` (Bid/Ask, IEX) | 97 | −1,0 bps | −46,4 bps |
+| `quote_verworfen` (letzter echter Trade) | 40 | **+11,8 bps** | +18,9 bps |
+
+Vorzeichen: **positiv = ungünstig** (schlechter ausgeführt als die
+Referenz).
+
+Die Teilmenge mit der **belastbareren** Referenz — dem letzten echten
+Trade statt einer IEX-Quote — zeigt konsistent ungünstige Ausführung um
+rund 12 bps und läge damit über der Bedingung „Median < 8 bps" aus
+`BETRIEBSPLAN` §3.1. Und rund 12 bps gegen einen Referenzkurs in
+Trade-Nähe ist ungefähr das, was eine halbe Spanne von 24 bps kostet.
+
+**Beide Teilmengen sind verzerrt, in entgegengesetzte Richtungen**, und
+keine ist eine Schätzung der echten Ausführungskosten:
+
+* `quote_verworfen` entsteht per Konstruktion nur dort, wo die Quote um
+  über 2 % vom letzten Trade abwich (`_MAX_QUOTE_ABWEICHUNG`) — also in
+  unruhigen, dünnen Momenten mit ohnehin weiten Spannen. Die Teilmenge
+  **überschätzt** den Normalfall.
+* `quote` mit einem Mittel von −46 bps behauptet, der Bot führe im
+  Schnitt 46 bps **besser** aus als die Quote. Das passiert an einem
+  echten Markt nicht. Es ist ein Papierkonto (`ALPACA_PAPER=True`);
+  gemessen wird Alpacas Füllmodell, nicht der Markt — dieselbe
+  Einschränkung, die §G34 für Limitorders ausdrücklich zieht und die für
+  Marktorders genauso gilt.
+
+Der Nebenbefund ist deshalb **kein** neuer Kostenwert, sondern eine
+Warnung vor dem gepoolten Median: Er ist der Mittelweg zweier
+Teilmengen, die sich widersprechen, und die mit der besseren Referenz
+fällt durch.
+
+### Was zu tun wäre — und warum es noch nicht getan ist
+
+Die Spanne ist direkt messbar: `data.latest_quotes()` liefert Bid und
+Ask. Eine Messung über das Live-Universum **während der Handelszeit**
+(15:30–22:00 MEZ) ergäbe eine Verteilung statt einer Annahme.
+
+**Der Vorbehalt, der sie nicht ersetzt:** Der freie Feed ist IEX, und
+IEX sieht ~2 % des US-Volumens (§G29). Eine daraus gerechnete Spanne ist
+eine **Obergrenze**, keine Punktschätzung. Für die Frage, die hier
+ansteht, ist eine Obergrenze aber genau das Richtige: Trägt der
+Vorsprung selbst im ungünstigen Fall, ist die Sache entschieden.
+
+Nicht sofort ausgeführt, weil zum Zeitpunkt des Fundes (10:40 MEZ) die
+US-Börse geschlossen war — außerhalb der Handelszeit sind Spannen
+systematisch weiter und die Messung wertlos.
+
+---
+
+## G40. Limitorder statt Marktorder — gemessen, kein Befund (26.08.2026)
+
+**Der Lauf, der seit dem 25.08. gebaut war und nie gestartet wurde.**
+`scripts/36_limit_vergleich.py`, 8 Jahre, 800 Symbole, 1.492.071 Bars,
+identische Tage und Kurse in beiden Armen. Einziger Unterschied: der
+Ordertyp beim Einstieg. Verkäufe bleiben in beiden Armen Marktorders.
+
+### Das Ergebnis
+
+Marktorder (der heutige Live-Bot): **+54,7 %**, 5.243 Trades,
+**+0,2576 %** je Trade.
+
+| Marke unter dem Entscheidungskurs | Rendite | Trades | je Trade | Füllquote | verpasst | **t** |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 bps | +57,0 % | 4.886 | +0,3363 % | 81 % | 1.170 | **−0,008** |
+| 10 bps | +64,0 % | 4.859 | +0,3543 % | 79 % | 1.256 | +0,218 |
+| 25 bps | +70,6 % | 4.793 | +0,3281 % | 76 % | 1.537 | +0,423 |
+| 50 bps | +95,7 % | 4.664 | +0,3494 % | 70 % | 2.018 | +1,035 |
+
+**Zufallsschwelle bei 4 geprüften Marken: |t| > 2,17. Höchster Wert
+1,035. Urteil: KEIN BEFUND.**
+
+Damit steht die Bilanz bei **0 von 49**.
+
+### Warum die Renditespalte in die Irre führt
+
++95,7 % gegen +54,7 % sieht nach der Lösung des zentralen Konflikts aus.
+Sie ist es nicht, aus zwei Gründen.
+
+**Erstens: der gepaarte t-Wert ist die maßgebliche Zahl, nicht die
+Endrendite.** Beide Arme sehen dieselben Tage; die Tagesdifferenz kürzt
+den Marktfaktor heraus. Über ~2.000 Handelstage liegt sie bei t = 1,03 —
+also innerhalb dessen, was Zufall erzeugt. Eine Endrendite über acht
+Jahre hängt an wenigen Pfaden; genau dagegen wurde der gepaarte Test
+vorab festgelegt.
+
+**Zweitens, und das ist der eigentliche Punkt: bei 50 bps wird gar
+nicht mehr die Kostenfrage gemessen.** Eine Marke 0,5 % unter dem
+Entscheidungskurs heißt „kaufe nur, wenn der Wert morgen noch einmal ein
+halbes Prozent tiefer fällt". Das ist **eine andere Einstiegsregel**,
+keine gesparte Spanne — und für eine Umkehr-Strategie eine plausibel
+bessere. Die Kosten- und die Signalfrage sind bei großen Marken
+untrennbar vermischt.
+
+**Sauber getrennt sind sie nur bei 5 bps** — dort entspricht die Marke
+ungefähr der Spanne selbst, die Einstiegsregel bleibt praktisch
+unverändert. Und genau dort steht:
+
+```
+t = -0,008
+```
+
+**Bei der reinen Kostenfrage ist der Effekt exakt null.**
+
+### Was der Lauf trotzdem belegt — die Mechanik stimmt
+
+| Größe | erwartet | gemessen |
+|---|---|---|
+| Füllquote | ~65 % (Anand/Samadi/Sokobin, FINRA) | **70–81 %** |
+| Ersparnis je gefülltem Trade | 5 bps Spanne + 3 bps Slippage | +0,079 pp je Trade bei 5 bps |
+
+Die Füllquote des Modells liegt **über** dem Literaturwert — das Modell
+ist also eher großzügig als streng, trotz des bewusst konservativen
+Puffers (das Tagestief muss die Marke unterschreiten, Berühren zählt
+nicht). Die Ersparnis kommt in der erwarteten Größenordnung an.
+
+**Die Ersparnis ist real und wird von den verpassten Einstiegen genau
+aufgefressen.** 1.170 von 6.056 Kaufversuchen (**19 %**) kommen nie
+zustande. Was an der Spanne gespart wird, kostet die Auswahl.
+
+### Der Vorbehalt, unter dem dieses Urteil steht
+
+Beide Arme rechnen mit `spread_bps = 5,0` — der Zahl, die §G39 am selben
+Tag als **ungemessen** ausgewiesen hat („für Large Caps typisch",
+angewandt auf ein Universum, das absichtlich keine Large Caps handelt).
+
+Wäre die echte Spanne deutlich weiter, wäre auch die Ersparnis der
+Limitorder deutlich größer, und die Rechnung „Ersparnis gegen verpasste
+Einstiege" könnte kippen. **Die verpassten Einstiege sind von der
+Spread-Annahme unabhängig, die Ersparnis nicht.**
+
+**Das ändert am Urteil von heute nichts.** Die Entscheidungsregel stand
+vorab fest (`docs/UEBERGABE.md` §7: „Negativ → K03 auf `verworfen`"),
+das Ergebnis ist negativ, `K03_limit_statt_market` steht auf
+**`verworfen`**. Sie nachträglich aufzuweichen, weil ein Vorbehalt
+gefunden wurde, wäre genau das Verhalten, gegen das §B2 dieses Register
+überhaupt geschrieben hat.
+
+**Der richtige Weg, falls §G39 eine wesentlich weitere Spanne zeigt,**
+ist eine **neue** Voranmeldung mit dem gemessenen Wert und einem eigenen
+Zählerplatz — nicht das Zurückholen dieser hier.
+
+### Nebenbefund: das Skript warnte nicht vor kleinen Läufen
+
+`34_edgar_kandidat.py` druckt unter 100 Symbolen ausdrücklich „ZEITMESSUNG,
+KEIN Befund (§B4)". `36_limit_vergleich.py` tat das nicht — ein Probelauf
+mit `--symbole 40` lieferte eine fertig formatierte Ergebnistabelle mit
+t-Werten, von einem echten Lauf nicht zu unterscheiden. Nachgezogen,
+gleiche Grenze und gleicher Wortlaut wie in Skript 34.
 
 ---
 

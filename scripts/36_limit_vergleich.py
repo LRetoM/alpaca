@@ -54,6 +54,16 @@ from alpaca_bot.lernlauf_eval import (  # noqa: E402
 
 LIVE_BASIS = {"deploy_to_target": True, "allow_topup": True}
 
+MECHANIK_GRENZE = 100
+"""Unter dieser Symbolzahl ist ein Lauf eine ZEITMESSUNG, kein Befund.
+
+Dieselbe Grenze und derselbe Grund wie in `34_edgar_kandidat.py`: §B4 -
+PEAD sah auf 60 Symbolen wie der beste Faktor des Projekts aus (t=6,7)
+und brach auf 800 vollstaendig zusammen. Dass dieses Skript den Hinweis
+bis zum 26.08.2026 NICHT druckte, war eine Luecke: Ein Probelauf mit
+--symbole 40 lieferte eine fertig formatierte Ergebnistabelle mit
+t-Werten, von einem echten Lauf nicht zu unterscheiden."""
+
 
 def lauf(bars, markt, ecfg, scfg) -> tuple[pd.Series, pd.DataFrame, dict]:
     res = simulate.run(bars, engine_config=ecfg, sim_config=scfg,
@@ -97,6 +107,11 @@ def main() -> int:
 
     syms = universe.load_universe(max_symbols=args.symbole)
     print(f"  Universum : {len(syms)} Symbole")
+    mechanik = len(syms) < MECHANIK_GRENZE
+    if mechanik:
+        print(f"\n  ACHTUNG: Unter {MECHANIK_GRENZE} Symbolen ist das eine")
+        print("  MECHANIKPRUEFUNG, KEIN Befund (§B4 - PEAD sah auf 60 Symbolen")
+        print("  hervorragend aus und brach auf 800 zusammen).\n")
     bars = lade_bars([*syms, MARKET_SYMBOL], args.jahre, verbose=True)
     markt = bars.xs(MARKET_SYMBOL, level="symbol")["close"].astype(float)
     ecfg = EngineConfig.for_reversal(**LIVE_BASIS)
@@ -147,6 +162,14 @@ def main() -> int:
 
     print(f"\n  Zufallsschwelle bei {len(offsets)} geprueften Marken: "
           f"|t| > {schwelle_sigma(len(offsets))}")
+    if mechanik:
+        print()
+        print("  " + "-" * 74)
+        print(f"  {len(syms)} Symbole sind eine MECHANIKPRUEFUNG, kein Befund (§B4).")
+        print("  Die Zahlen oben zeigen, DASS das Fuellmodell rechnet - nicht,")
+        print("  WAS herauskommt. Fuer den echten Lauf: --symbole >= 100")
+        print("  (Vorgabe 800).")
+        print("  " + "-" * 74)
     print()
     print("  Massgeblich ist NICHT die Gesamtrendite, sondern der gepaarte")
     print("  t-Wert: Beide Seiten sehen dieselben Tage, der Marktfaktor")
