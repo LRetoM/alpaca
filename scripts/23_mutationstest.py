@@ -943,7 +943,7 @@ MUTATIONEN = [
     Mutation(
         "EDGAR-Filings wieder nacheinander statt parallel geholt",
         "src/alpaca_bot/edgar.py",
-        "PARALLEL_FILINGS = 8",
+        "PARALLEL_FILINGS = 3",
         "PARALLEL_FILINGS = 1",
         "test_edgar_parallelitaet",
         "Gemessen im laufenden Kandidatentest (§G47): Die Drossel erlaubt "

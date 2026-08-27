@@ -39,7 +39,24 @@ import requests
 from .config import CACHE_DIR, PROJECT_ROOT
 from .ratelimit import RateLimiter, with_retry
 
-_limit = RateLimiter("sec_edgar")
+_limit = RateLimiter("sec_edgar", safety=0.4)
+"""`safety=0.4` statt der Vorgabe 0.9 (§G48, 27.08.2026).
+
+**Der Fund, waehrend der Lauf bereits stundenlang lief.** Mit 8
+parallelen Workern (`PARALLEL_FILINGS`, §G47) nahe am dokumentierten
+Limit von 10/s gefahren, stiegen die `ReadTimeout`-Wiederholungen im
+Verlauf des Laufs steil an: 0 je 100 Symbole in den ersten beiden
+Bloecken, dann 3, 5, 9, 18, **140**, 110. Das ist keine zufaellige
+Streuung - SEC drosselt sichtbar HAERTER, je laenger eine hohe
+Anfragerate durchgehalten wird. Nirgends dokumentiert, aber empirisch
+eindeutig.
+
+Die Lehre: **Das dokumentierte "10/s" ist eine Obergrenze fuer kurze
+Bursts, keine sichere Dauerrate.** §G47 hat den Leerlauf zwischen den
+Anfragen beseitigt und ist damit zu nah an diese Grenze gefahren.
+`safety=0.4` zielt auf ~4/s Dauerlast - spuerbar langsamer als die
+~7-9/s aus §G47, aber ohne die eskalierende Drosselung, die am Ende
+teurer waere als der Umweg."""
 
 EDGAR_CACHE = CACHE_DIR / "edgar"
 EDGAR_CACHE.mkdir(parents=True, exist_ok=True)
@@ -62,14 +79,17 @@ Browser und jede professionelle EDGAR-Anbindung nutzt."""
 _ADAPTER = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16)
 _SESSION.mount("https://", _ADAPTER)
 
-PARALLEL_FILINGS = 8
-"""Gleichzeitige Filing-Abrufe in `insider_trades()` (§G47).
+PARALLEL_FILINGS = 3
+"""Gleichzeitige Filing-Abrufe in `insider_trades()` (§G47, gesenkt in §G48).
 
-Erhoeht NICHT die erlaubte Rate - `RateLimiter("sec_edgar")` laesst
-weiterhin nur 9 Requests/Sekunde durch, egal aus wie vielen Threads.
-Der Wert ist bewusst kleiner als `pool_maxsize`: Ein Filing braucht ZWEI
-Requests nacheinander (Verzeichnis, dann XML), ein Thread haelt seine
-Verbindung also laenger als einen einzelnen Request."""
+Erhoeht NICHT die erlaubte Rate - `RateLimiter("sec_edgar")` bleibt die
+einzige Bremse, egal aus wie vielen Threads. Stand urspruenglich auf 8,
+das jagte zusammen mit `safety=0.9` beinahe das volle SEC-Limit aus -
+und genau das loeste die in §G48 gemessene, im Verlauf eskalierende
+Drosselung aus. 3 statt 8: genug, um den urspruenglichen Fehler (§G47,
+NULL Parallelitaet) zu beheben, ohne SEC-Anfragen in dichten Buendeln
+statt gleichmaessig verteilt zu senden - ein Buendel loest anscheinend
+eher eine Schutzreaktion aus als dieselbe Anzahl ueber die Zeit verteilt."""
 
 # Kaufcodes, die tatsaechlich Information tragen.
 MEANINGFUL_BUY_CODES = {"P"}
