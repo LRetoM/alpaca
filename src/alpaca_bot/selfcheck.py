@@ -156,12 +156,24 @@ def check_dry_run_defaults(report: CheckReport) -> None:
 
 
 def check_rate_limiting(report: CheckReport) -> None:
-    """Jedes Modul mit API-Zugriff muss den Rate-Limiter einbinden."""
+    """Jedes Modul mit API-Zugriff muss den Rate-Limiter einbinden.
+
+    Reine Textsuche, kein AST - trifft deshalb auch Marker, die nur als
+    STRING in der Datei stehen, nicht als echter Aufruf. `selfcheck.py`
+    ist deshalb selbst ausgenommen: `api_markers` unten enthaelt die
+    Marker woertlich als Daten. `23_mutationstest.py` ist aus demselben
+    Grund ausgenommen (§G46, 27.08.2026) - eine seiner Mutationen
+    beschreibt den historischen Fehler "`requests.get` statt einer
+    geteilten Session" und zitiert dafuer `requests.get` als TEXT in der
+    Mutation, nicht als Aufruf. Ohne diese Ausnahme meldet die Pruefung
+    hier bei jedem Lauf einen Verstoss, der keiner ist.
+    """
     report.checks_run += 1
     api_markers = ("trading_client()", "stock_data_client()", "crypto_data_client()",
                    "requests.get", "requests.post", "client.get_news")
     for path in _py_files():
-        if path.name in {"ratelimit.py", "clients.py", "selfcheck.py"}:
+        if path.name in {"ratelimit.py", "clients.py", "selfcheck.py",
+                         "23_mutationstest.py"}:
             continue
         text = path.read_text()
         uses_api = any(m in text for m in api_markers)

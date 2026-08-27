@@ -43,6 +43,24 @@ _limit = RateLimiter("sec_edgar")
 EDGAR_CACHE = CACHE_DIR / "edgar"
 EDGAR_CACHE.mkdir(parents=True, exist_ok=True)
 
+_SESSION = requests.Session()
+"""Eine wiederverwendete Verbindung statt einer neuen je Abruf (§G46).
+
+**Der eigentliche Grund fuer den Absturz vom 26./27.08.2026 - nicht das
+geschlossene Terminal.** Jeder Aufruf ging bis dahin ueber
+`requests.get(...)`, also einen frischen TCP+TLS-Handshake JE REQUEST.
+Ein Symbol mit 900 Meldungen kostet ~1.800 Requests (2 je Einreichung) -
+also 1.800 neue Verbindungen statt einer wiederverwendeten.
+
+Gemessen im Log: durchschnittlich 320-330s je Symbol bei staendigen
+`ReadTimeout`-Wiederholungen, hochgerechnet ~7-8 Tage fuer 2.168 Symbole.
+Mit `Session()` (Keep-Alive, Connection-Pooling) sinkt der
+Verbindungsaufwand auf einen Bruchteil - derselbe Mechanismus, den jeder
+Browser und jede professionelle EDGAR-Anbindung nutzt."""
+
+_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4)
+_SESSION.mount("https://", _ADAPTER)
+
 # Kaufcodes, die tatsaechlich Information tragen.
 MEANINGFUL_BUY_CODES = {"P"}
 # Codes, die haeufig als "Kauf" fehlinterpretiert werden, es aber nicht sind.
@@ -113,7 +131,7 @@ def _get(url: str, *, as_json: bool = True, cache_key: str | None = None):
 
     _limit.acquire()
     resp = with_retry(
-        lambda: requests.get(
+        lambda: _SESSION.get(
             url,
             headers={
                 "User-Agent": _user_agent(),
@@ -144,7 +162,7 @@ def ticker_map(refresh: bool = False) -> dict[str, str]:
     if refresh or not path.exists():
         _limit.acquire()
         resp = with_retry(
-            lambda: requests.get(
+            lambda: _SESSION.get(
                 "https://www.sec.gov/files/company_tickers.json",
                 headers={"User-Agent": _user_agent()},
                 timeout=30,

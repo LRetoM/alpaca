@@ -86,6 +86,14 @@ def _abrufen() -> dict:
         from alpaca.trading.requests import GetCalendarRequest
 
         from .clients import trading_client
+        from .ratelimit import RateLimiter
+
+        # Dieselbe Drossel wie jeder andere Alpaca-Trading-Aufruf
+        # (account.py) - eine zweite, eigene waere eine zweite Zaehlung
+        # desselben Kontingents. `09_selfcheck.py` prueft das inzwischen
+        # automatisch (Regel "jeder API-Aufruf durch die Drossel");
+        # dieser Aufruf fiel beim Bau des Moduls zunaechst durch.
+        RateLimiter("alpaca_trading").acquire()
 
         heute = dt.date.today()
         req = GetCalendarRequest(start=heute - dt.timedelta(days=365 * 12),

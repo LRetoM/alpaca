@@ -16,9 +16,11 @@ werden.
     python scripts/23_mutationstest.py --liste    # nur anzeigen
 
 Sicherheit: Jede Aenderung wird im Speicher gehalten und in einem
-`finally` zurueckgeschrieben - auch bei Absturz oder Strg-C. Nach dem
-Lauf prueft das Skript zusaetzlich, dass alle Dateien wieder im
-Originalzustand sind.
+`finally` zurueckgeschrieben - das schuetzt gegen normale Exceptions
+und Strg-C, NICHT gegen SIGKILL oder einen Systemabsturz (§G46,
+27.08.2026: genau das geschah, eine Mutation blieb Stunden auf der
+Platte haengen). Deshalb prueft `_pruefe_unversehrt()` vor JEDEM Lauf,
+ob eine fruehere Mutation haengen geblieben ist, und repariert sie.
 """
 
 from __future__ import annotations
@@ -181,10 +183,12 @@ MUTATIONEN = [
         "bars_held wieder aus dem gespeicherten Wert",
         # `_handelstage` heisst seit dem 23.08.2026 `lifecycle.handelstage`
         # und liegt dort, weil der Intraday-Stop dieselbe Rechnung braucht
-        # (§G21). `daemon` importiert den Namen weiter.
+        # (§G21). `daemon` importiert den Namen weiter. Seit dem 26.08.2026
+        # (§G38) rechnet die Funktion ueber `handelskalender.zwischen`
+        # statt ueber `pd.bdate_range` - Suchmuster nachgezogen.
         "src/alpaca_bot/lifecycle.py",
-        "return max(0, len(pd.bdate_range(start.normalize(), ende.normalize())) - 1)",
-        "return 0",
+        "        return zwischen(start, ende)",
+        "        return 0",
         "test_protokoll",
         "War in JEDEM Lebenslauf 0 - Haltedauer-Auswertung unmoeglich.",
     ),
@@ -908,6 +912,34 @@ MUTATIONEN = [
         "als verwaist geloescht. Die Position blieb mehrere Tage ohne "
         "Stop, weil der Broker-Read sie danach wiederholt ausliess.",
     ),
+
+    # --- Runde 13, 27.08.2026: EDGAR ohne Verbindungs-Wiederverwendung (§G46) --
+    Mutation(
+        "EDGAR-Abruf baut wieder eine neue Verbindung je Request auf",
+        "src/alpaca_bot/edgar.py",
+        "        lambda: _SESSION.get(\n"
+        "            url,",
+        "        lambda: requests.get(\n"
+        "            url,",
+        "test_edgar_verbindung",
+        "Der eigentliche Grund fuer den Absturz vom 26./27.08.2026: Ohne "
+        "geteilte Session baut jeder der ~1.800 Requests je Symbol einen "
+        "frischen TCP+TLS-Handshake auf. In acht Stunden schaffte der "
+        "Lauf so nur 94 von 2.168 Symbolen (4 %), mit staendigen "
+        "ReadTimeout-Wiederholungen im Log.",
+    ),
+    Mutation(
+        "handelskalender ruft Alpaca ohne Drossel auf",
+        "src/alpaca_bot/handelskalender.py",
+        '        RateLimiter("alpaca_trading").acquire()',
+        "        pass",
+        "test_handelskalender_drossel",
+        "Fehlte beim Bau des Moduls (§G38) - 09_selfcheck.py meldet dann "
+        "sofort einen Regelverstoss ('Jeder API-Aufruf durch die "
+        "Drossel'). Ohne Drossel zaehlt der Kalenderabruf nicht gegen "
+        "das gemeinsame Alpaca-Kontingent - bei vielen Prozessen ein "
+        "stiller Weg zum HTTP 429.",
+    ),
 ]
 
 
@@ -920,6 +952,35 @@ def pytest_laeuft_durch(filter_ausdruck: str) -> bool:
     return r.returncode == 0
 
 
+def _pruefe_unversehrt() -> list[str]:
+    """Erkennt eine Mutation, die durch einen harten Abbruch auf der
+    Platte haengen geblieben ist, und repariert sie (§G46, 27.08.2026).
+
+    **Der Vorfall:** `finally: pfad.write_text(original, ...)` (Zeile
+    unten) schuetzt zuverlaessig gegen normale Exceptions und Strg-C -
+    aber nicht gegen SIGKILL. Ein Mutationstest-Lauf wurde in dieser
+    Sitzung mit Exit-Code 137 (SIGKILL) beendet, waehrend die Mutation
+    "Limitkauf zahlt wieder den Spread" auf der Platte lag. `finally`
+    lief nie. `_kaufkosten` in `simulate.py` blieb **Stunden** mutiert -
+    jede Limitorder-Rechnung in dieser Zeit haette den Spread erneut
+    bezahlt und damit genau den Effekt weggerechnet, den §G34 belegt.
+    Aufgefallen ist es nur durch Zufall, nicht durch eine Pruefung.
+
+    Diese Funktion macht aus dem Zufall eine Routine: Sie laeuft VOR
+    jedem echten Testdurchgang und erkennt eine haengengebliebene
+    Mutation daran, dass die kaputte Version (`ersetzen`) vorhanden ist,
+    die urspruengliche (`suchen`) aber fehlt - und schreibt sie zurueck.
+    """
+    repariert = []
+    for m in MUTATIONEN:
+        pfad = WURZEL / m.datei
+        text = pfad.read_text(encoding="utf-8")
+        if m.ersetzen in text and m.suchen not in text:
+            pfad.write_text(text.replace(m.ersetzen, m.suchen, 1), encoding="utf-8")
+            repariert.append(m.name)
+    return repariert
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -930,6 +991,17 @@ def main() -> int:
         for m in MUTATIONEN:
             print(f"  {m.name:<45} -> {m.erwartet_rot}")
         return 0
+
+    repariert = _pruefe_unversehrt()
+    if repariert:
+        print("=" * 78)
+        print("  ACHTUNG: haengengebliebene Mutation(en) gefunden und repariert")
+        print("=" * 78)
+        for name in repariert:
+            print(f"  - {name}")
+        print("  Ein frueherer Lauf wurde vermutlich hart abgebrochen (SIGKILL,")
+        print("  Systemabsturz) - der eingebaute Fehler lag auf der Platte, bis")
+        print("  gerade eben. Quelltext ist jetzt sauber, dieser Lauf geht weiter.\n")
 
     print("=" * 78)
     print("  MUTATIONSTEST - fangen die Tests echte Fehler?")
