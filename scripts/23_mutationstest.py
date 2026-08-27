@@ -940,6 +940,17 @@ MUTATIONEN = [
         "das gemeinsame Alpaca-Kontingent - bei vielen Prozessen ein "
         "stiller Weg zum HTTP 429.",
     ),
+    Mutation(
+        "EDGAR-Filings wieder nacheinander statt parallel geholt",
+        "src/alpaca_bot/edgar.py",
+        "PARALLEL_FILINGS = 8",
+        "PARALLEL_FILINGS = 1",
+        "test_edgar_parallelitaet",
+        "Gemessen im laufenden Kandidatentest (§G47): Die Drossel erlaubt "
+        "9 Requests/Sekunde, sequentiell kamen nur 1,66 an - das Budget "
+        "lag die meiste Zeit brach. Mit PARALLEL_FILINGS=1 waere ein "
+        "2.168-Symbol-Lauf wieder eine Sache von Tagen statt Stunden.",
+    ),
 ]
 
 

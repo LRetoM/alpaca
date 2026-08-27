@@ -28,6 +28,7 @@ import datetime as dt
 import json
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -58,8 +59,17 @@ Mit `Session()` (Keep-Alive, Connection-Pooling) sinkt der
 Verbindungsaufwand auf einen Bruchteil - derselbe Mechanismus, den jeder
 Browser und jede professionelle EDGAR-Anbindung nutzt."""
 
-_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4)
+_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16)
 _SESSION.mount("https://", _ADAPTER)
+
+PARALLEL_FILINGS = 8
+"""Gleichzeitige Filing-Abrufe in `insider_trades()` (§G47).
+
+Erhoeht NICHT die erlaubte Rate - `RateLimiter("sec_edgar")` laesst
+weiterhin nur 9 Requests/Sekunde durch, egal aus wie vielen Threads.
+Der Wert ist bewusst kleiner als `pool_maxsize`: Ein Filing braucht ZWEI
+Requests nacheinander (Verzeichnis, dann XML), ein Thread haelt seine
+Verbindung also laenger als einen einzelnen Request."""
 
 # Kaufcodes, die tatsaechlich Information tragen.
 MEANINGFUL_BUY_CODES = {"P"}
@@ -341,8 +351,24 @@ def insider_trades(
 
     ACHTUNG Laufzeit: Jede Einreichung braucht 2 Requests (Verzeichnis +
     XML). Ein Symbol mit 400 Form-4-Meldungen kostet also 800 Requests -
-    bei 8/s rund 100 Sekunden. Der Plattencache macht Wiederholungslaeufe
-    praktisch kostenlos, der erste Lauf dauert.
+    bei 8-9/s Drossel rund 90-100 Sekunden PLATTENGEBUNDEN. Der
+    Plattencache macht Wiederholungslaeufe praktisch kostenlos, der
+    erste Lauf dauert.
+
+    **Warum die Einreichungen parallel geholt werden (§G47, 27.08.2026).**
+    Bis dahin lief das hier als einfache `for`-Schleife: ein Filing nach
+    dem anderen, und jedes wartet erst die volle Netzwerkantwort ab,
+    bevor das naechste beginnt. Gemessen im laufenden EDGAR-Lauf: die
+    Drossel erlaubt 9 Requests/Sekunde, tatsaechlich ankamen **1,66**.
+    Der Engpass war nie das SEC-Limit, sondern die reine Wartezeit auf
+    die Antwort - das Budget lag die meiste Zeit brach.
+
+    Der `ThreadPoolExecutor` aendert daran NICHTS an der erlaubten Rate:
+    `_limit` (`RateLimiter`) ist threadsicher und bleibt die EINZIGE
+    Instanz, die das SEC-Limit durchsetzt (`_get()` ruft `_limit.acquire()`
+    unabhaengig vom aufrufenden Thread). Parallelitaet sorgt nur dafuer,
+    dass ein Thread, der auf eine Antwort wartet, das Budget nicht fuer
+    alle anderen blockiert.
 
     `max_filings` ist eine LAUFZEITBREMSE, keine Kuerzung: Wird sie
     ueberschritten, fliegt `ZuVieleMeldungen`. Der Aufrufer entscheidet
@@ -360,11 +386,13 @@ def insider_trades(
                 f"{sym}: {len(f)} Form-4-Meldungen seit {since}, Grenze ist "
                 f"{max_filings}. Symbol ausschliessen oder Grenze anheben - "
                 f"Abschneiden erzeugt ein Panel mit Zeitverzerrung (§G41).")
-        for _, r in f.iterrows():
-            rows.extend(
-                parse_form4(r["cik"], r["accession"], r["accessionNumber"],
-                            r["ticker"], r["filing_date"])
-            )
+        with ThreadPoolExecutor(max_workers=PARALLEL_FILINGS) as pool:
+            for teil in pool.map(
+                lambda r: parse_form4(r["cik"], r["accession"], r["accessionNumber"],
+                                      r["ticker"], r["filing_date"]),
+                [row for _, row in f.iterrows()],
+            ):
+                rows.extend(teil)
 
     if not rows:
         return pd.DataFrame(
