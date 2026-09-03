@@ -5195,6 +5195,264 @@ ihren t-Werten und dem Hinweis auf die vorab notierte Erwartung.
 
 ---
 
+> **Nachtrag zur Nummerierung.** Die Commits vom 27.08.2026 tragen im
+> Betreff „(G46)" und „(G48)" für die EDGAR-Infrastruktur (Verbindungs-
+> Pooling, eskalierende SEC-Drosselung) — die zugehörigen §-Einträge
+> hier fehlen noch, ebenso das **EDGAR-Sachergebnis** (Lauf fertig
+> 28.08.2026: `insider_cluster_score` IC 0,0041 t=1,47, `insider_buyers_90d`
+> t=1,44, `insider_buyers_30d` t=1,47 — alle 5/5 Jahre gleiches
+> Vorzeichen, aber \|t\| < 2, weit unter der Schwelle → **kein Kandidat
+> besteht**). Nachzutragen als §G46–§G48. Der folgende Eintrag ist
+> deshalb §G49.
+
+## G49. Der spekulative Historienlauf — maximale Aggression, gemessen (03.09.2026)
+
+**Anlass:** Nutzerwunsch nach einem bewusst kompromisslosen Backtest —
+die volatilsten Werte, schneller Umschlag, Hebel, Konzentration,
+Daytrade — um die *Verteilung* des Endkapitals über viele Jahre zu
+sehen, nicht den Mittelwert. Ausdrücklich **nur Offline auf Altdaten**,
+kein Handelsbot, keine Flottenanmeldung.
+
+### Das Werkzeug
+
+`src/alpaca_bot/spekulativ.py` + `scripts/40_spekulativ.py` +
+`spekulativ_store.py` (`spekulativ.sqlite` in `DATA_DIR`). Eigenständiger
+Tag-für-Tag-Simulator (nutzt **nicht** die `Engine` — andere
+Strategiefamilie), Ausführung erst zum Folgetags-Open, Stop/Ziel/Trailing
+intraday gegen Tages-High/Low mit **Stop-vor-Ziel-Pessimismus** (§G3/§G4),
+Kosten beidseitig über `costs.estimate_costs`, Margin-Zins auf negatives
+Cash, PDT-Regel modelliert. Vier Presets (`max_aggression`,
+`bounce_hunter`, `breakout_runner`, `daytrade_scalp`), jede Achse per
+Flag; `--sweep`, `--walk-forward`, `--kosten-check`. Auswertung führt
+`statistik.gruppierter_test` mit `horizont=haltedauer+1`, Jahrestabelle,
+Block-Bootstrap und Kostensensitivität mit. Absicherung:
+`tests/test_spekulativ.py`, 15 Tests (kein Lookahead via
+`pit.audit_feature_function`, Kosten beidseitig, Stop vor Ziel,
+Hebeldeckel, Ruin hält an, gruppierter Test genutzt, Survivorship im
+Bericht, Compounding, `voll_rotation`).
+
+**Kein Versuchszählerplatz**, solange kein Kandidat in der Flotte
+angemeldet wird (BETRIEBSPLAN §4, wie der Lernlauf). Der Lauf darf eine
+Idee **verwerfen, nicht abnehmen**.
+
+### Erster echter Lauf — Preset `max_aggression`
+
+1 Position, Hebel 3×, `voll_rotation`, Momentum \|1T\| ≥ 12 % auf 4×
+Volumen, Daytrade (0 Tage halten), Stop 3×ATR. Universum: oberstes
+ATR%-Terzil des Live-Universums = **202 Symbole**, **10 Jahre**, 1.538
+Handelstage, Alpaca-IEX-Tagesbalken. Lauf `e7024b3f34e5`.
+
+| | Wert |
+|---|---|
+| Start → Ende | 30.000 $ → **473.107 $** (+1.477 %) |
+| CAGR | **+57,2 %** |
+| Max. Drawdown | **−94,5 %** |
+| Ertrag je Trade netto | **+0,993 %** (brutto +1,156 %) |
+| Trefferquote / Profit-Faktor | 56,4 % / 1,18 |
+| Kosten gesamt | 127.255 $ (bei 30.000 $ Start) |
+| **Gruppierter t (236 Handelstage)** | **2,42 — unter der Schwelle 2,88 → kein Befund** |
+
+**Warum die Zahl trotz +57 % CAGR nichts belegt:**
+
+1. **2 von 8 Jahren positiv.** 2021/22/23: −16 % / −32 % / −54 %. Dann
+   2024 **+1.204 %**, 2025 **+431 %**, 2026 −12 %. Der ganze Lauf hängt an
+   zwei Jahren — dasselbe Muster wie §G11.
+2. **Kosten kippen das Vorzeichen** (echte Neuläufe, `--kosten-check`):
+   0 bps → CAGR +90 %; 10+6 bps → +32 %; **25+10 bps → −8 %, Endkapital
+   18.000 $** (unter Start). §G44 hat für genau dieses Segment 25–270 bps
+   gemessen, nicht 5. Im realistischen Kostenbereich verliert die
+   Strategie.
+3. **Ruin ist der wahrscheinliche Pfad.** Block-Bootstrap (5-Tage-Blöcke,
+   5.000 Ziehungen): p05 = 0,11× / p50 = 16,7× / p95 = 2.283×.
+   P(Endkapital < Start) = 17 %, **P(zwischenzeitlich −80 %) = 29 %**. Der
+   16×-Median ist der Überlebenspfad, nicht der Erwartungswert.
+4. **Survivorship:** 65 % der Symbole über 10 Jahre fehlen im Datensatz —
+   und eine Aggressiv-Long-Regel wird von genau den fehlenden Pleiten
+   getroffen. Die absolute Zahl ist eine **Obergrenze**.
+
+**Was es sagt:** Der Ertrag je Trade (+0,99 %) ist rund 9× so groß wie
+der der Umkehrstrategie (+0,11 %, §A) — die Bewegung auf den volatilsten
+Werten ist real größer. Aber: statistisch kein Befund (t 2,42 < 2,88
+über 10 Jahre), bei realistischen Kosten negativ, mit −94,5 % Drawdown.
+Deckt sich mit `TAKTIKWECHSEL` §7 und der Basisrate §B6 (0 von rund 68).
+
+### Sweep über Hebel × Haltedauer × Positionszahl (Lauf `9fb9bb0d4a5d`)
+
+18 Konfigurationen, dieselben 203 Symbole / 10 Jahre. Zufallsmaximum bei
+18 Versuchen: t ≈ 2,90.
+
+| Hebel | Halten | CAGR | Max-DD | t (grp) | p05 | p50 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | **0 T** | **+58,3 %** | −79 % | 2,41 | 0,74× | 15,8× |
+| 3 | 0 T | +57,2 % | −95 % | 2,32 | **0,12×** | 15,1× |
+| 1 | 0 T | +29,6 % | −50 % | 2,23 | **1,14×** | 4,8× |
+| 1 | 3 T | +8,1 % | −80 % | 1,50 | 0,22× | 1,55× |
+| 2 | 3 T | −18,8 % | −99 % | 1,39 | 0,00× | 0,31× |
+| 3 | 3 T | **−100 % (Ruin)** | −99 % | −1,5 | — | — |
+
+**Drei klare Muster, keiner davon ein Befund:**
+
+1. **Der Effekt ist ein Ein-Tages-Ereignis.** Jede `haltedauer=3`-Variante
+   verliert oder geht in den Ruin — der Sprung dreht in den Folgetagen.
+   Momentum auf den volatilsten Werten über mehrere Tage halten ist
+   strukturell verlustbringend. Das ist die deutlichste Aussage des
+   Laufs.
+2. **Hebel über 2× kauft nur Streuung.** Hebel 2 schlägt Hebel 3 im CAGR
+   (+58,3 vs +57,2 %) bei p05 0,74× statt 0,12× — mehr Hebel senkt das
+   zeitgewichtete Ergebnis, weil der tiefere Drawdown den Zinseszins
+   frisst. Hebel 1 ist die einzige Stufe, deren 5 %-Bootstrap-Pfad
+   (p05 1,14×) über dem Startkapital endet.
+3. **`max_positionen` war wirkungslos** — CAGR identisch für 1/5/15.
+   Ursache: das Preset pinnt `groessen_modus=voll_rotation` (genau eine
+   Position). Eine echte Breiten-Achse braucht `--groessen-modus gleich`.
+
+**Walk-Forward: t = −0,13.** Die historisch beste Konfiguration je Jahr
+zu wählen trägt nicht ins nächste Jahr (3/5 Jahre Vorsprung, mittlere
+Diff −12,9 %). 2024 hätte die Auswahl Hebel 1 genommen und +334 pp
+liegen gelassen, 2025 Hebel 3 und Glück gehabt.
+
+### Konsistenzpflicht: „jedes Kalenderjahr muss Gewinn machen" (03.09.2026)
+
+**Anlass:** Nutzervorgabe — nicht die Gesamtrendite zählt, sondern es
+darf **kein einziges Minusjahr** geben (egal ob 1, 5 oder 10 Jahre
+betrachtet). Gebaut als `--min-jahr-rendite X` (Filter + zweite
+Rangliste + Walk-Forward nur über die Bestandenen). Test:
+`tests/test_spekulativ.py::TestKonsistenzpflicht`.
+
+**Reversal/Bounce (24 Konfigs, Lauf `46abd5970527`):** alles flach oder
+negativ, Walk-Forward t = +0,09. Keine erfüllt die Pflicht. Erledigt.
+
+**Momentum-Daytrade + Breite (27 Konfigs, Lauf `00ae86691195`):** 11 von
+27 erfüllen die Pflicht **in-sample** (8/8 Jahre positiv). Sie clustern
+um ein Rezept: Auslöser **+10 %** (nicht 6 %, nicht 15 %), 10 Positionen
+gleichgewichtet, Haltedauer 0, Hebel skaliert nur die Rendite (1,0 →
+CAGR +7,6 % / 1,5 → +11,4 % / 2,0 → +15,2 %; Max-DD −9/−14/−18 %).
+Walk-Forward über die 11: **5/5 Jahre Vorsprung, t = +2,62** — der beste
+Walk-Forward-Wert des Projekts, aber weiter unter 2,88.
+
+**Der Detaillauf entzaubert es** (`76a98dc5fc10`, 10 Pos / Hebel 1 /
++10 %):
+
+| Prüfung | Ergebnis |
+|---|---|
+| Gruppierter t je Trade (541 Handelstage) | **1,60** (naiv 3,02) — keine Kante |
+| Kosten-Check echte Neuläufe | 5+3 bps: +7,6 % · 10+6: +5,0 % · **25+10: −1,0 %** |
+| **Ohne `--hochvola`-Vorauswahl** (595 Symbole, `1225dcc05cf1`) | CAGR **+4,3 %**, **5/10 Jahre positiv** (2021: −5,6 %), **Konsistenzpflicht VERFEHLT**, t je Trade **0,65**, bei 25 bps −3,4 % |
+
+**Warum die Konsistenz nicht trägt:**
+
+1. **Sie hing an der Universumsauswahl.** `--hochvola` nimmt das oberste
+   ATR%-Terzil nach *jüngster* Vola — ein mildes §G11-Auswahlartefakt.
+   Ohne diesen Schritt ist 2021 ein −5,6 %-Jahr und die Pflicht
+   durchgefallen.
+2. **Es gibt keine Kante je Trade.** Der gruppierte t fällt von 1,60 auf
+   **0,65**, sobald das Universum ehrlich gewählt wird. „Jedes Jahr
+   knapp positiv" ist die **Niedrigvarianz-Signatur** von 966 winzigen
+   Tageswetten auf 10 Positionen, nicht ein Beleg für Ertrag.
+3. **Kosten und Survivorship erklären den Rest.** Bei 25 bps (§G44s
+   Untergrenze für dieses Segment) ist beide Fassungen negativ.
+   Survivorship trägt zusätzlich +2–4 pp/Jahr Schein-Rendite bei.
+
+### Gesamturteil §G49
+
+Über 10 Jahre, ~90 Varianten und drei Strategiefamilien (Momentum,
+Reversal, Konsistenz-gefiltert) übersteigt **keine** die
+Zufallsschwelle. Der Ertrag je Trade ist bei roher Kostenannahme größer
+als bei der Umkehrstrategie, aber: statistisch nicht von Rauschen zu
+trennen (bester ehrlicher t = 0,65–1,60), an wenigen Jahren hängend, bei
+realistischen Kosten negativ, mit Ruin als wahrscheinlichem Pfad ab
+Hebel 2 und jeder Haltedauer über 0. Die „jedes-Jahr-positiv"-Konfig war
+ein Artefakt aus Universumsauswahl + optimistischen Kosten +
+Survivorship.
+
+Der einzige verwertbare *strukturelle* Nebenbefund: **der Momentum-Sprung
+auf volatilen Werten ist ein Ein-Tages-Ereignis** — jede Haltedauer über
+0 verliert oder ruiniert. Spiegelbild zu §A („Umkehr-Effekt lebt auf
+3–5 Tagen"). Braucht keinen Flottenplatz.
+
+**Das Werkzeug bleibt** für weitere Verfeinerung (`--quelle yf` für
+20 Jahre inkl. 2008/2015/2018, `--gap-pct`, `--ausloeser-ntage`,
+kausaler Vola-Filter). **Kein Kandidat geht in die Flotte** — der Zähler
+bleibt bei 0 von rund 68.
+
+---
+
+## G50. Der DQN-Agent zeigt kein Timing-Koennen (03.09.2026)
+
+**Anlass:** erneute Nutzerforderung nach einem selbstlernenden System
+(„RL, mit so vielen Faktoren wie möglich, alles ausprobieren, gegen alle
+Daten bis gestern trainieren"). §G15 hatte das am 22.08.2026 bereits
+verneint — dort aber mit einem **GBM auf der Ranking-Aufgabe**. Hier
+zum ersten Mal der **tatsächliche DQN-Agent** aus `src/alpaca_bot/rl/`
+(Double-DQN, Zielnetz, Replay, Huber; Umgebung mit Gebühren/Slippage je
+Positionsänderung, PDT, Folge-Bar-Ausführung), Walk-Forward über 10
+Jahre, 4 Fenster, gegen die fest verdrahtete Zufalls-/Konstant-Messlatte
+(`scripts/08_train_rl.py`).
+
+| Symbol | Timing-Perzentil (>= 95 nötig) | Urteil |
+|---|---:|---|
+| SPY | 42 | kein Timing-Können |
+| QBTS | 19 | kein Timing-Können |
+| CYTK | 70 | kein Timing-Können |
+| SYRE | 85 | „schwacher Hinweis, nicht belastbar" |
+
+**0 von 4 zeigen Timing-Können.** SYREs 85 stammt aus einem einzigen
+Fenster mit +3.216 % Rendite bei Timing-Perzentil 50 — der auswendig
+gelernte Kurssprung, vor dem der Modul-Docstring ausdrücklich warnt; die
+beiden anderen SYRE-Fenster (Perzentil 89 und 100) trugen fast keine
+Rendite. Das Muster ist Rauschen, kein Signal.
+
+**Damit ist §G15 ein zweites Mal bestätigt, jetzt mit dem echten
+RL-Agenten.**
+
+### Der Querschnitt-DQN (Breite statt Tiefe) — auch negativ (03.09.2026)
+
+Die im ersten Entwurf noch offen gelassene Variante — ein Agent lernt
+aus vielen Symbolen gleichzeitig (IR = IC·√BR, §G31/§G43) — gebaut als
+`src/alpaca_bot/rl/pooled.py` (Walk-Forward über gemeinsamen Kalender,
+gepoolter Scaler nur aus Train, Urteil verlangt Median-Timing ≥ 95 über
+Symbole UND ≥ 50 % Symbole mit Können, damit kein Glückstreffer trägt).
+Test: `tests/test_rl_pooled.py`, 7 Tests, darunter der SYRE-Fall.
+
+Lauf `lauf_0_40sym`: 40 volatilste Werte, 10 Jahre, 3 Fenster, ein
+gemeinsamer Agent, 507.000 Lernschritte.
+
+| | Wert |
+|---|---:|
+| Symbol×Fenster bewertet | 113 |
+| Median Agent-Rendite (OOS) | +15,2 % |
+| schlägt konstante Position | **49 %** (Münzwurf) |
+| **Median Timing-Perzentil** | **14** (≥ 95 nötig) |
+| **Anteil Symbole mit Timing-Können** | **3 %** (3/113; ≥ 50 % nötig) |
+
+Die 3 „Treffer" sind das bekannte Muster: COHR/LITE bei Perzentil 98/97
+mit ~0 % Beteiligung und ~0 % Rendite (der Agent stand flach), TSLA
+2025/26 bei 96 mit +55 % (auswendig gelernter Momentum-Lauf). MSTR
++303 % trägt Perzentil 83 — riesige Rendite, kein Timing.
+
+### Fünf Wege, ein Ergebnis
+
+| Methode | § | Stichprobe | Ergebnis |
+|---|---|---|---|
+| GBM-Ranking | G15 | 1.101 Handelstage | schlechter als der Score |
+| 20-Achsen-Lernlauf | G45 | 15 J, 3.768 Tage | 0 von 19 |
+| Spekulativ-Sweep | G49 | ~90 Konfigs, 10 J | keiner über der Schwelle |
+| Einzel-DQN | G50 | 4 Symbole, WF | 0 von 4 Timing |
+| **Querschnitt-DQN** | G50 | **40 Symbole, WF** | **3 % Timing, Münzwurf gegen konstant** |
+
+**Der Engpass ist das Signal-Rausch-Verhältnis, nicht das Modell.** Das
+Messgerät löst 0,0378 %/Tag auf, entscheidend wären 0,0065 %/Tag
+(§G31/§G43). Größeres Netz, mehr Daten, mehr Breite — nichts davon
+schließt diese Lücke; Survivorship (§G11) gibt dem Renditemaximierer
+sogar einen Phantom-Vorteil zum Auswendiglernen. **Die Lernfrage ist
+damit beantwortet.** Neue Information müsste von außerhalb der Kursdaten
+kommen (§C) — und Insider/EDGAR (§G, insider_cluster t=1,47) hat das
+bereits verneint. Der nächste konkrete Schritt bleibt der aus
+`BETRIEBSPLAN` §3.4: eine **zweite, nicht-IEX-Datenquelle** für die
+Spannen-Messung (Tiingo NBBO), nicht der nächste Lerner.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
