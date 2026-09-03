@@ -81,9 +81,21 @@ CREATE TABLE IF NOT EXISTS spannen (
     spanne_bps   REAL,
     liq_dezil    INTEGER,
     quote_alter_s REAL,
+    feed         TEXT NOT NULL DEFAULT 'iex',
     PRIMARY KEY (gemessen_am, symbol)
 );
 """
+
+# Wie alt eine Quote je Feed hoechstens sein darf, um als zeitgleiche
+# Beobachtung zu gelten. `delayed_sip` ist konstruktionsbedingt ~15 Min
+# alt - dort waere die 120-s-Grenze von `iex` gleichbedeutend mit "alles
+# verwerfen".
+QUOTE_ALTER_MAX = {"iex": 120.0, "delayed_sip": 20 * 60.0}
+
+# Um wie viel die Eroeffnungssperre je Feed spaeter greift: der
+# verzoegerte Feed zeigt um 09:50 NY die Lage von 09:35 - noch mitten in
+# der Eroeffnungsturbulenz.
+EROEFFNUNG_OFFSET_MIN = {"iex": 0, "delayed_sip": 15}
 
 BATCH = 200
 """Symbole je Anfrage. Alpaca vertraegt mehr, aber ein kleinerer Batch
@@ -112,8 +124,8 @@ wegfiltern, was die Messung zeigen soll. Ausgeschlossen wird nur, was
 keine Quote sein kann."""
 
 
-def _minuten_nach_eroeffnung(stempel: str) -> float:
-    """Minuten zwischen Handelsbeginn und dieser Aufnahme.
+def _minuten_nach_eroeffnung(stempel: str, offset_min: int = 0) -> float:
+    """Minuten zwischen Handelsbeginn und dem, was diese Aufnahme SIEHT.
 
     Bezug ist 09:30 **New Yorker Zeit** am selben Tag, nicht die erste
     Aufnahme des Laufs: Ein Lauf, der selbst schon in der Eroeffnungsphase
@@ -121,6 +133,10 @@ def _minuten_nach_eroeffnung(stempel: str) -> float:
     wuerde die naechsten 20 Minuten faelschlich mitverwerfen. Und ueber
     `zoneinfo` statt einer festen UTC-Stunde, weil die USA und Europa die
     Zeitumstellung an verschiedenen Tagen machen.
+
+    `offset_min` zieht die Verzoegerung des Feeds ab: `delayed_sip` zeigt
+    um 09:50 die Lage von 09:35 - fuer die Eroeffnungssperre zaehlt die
+    Datenzeit, nicht die Wanduhr.
     """
     from zoneinfo import ZoneInfo
 
@@ -128,7 +144,7 @@ def _minuten_nach_eroeffnung(stempel: str) -> float:
     ts = pd.Timestamp(stempel)
     if ts.tz is None:
         ts = ts.tz_localize("UTC")
-    lokal = ts.tz_convert(ny)
+    lokal = ts.tz_convert(ny) - pd.Timedelta(minutes=offset_min)
     eroeffnung = lokal.normalize() + pd.Timedelta(hours=9, minutes=30)
     return (lokal - eroeffnung).total_seconds() / 60
 
@@ -144,7 +160,8 @@ def _conn():
         # Tabelle fehl - und zwar erst NACH der Messung, also nachdem die
         # Quotes schon abgerufen waren.
         vorhanden = {r[1] for r in c.execute("PRAGMA table_info(spannen)")}
-        for spalte, typ in (("quote_alter_s", "REAL"),):
+        for spalte, typ in (("quote_alter_s", "REAL"),
+                            ("feed", "TEXT NOT NULL DEFAULT 'iex'")):
             if spalte not in vorhanden:
                 c.execute(f"ALTER TABLE spannen ADD COLUMN {spalte} {typ}")
         yield c
@@ -154,14 +171,14 @@ def _conn():
 
 
 def eine_aufnahme(symbole: list[str], dezile: dict[str, int],
-                  *, verbose: bool = True) -> pd.DataFrame:
+                  *, feed: str = "iex", verbose: bool = True) -> pd.DataFrame:
     """Eine Momentaufnahme der Spannen ueber alle Symbole."""
     stempel = dt.datetime.now(dt.UTC).isoformat()
     zeilen = []
     for i in range(0, len(symbole), BATCH):
         teil = symbole[i:i + BATCH]
         try:
-            q = data.latest_quotes(teil)
+            q = data.latest_quotes(teil, feed=feed)
         except Exception as e:  # noqa: BLE001 - ein Batch darf den Lauf nicht kippen
             if verbose:
                 print(f"      Batch {i//BATCH+1}: {type(e).__name__}, uebersprungen")
@@ -186,7 +203,8 @@ def eine_aufnahme(symbole: list[str], dezile: dict[str, int],
                            "bid": bid, "ask": ask, "mid": mid,
                            "spanne_bps": bps,
                            "liq_dezil": dezile.get(sym),
-                           "quote_alter_s": alter})
+                           "quote_alter_s": alter,
+                           "feed": feed})
         if verbose:
             print(f"      Batch {i//BATCH+1}/{(len(symbole)-1)//BATCH+1}: "
                   f"{len(zeilen)} verwertbare Quotes bisher", flush=True)
@@ -210,84 +228,118 @@ konsolidierte NBBO. Eine Aufnahme aus dieser Phase misst die Traegheit
 des Feeds, nicht den Markt."""
 
 
+def _feed_block(df: pd.DataFrame, feed: str, *, mit_eroeffnung: bool) -> tuple[str, float | None]:
+    """Auswertung EINES Feeds. Gibt (Text, Median Dezile 1-6) zurueck."""
+    offset = EROEFFNUNG_OFFSET_MIN.get(feed, 0)
+    alter_max = QUOTE_ALTER_MAX.get(feed, MAX_QUOTE_ALTER_S)
+
+    if not mit_eroeffnung:
+        stempel = sorted(df["gemessen_am"].unique())
+        behalten = [t for t in stempel
+                    if _minuten_nach_eroeffnung(t, offset) >= EROEFFNUNG_MINUTEN]
+        if not behalten:
+            return (f"  [{feed}] alle {len(stempel)} Aufnahme(n) liegen in den "
+                    f"ersten {EROEFFNUNG_MINUTEN} Minuten nach Handelsbeginn "
+                    f"(Feed-Verzoegerung {offset} Min beruecksichtigt).", None)
+        df = df[df["gemessen_am"].isin(behalten)]
+
+    n_vor = len(df)
+    alt = df["quote_alter_s"]
+    if alt.notna().any():
+        df = df[alt.notna() & (alt <= alter_max)]
+    if df.empty:
+        return (f"  [{feed}] keine Quote juenger als {alter_max:.0f} s - "
+                f"nicht messbar.", None)
+
+    L = [f"  FEED: {feed}"
+         + ("   (IEX, ~2 % des US-Volumens, §G29 - OBERGRENZE)"
+            if feed == "iex"
+            else "   (konsolidierte NBBO, ~15 Min verzoegert - die eigentliche Zahl)")]
+    L.append(f"  {len(df):,} Quotes aus {df['gemessen_am'].nunique()} Aufnahme(n), "
+             f"{df['symbol'].nunique()} Symbole"
+             + (f"  ({n_vor - len(df)} veraltet verworfen)" if n_vor != len(df) else ""))
+    q = df["spanne_bps"].quantile([.10, .25, .50, .75, .90]).round(1)
+    L.append(f"    10%={q[.10]:.1f}  25%={q[.25]:.1f}  Median={q[.50]:.1f}  "
+             f"75%={q[.75]:.1f}  90%={q[.90]:.1f}  bps")
+
+    median_16 = None
+    if df["liq_dezil"].notna().any():
+        L.append(f"    {'Dezil':<7}{'n':>7}{'Median':>10}{'75%':>9}{'90%':>9}")
+        g = df.dropna(subset=["liq_dezil"]).groupby("liq_dezil")["spanne_bps"]
+        for dez, teil in g:
+            L.append(f"    {int(dez):<7}{len(teil):>7}{teil.median():>10.1f}"
+                     f"{teil.quantile(.75):>9.1f}{teil.quantile(.90):>9.1f}")
+        gehandelt = df[df["liq_dezil"].between(1, 6)]["spanne_bps"]
+        if not gehandelt.empty:
+            median_16 = float(gehandelt.median())
+            L.append(f"    -> Dezile 1-6 (dort kauft der Bot): Median "
+                     f"{median_16:.1f} bps")
+    return "\n".join(L), median_16
+
+
 def bericht(*, mit_eroeffnung: bool = False) -> str:
     with _conn() as c:
         df = pd.read_sql("SELECT * FROM spannen", c)
     if df.empty:
         return "  Noch keine Messung. Bei offener Boerse laufen lassen."
-
-    if not mit_eroeffnung:
-        stempel = sorted(df["gemessen_am"].unique())
-        behalten = [t for t in stempel
-                    if _minuten_nach_eroeffnung(t) >= EROEFFNUNG_MINUTEN]
-        if not behalten:
-            return (f"  Alle {len(stempel)} Aufnahme(n) liegen in den ersten "
-                    f"{EROEFFNUNG_MINUTEN} Minuten nach Handelsbeginn und sind "
-                    f"damit nicht verwertbar.\n  Spaeter erneut messen, oder "
-                    f"--mit-eroeffnung zum Ansehen.")
-        df = df[df["gemessen_am"].isin(behalten)]
-
-    n_vor = len(df)
-    alt = df["quote_alter_s"] if "quote_alter_s" in df else None
-    frisch_bekannt = alt is not None and alt.notna().any()
-    if frisch_bekannt:
-        df = df[alt.notna() & (alt <= MAX_QUOTE_ALTER_S)]
-        if df.empty:
-            return (f"  Keine der {n_vor} Quotes ist juenger als "
-                    f"{MAX_QUOTE_ALTER_S:.0f} s. Bei diesem Feed ist die "
-                    f"Spanne nicht messbar.")
+    if "feed" not in df:
+        df["feed"] = "iex"
+    df["feed"] = df["feed"].fillna("iex")
 
     L = ["=" * 78, "  GELD-BRIEF-SPANNE IM LIVE-UNIVERSUM", "=" * 78]
-    aufnahmen = df["gemessen_am"].nunique()
-    L.append(f"  {len(df):,} Quotes aus {aufnahmen} Aufnahme(n), "
-             f"{df['symbol'].nunique()} Symbole")
     if not mit_eroeffnung:
-        L.append(f"  (Aufnahmen aus den ersten {EROEFFNUNG_MINUTEN} Minuten "
-                 f"nach Handelsbeginn sind ausgeschlossen)")
-    if frisch_bekannt:
-        L.append(f"  (nur Quotes juenger als {MAX_QUOTE_ALTER_S:.0f} s - "
-                 f"{n_vor - len(df)} von {n_vor} als veraltet verworfen)")
-    else:
-        L.append("  ACHTUNG: Diese Messung enthaelt kein Quote-Alter. Eine "
-                 "alte\n  Quote ist von einer weiten nicht zu unterscheiden.")
+        L.append(f"  (Aufnahmen aus den ersten {EROEFFNUNG_MINUTEN} Minuten nach "
+                 f"Handelsbeginn ausgeschlossen; Feed-Verzoegerung beruecksichtigt)")
     L.append("")
 
-    q = df["spanne_bps"].quantile([.10, .25, .50, .75, .90]).round(1)
-    L.append("  Verteilung ueber alle Symbole (bps):")
-    L.append(f"    10 %  {q[.10]:>7.1f}      Median {q[.50]:>7.1f}      "
-             f"90 %  {q[.90]:>7.1f}")
-    L.append(f"    25 %  {q[.25]:>7.1f}                          "
-             f"75 %  {q[.75]:>7.1f}")
-    L.append("")
-
-    if df["liq_dezil"].notna().any():
-        L.append("  Nach Liquiditaetsdezil (1 = liquideste 10 % des Universums):")
-        L.append(f"    {'Dezil':<7}{'n':>7}{'Median':>10}{'75 %':>10}{'90 %':>10}")
-        g = df.dropna(subset=["liq_dezil"]).groupby("liq_dezil")["spanne_bps"]
-        for dez, teil in g:
-            L.append(f"    {int(dez):<7}{len(teil):>7}"
-                     f"{teil.median():>10.1f}{teil.quantile(.75):>10.1f}"
-                     f"{teil.quantile(.90):>10.1f}")
+    mediane: dict[str, float | None] = {}
+    for feed in sorted(df["feed"].unique()):
+        block, m16 = _feed_block(df[df["feed"] == feed].copy(), feed,
+                                 mit_eroeffnung=mit_eroeffnung)
+        mediane[feed] = m16
+        L.append(block)
         L.append("")
-        gehandelt = df[df["liq_dezil"].between(1, 6)]["spanne_bps"]
-        if not gehandelt.empty:
-            L.append(f"  Dezile 1-6 (dort kauft der Bot laut Journal): "
-                     f"Median {gehandelt.median():.1f} bps")
-    L.append("")
+
     L.append("  " + "-" * 74)
     L.append("  EINORDNUNG")
     L.append("  " + "-" * 74)
-    L.append(f"  Das Kostenmodell rechnet mit 5,0 bps (costs.py:151, "
-             f"'fuer Large Caps typisch').")
-    median = float(df["spanne_bps"].median())
-    L.append(f"  Gemessener Median: {median:.1f} bps  "
-             f"= Faktor {median/5:.1f} auf die Annahme.")
+    L.append("  Kostenmodell: 5,0 bps (costs.py:151). Breakeven-Grenze fuer die")
+    L.append("  Strategie bei heutigem Umschlag: 3,4 bps (BETRIEBSPLAN §3.4).")
+    sip = mediane.get("delayed_sip")
+    iex = mediane.get("iex")
+    if sip is not None:
+        L.append("")
+        L.append(f"  KONSOLIDIERTE NBBO (delayed_sip), Dezile 1-6: {sip:.1f} bps.")
+        if sip <= 3.4:
+            L.append("  -> UNTER der Breakeven-Grenze. Die Annahme von 5 bps war "
+                     "zu pessimistisch;")
+            L.append("     die halbe Spanne traegt den gemessenen Vorsprung "
+                     "(+0,110 %/Trade).")
+        elif sip <= 5.0:
+            L.append("  -> zwischen Breakeven (3,4) und Annahme (5,0). Knapp, aber "
+                     "die Annahme")
+            L.append("     ist nicht zu guenstig - der zentrale Konflikt aus §A "
+                     "bleibt bestehen.")
+        elif sip <= 10.0:
+            L.append("  -> UEBER der Annahme. Der Hebel ist der Umschlag "
+                     "(max_hold_days), nicht der")
+            L.append("     naechste Faktor (BETRIEBSPLAN §3.4, Zeile '5-10 bps').")
+        else:
+            L.append("  -> DEUTLICH ueber der Annahme. Kein Faktorfund dieser "
+                     "Groessenordnung schliesst das;")
+            L.append("     entweder radikal laengere Haltedauer oder in dieser "
+                     "Form nicht handelbar (§3.4).")
+        if iex is not None:
+            L.append(f"  (IEX zeigt fuer dieselben Dezile {iex:.1f} bps - "
+                     f"Faktor {iex / max(sip, 0.1):.0f} weiter, das ist die "
+                     f"Feed-Luecke, nicht der Markt.)")
+    else:
+        L.append("")
+        L.append("  Nur IEX gemessen - das ist eine OBERGRENZE (§G29). Fuer die")
+        L.append("  eigentliche Zahl mit --feed delayed_sip nachmessen.")
     L.append("")
-    L.append("  OBERGRENZE, keine Punktschaetzung: Der freie Feed ist IEX und")
-    L.append("  sieht ~2 % des US-Volumens (§G29). An der konsolidierten NBBO")
-    L.append("  ist die echte Spanne enger. Diese Messung taugt fuer die Frage")
-    L.append("  'traegt der Vorsprung auch im unguenstigen Fall' - nicht als")
-    L.append("  neuer Parameter fuer costs.py.")
+    L.append("  Diese Messung setzt costs.py NICHT auf einen neuen Wert - das")
+    L.append("  waere eine vorangemeldete Entscheidung, keine Nebenwirkung (§3.4).")
     return "\n".join(L)
 
 
@@ -306,6 +358,10 @@ def main() -> int:
                         f"Handelsbeginn mitzaehlen - NICHT verwertbar")
     p.add_argument("--trotz-geschlossener-boerse", action="store_true",
                    help="Messung erzwingen - das Ergebnis ist dann NICHT verwertbar")
+    p.add_argument("--feed", choices=("iex", "delayed_sip"), default="iex",
+                   help="iex = kostenloser Standard (~2 %% des Volumens, "
+                        "OBERGRENZE, §G29); delayed_sip = konsolidierte NBBO, "
+                        "~15 Min verzoegert - die eigentliche Zahl fuer §G44")
     args = p.parse_args()
 
     if args.bericht:
@@ -329,7 +385,8 @@ def main() -> int:
         return 1
 
     print("=" * 78)
-    print(f"  SPANNEN MESSEN  |  {args.wiederholungen} Aufnahme(n)")
+    print(f"  SPANNEN MESSEN  |  {args.wiederholungen} Aufnahme(n)  |  "
+          f"Feed: {args.feed}")
     print("=" * 78)
     syms = universe.load_universe(max_symbols=args.symbole)
     print(f"  Universum : {len(syms)} Symbole")
@@ -346,8 +403,9 @@ def main() -> int:
         dezile = {}
 
     for n in range(1, args.wiederholungen + 1):
-        print(f"\n  [{n}/{args.wiederholungen}] Aufnahme ...", flush=True)
-        df = eine_aufnahme(syms, dezile)
+        print(f"\n  [{n}/{args.wiederholungen}] Aufnahme ({args.feed}) ...",
+              flush=True)
+        df = eine_aufnahme(syms, dezile, feed=args.feed)
         if df.empty:
             print("      keine verwertbaren Quotes")
         else:

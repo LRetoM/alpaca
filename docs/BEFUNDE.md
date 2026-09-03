@@ -5449,7 +5449,71 @@ damit beantwortet.** Neue Information müsste von außerhalb der Kursdaten
 kommen (§C) — und Insider/EDGAR (§G, insider_cluster t=1,47) hat das
 bereits verneint. Der nächste konkrete Schritt bleibt der aus
 `BETRIEBSPLAN` §3.4: eine **zweite, nicht-IEX-Datenquelle** für die
-Spannen-Messung (Tiingo NBBO), nicht der nächste Lerner.
+Spannen-Messung — siehe §G51.
+
+---
+
+## G51. Die Spanne ist doch messbar — konsolidierte NBBO: ~12 bps (03.09.2026)
+
+**§G44 hielt fest, mit dem freien IEX-Feed sei die Spanne nicht messbar
+(Median 268 bps = 2,7 %, keine Monotonie über die Dezile).** Beim
+Nachsehen des Alpaca-Kontos: **`delayed_sip` ist freigeschaltet** — die
+konsolidierte NBBO über alle Börsen, ~15 Minuten verzögert, kostenlos.
+Genau die „zweite Quelle", die §G44 und `BETRIEBSPLAN` §3.4 fordern.
+
+`scripts/37_spannen_messen.py --feed delayed_sip` (neu: `--feed`-Schalter,
+feed-abhängige Frische- und Eröffnungsfilter, `latest_quotes(feed=…)`).
+Drei Aufnahmen, 3.582 Quotes, 1.194 Symbole, Eröffnungs-20-Min
+ausgeschlossen (Verzögerung eingerechnet), veraltete Quotes verworfen:
+
+| | delayed_sip (NBBO) | IEX (§G44) |
+|---|---:|---:|
+| 10 % | 3,2 bps | 4,9 |
+| 25 % | 5,9 | 11,9 |
+| **Median (Dezile 1–6)** | **12,2 bps** | 268,0 |
+| 75 % | 23,7 | 722 |
+| Dezile 1→6 | 6,9 / 12,1 / 11,9 / 14,4 / 16,9 / 17,7 — **monoton** | 205 / 428 / 435 / 374 / 232 / 54 |
+
+Stabil über die drei Aufnahmen (12,4 / 12,0 / 12,2). Die Monotonie
+(liquider = enger) ist der Beleg, dass es eine echte Spannenverteilung
+ist — genau das, was IEX vermissen ließ. Der Faktor 22 zwischen den
+Feeds ist die Feed-Lücke (IEX sieht ~2 % des Volumens, §G29), nicht der
+Markt.
+
+### Was das bedeutet — §3.4s vorab festgelegte Tabelle
+
+| Spanne | Breakeven | annualisiert |
+|---:|---:|---:|
+| 3,4 bps | 0,110 % (= Vorsprung) | ±0 |
+| 5,0 (Annahme) | 0,142 % | −1,6 %/Jahr |
+| **12,2 (gemessen)** | **~0,27 %** | **≈ −8 %/Jahr** |
+
+12 bps liegt in §3.4s Band **„10–20 bps: Annahme deutlich zu günstig.
+Kein Faktorfund dieser Größenordnung schließt das. Entweder radikal
+längere Haltedauer oder die Strategie ist in dieser Form nicht
+handelbar."** Die Asymmetrie-Klausel (§3.4: „über 20 bps kann IEX sein")
+greift **nicht** — die Zahl ist die konsolidierte NBBO, unter 20, monoton
+und über drei Aufnahmen stabil.
+
+**Folgen:**
+
+1. **Der zentrale Konflikt aus §A verschärft sich, statt sich zu lösen.**
+   Vorsprung +0,110 %/Trade gegen jetzt ~0,27 % Rundlauf-Breakeven. Die
+   Umkehrstrategie bei 5 Tagen Haltedauer / ~50 Umschlägen ist **nicht
+   kostentragfähig** — nicht knapp, sondern klar.
+2. **Der Hebel ist der Umschlag, nicht der nächste Faktor** (§3.4,
+   `TAKTIKWECHSEL` §2). Eine Haltedauer, die den Vorsprung *je Trade*
+   über ~0,27 % hebt, ist die einzige offene Richtung — und §G45 fand
+   dafür keine Kante (40 Tage nicht besser als 10).
+3. **`spekulativ.py` (§G49) ist damit erledigt.** Die Daytrade-Rezepte
+   mit 100+ Trades/Jahr kippten schon im `--kosten-check` bei 25 bps ins
+   Minus; bei realen 12 bps sind sie tief negativ.
+4. **`costs.py` wird NICHT angefasst.** Ein geänderter Kostenparameter
+   bewertet jede laufende und vergangene Messung neu — eigene,
+   vorangemeldete Entscheidung (§3.4), keine Nebenwirkung dieser Messung.
+
+**Absicherung:** `scripts/37_spannen_messen.py` migriert die `feed`-Spalte
+idempotent, Bericht vergleicht beide Feeds. 596 Tests grün.
 
 ---
 

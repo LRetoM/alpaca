@@ -211,10 +211,20 @@ def close_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return df["close"].unstack(level="symbol").sort_index()
 
 
-def latest_quotes(symbols: str | Sequence[str]) -> pd.DataFrame:
-    """Aktuelle Geld-/Briefkurse (Bid/Ask)."""
+def latest_quotes(
+    symbols: str | Sequence[str], *, feed: DataFeed | str | None = None
+) -> pd.DataFrame:
+    """Aktuelle Geld-/Briefkurse (Bid/Ask).
+
+    `feed` ueberschreibt den Feed aus der .env. Sinnvoll fuer den
+    Spannen-Vergleich: der kostenlose Standard ist `iex` (~2 % des
+    US-Volumens, §G29); `delayed_sip` liefert die konsolidierte NBBO mit
+    ~15 Minuten Verzoegerung - fuer eine Spannen-Charakterisierung
+    (nicht fuers Handeln) ist die Verzoegerung ohne Belang.
+    """
+    verwendet = DataFeed(feed) if isinstance(feed, str) else (feed or data_feed())
     req = StockLatestQuoteRequest(
-        symbol_or_symbols=_as_list(symbols), feed=data_feed()
+        symbol_or_symbols=_as_list(symbols), feed=verwendet
     )
     _limit.acquire()
     quotes = with_retry(lambda: stock_data_client().get_stock_latest_quote(req))
