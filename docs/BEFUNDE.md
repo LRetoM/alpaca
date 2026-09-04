@@ -5510,7 +5510,16 @@ und über drei Aufnahmen stabil.
    Minus; bei realen 12 bps sind sie tief negativ.
 4. **`costs.py` wird NICHT angefasst.** Ein geänderter Kostenparameter
    bewertet jede laufende und vergangene Messung neu — eigene,
-   vorangemeldete Entscheidung (§3.4), keine Nebenwirkung dieser Messung.
+   vorangemeldete Entscheidung, keine Nebenwirkung dieser Messung. Die
+   Voranmeldung steht jetzt in `BETRIEBSPLAN` §3.5: Wechsel erst nach
+   ≥ 4 Handelstagen stabiler Messung **und** nach dem 10.10.2026
+   (B11-Basis zuerst), dann voller Neulauf.
+
+**Weitermessen:** LaunchAgent `de.local.alpacaspannen` (nicht im Repo,
+`~/Library/LaunchAgents/`) sammelt ab 04.09.2026 werktags 16:15 Ortszeit
+6 Aufnahmen je Tag in `spannen.sqlite`. Auswertung:
+`scripts/37_spannen_messen.py --bericht`. Entfernen, wenn genug Tage da
+sind: `launchctl bootout gui/$(id -u)/de.local.alpacaspannen`.
 
 **Absicherung:** `scripts/37_spannen_messen.py` migriert die `feed`-Spalte
 idempotent, Bericht vergleicht beide Feeds. 596 Tests grün.

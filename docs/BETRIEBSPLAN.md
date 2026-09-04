@@ -374,6 +374,51 @@ ja nur IEX", während ein gutes Ergebnis unbesehen gilt.
 
 ---
 
+### 3.5 Der `costs.py`-Wert — vorab festgelegt am 04.09.2026
+
+**Anlass.** §G51 hat die Spanne mit der konsolidierten NBBO
+(`delayed_sip`) gemessen: **Median 12,2 bps** über die Dezile 1–6, an
+einem Handelstag, drei Aufnahmen. `costs.py` rechnet mit **5,0 bps**.
+Die Lücke ist real und groß. Trotzdem wird der Wert **jetzt nicht
+geändert** — und dieser Absatz legt vorab fest, wann und wie.
+
+**Warum nicht sofort:**
+
+1. **Eine Momentaufnahme ist dünn.** §37 sagt es im eigenen Docstring:
+   Spannen schwanken über den Tag und zwischen Tagen. Ein Tag trägt
+   keinen neuen Parameter.
+2. **Ein geänderter Kostenparameter bewertet jede laufende und vergangene
+   Messung neu.** Das ist genau die Vergleichsbasis, die §G10/§G22 für
+   den 10.10.-Termin schützen. Eine Änderung fünf Wochen davor zerstört
+   B11s Grundlage.
+3. §3.4 hält es bereits fest: „Kein neuer Wert in `costs.py` … eine
+   eigene, vorangemeldete Entscheidung — keine Nebenwirkung einer
+   Messung."
+
+**Die Datengrundlage, die den Wechsel auslöst:** Der LaunchAgent
+`de.local.alpacaspannen` sammelt ab dem 04.09.2026 werktags 6 Aufnahmen
+je Tag in `spannen.sqlite`. Der Wechsel wird vorbereitet, sobald
+
+* **mindestens 4 verschiedene Handelstage** erfasst sind **und**
+* der Median (Dezile 1–6, nur Quotes < 20 min alt, Eröffnungs-20-Min
+  ausgeschlossen) über diese Tage **stabil** ist (Spannweite der
+  Tagesmediane < 4 bps).
+
+**Was dann passiert — in dieser Reihenfolge, nicht früher:**
+
+| Schritt | Wann |
+|---|---|
+| `costs.DEFAULT_FEES` / `SimConfig.spread_bps` von 5,0 auf den gemessenen Median | **nach dem 10.10.2026** (B11-Entscheidung zuerst, mit der alten Basis, wie vertraglich) |
+| Vollständiger Neulauf: `10_simulate.py`, `32_lernlauf.py`, `shadow_eval` mit dem neuen Wert | direkt danach |
+| Ergebnis als neuer §G in `BEFUNDE.md`, mit Vorher/Nachher | direkt danach |
+| Prüfen, ob `TAKTIKWECHSEL` §7 (Einstellungskriterium) greift | mit demselben Lauf |
+
+**Was diese Festlegung ausdrücklich nicht ist:** keine Änderung an der
+Handelslogik (`EngineConfig`) und keine an `costs.py` vor dem 10.10. Der
+laufende Betrieb und alle laufenden Messungen bleiben unberührt.
+
+---
+
 ## 4. Zeitplan — wie lange laufen lassen
 
 B11 ist seit **18.08.2026** angemeldet. Alle Tagesangaben zählen ab dort.
