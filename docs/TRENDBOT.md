@@ -109,16 +109,61 @@ Fällt eines durch → keine Phase 2. Dann ist belegt, dass auch diese
 Familie auf einem Retail-Konto nichts trägt — ein Ergebnis, kein
 Misserfolg.
 
+### 5a. Gate-Ergebnis (04.09.2026, `BEFUNDE.md` §G52) — 2 von 4
+
+| Kriterium | Ergebnis |
+|---|---|
+| 1. schlägt 60/40 gesamt + ≥ 60 % Jahre | **NEIN** (+277 % vs +361 %, 37 % der Jahre) |
+| 2. Max-Drawdown < SPY B&H | **JA** (−16 % vs −52 %) |
+| 3. Walk-Forward-Vorsprung stabil | **NEIN** (t = −1,34) |
+| 4. überlebt doppelte Kosten | **JA** |
+
+**Phase 1 nicht bestanden.** Die Strategie ist *risikoärmer, nicht
+besser*: Sharpe 0,88 über beiden Benchmarks, Drawdown ein Drittel von
+SPY, aber kein Renditevorsprung gegen ein simples 60/40.
+
+### 5b. Produktentscheidung (Nutzer, 04.09.2026)
+
+Der Nutzer hat entschieden, die defensive Variante trotz nicht
+bestandenem Gate als Phase 2 vorwärts zu verfolgen — **als bewusste
+Produktentscheidung** (§G52 Option 2), nicht als Gate-Umgehung. Das
+Ziel wird damit ausdrücklich umdefiniert: von „schlägt den Markt" zu
+„defensive Allokation, kompoundiert ~7,5 %/Jahr, verliert im Crash ein
+Drittel dessen was SPY verliert". Die Phase-3-Hürde (unten) muss diese
+Umdefinition auffangen.
+
+**Festgeschriebene Konfiguration** (`trend_schatten.PHASE2_CONFIG`):
+`dualmom`, 9-Monats-Lookback (skip 1), Top-3, 10 % Vol-Ziel, monatliches
+Rebalancing, 2 bps Kosten. Änderungen hier sind eine neue Voranmeldung.
+
 ---
 
 ## 6. Fahrplan bis 01.01.2027
 
-| Phase | Zeitraum | Inhalt |
-|---|---|---|
-| **1 — Historie** | jetzt – ~20.09. | `trend.py` + Backtest, `--vergleich`, `--walk-forward`. Gate aus §5. Ergebnis als neuer §G in `BEFUNDE.md`. |
-| **2 — Papier** | ~Okt/Nov | Bei bestandenem Gate: eigener Paper-Bot (monatlicher Rebalance-Cron), 4–6 Wochen. Prüfen: echte ETF-Fills = Modell, Rebalance-Logik, Slippage. |
-| **3 — Live-Entscheidung** | Dez | Go-Live-Kriterien wie `BETRIEBSPLAN` §3.3: X Wochen Paper deckt Modell, Drawdown im Rahmen, Slippage < Y bps. |
-| **Live** | 01.01.2027 | Bei erfüllten Kriterien: klein starten (10–20 % des Kontos), über Monate hochskalieren. |
+| Phase | Zeitraum | Inhalt | Stand |
+|---|---|---|---|
+| **1 — Historie** | erledigt 04.09. | `trend.py` + Backtest, Gate §5. | §G52, 2/4 |
+| **2 — Vorwärts-Schatten** | 04.09. – ~30.11. | `trend_schatten.py` + `scripts/45_trend_schatten.py`, LaunchAgent `de.local.alpacatrend` (werktags nach US-Schluss). **Sendet keine Orders** — schreibt simulierte Equity + Zielgewichte fort. Prüft: deckt sich das Live-Signal mit dem Backtest, ist der Verlauf wie erwartet? | läuft ab 04.09. |
+| **3 — Live-Entscheidung** | Dez | Hürde unten. | offen |
+| **Live** | frühestens 01.01.2027 | Bei erfüllter Hürde: klein starten (10–20 % des Kontos), über Monate hochskalieren. | offen |
+
+### 6a. Phase-3-Hürde — vorab festgelegt (04.09.2026)
+
+Live geht der Bot nur, wenn *alle* zutreffen:
+
+1. **≥ 8 Wochen** Vorwärts-Schatten ohne Abweichung zwischen berechneten
+   und plausiblen Alpaca-Zielgewichten (Rebalance-Logik greift korrekt).
+2. Der Schatten-Drawdown seit Start bleibt **über −20 %** (die Strategie
+   soll ja gerade defensiv sein — reißt sie das früh, war die Prämisse
+   falsch).
+3. Ein separater **Live-Klempner-Test**: eine einzelne 100-$-ETF-
+   Testorder auf dem Paper-Konto wird zum erwarteten Kurs (± 5 bps)
+   gefüllt.
+4. Der Umkehr-Bot-Termin (10.10.) ist entschieden — kein paralleler
+   offener Umbau.
+
+Fällt eines durch → kein Live zum 01.01., der Schatten läuft weiter.
+**Diese Hürde wird nicht nachträglich gelockert** (§B2).
 
 **Der Umkehr-Bot läuft unverändert weiter** bis zum 10.10.-Termin —
 nicht anfassen. Der Trendbot ist ein zusätzlicher, diversifizierender
