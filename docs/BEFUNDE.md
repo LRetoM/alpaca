@@ -1538,6 +1538,22 @@ Regression: `tests/test_lernkern.py` (23 Tests), darunter je einer fuer
 die vier Fehler oben, der Nachweis, dass kein Handelstag in beiden
 Fenstern liegt, und beide Kalibrierungsrichtungen.
 
+### Fortschreibung 04.09.2026 — Wiederholung mit frischem Fenster
+
+`26_lernkern.py --symbole 1200 --jahre 7` erneut gelaufen (der Baustein
+lag seit 22.08. still, Health-Check GELB — jetzt GRÜN). Panel: 1.351
+Handelstage, 1.186 Symbole, 32 Merkmale, Zeitraum bis 27.08.2026.
+Neue Modellversion `03f6c2b0`:
+
+| | IC | t (korr.) | Dezil-Spreizung | t |
+|---|---:|---:|---:|---:|
+| Modell (gbm) | 0,0060 | 1,01 | **−0,349 %** | −2,13 |
+| Score (Bot heute) | 0,0091 | 1,45 | −0,127 % | −1,01 |
+
+**Unverändert: das Modell schlägt den Score nicht** (Spreizung −0,35 %
+gegen −0,13 %), beide unter der Schwelle 2,88. Drittes Mal bestätigt
+(§G15, §G50). `03f6c2b0` **abgelehnt**, kein Zählerplatz-Bezug — der
+Lauf ist ein Filter, keine Abnahme.
 
 ---
 
