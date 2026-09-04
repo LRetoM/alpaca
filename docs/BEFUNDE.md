@@ -5608,6 +5608,77 @@ ehrliche Anschlüsse:
 
 ---
 
+## G53. Jahres-Aktienauswahl — 22,8 % CAGR, die fast ganz Survivorship ist (04.09.2026)
+
+**Anlass:** Nutzeridee — Anfang jedes Jahres die aussichtsreichsten
+Aktien wählen, ganzes Jahr halten, bei extremem Verlauf raus. Sehr wenige
+Trades → die gemessene Spanne (§G51) zählt kaum.
+
+**Gebaut:** `src/alpaca_bot/jahresbot.py` + `scripts/44_jahresbot.py` +
+`tests/test_jahresbot.py` (7). Signale `momentum` (12-1-Monat),
+`tief_vola`, `momentum_vola`; Top-N, jährliches Rebalancing,
+Verlust-Stop, „Gewinner laufen lassen". Kosten mit der echten
+NBBO-Spanne (12+3 bps) beidseitig, nur bei tatsächlichem Kauf/Verkauf.
+Beim Bau ein RateLimiter-Bug behoben (`acquire(n)` mit n über dem
+Minutenlimit → IndexError; `tests/test_ratelimit_burst.py`).
+
+### Der Lauf — beste Variante (`momentum_vola`, Top-20, kein Stop)
+
+Universum `universe.load_universe(500)` (heute liquideste US-Werte),
+yfinance-Total-Return, **2005–2026, 21 Rebalances, 492 Symbole**.
+
+| | Wert |
+|---|---:|
+| CAGR | **22,8 %** (SPY B&H ~11,3 %) |
+| Sharpe / Sortino | 0,83 / 1,05 |
+| Max Drawdown | **−60,9 %** |
+| schlägt SPY | 14 von 22 Jahren (64 %) |
+| Walk-Forward (Regel fix, Jahr für Jahr gegen SPY) | mittlere Diff **+15,8 %/Jahr, t = +2,14** |
+
+Auf den ersten Blick das beste Ergebnis des Projekts. **Es hält trotzdem
+nicht.**
+
+### Warum die Zahl nicht trägt
+
+1. **Survivorship auf Maximum.** Der Bericht sagt es selbst: **89 % des
+   Universums fehlen** über 21 Jahre (~4.472 damals → 492 heute). Top-20
+   Momentum aus den *heute* 500 liquidesten Werten zu picken heißt: das
+   Universum enthält garantiert Nvidia, Apple & Co. und **keine** der
+   Tausenden, die auf null gingen. Das ist §G11 und §B4 kombiniert, in
+   voller Stärke. Der akademische Cross-Sectional-Momentum-Aufschlag
+   liegt bei ~4–8 %/Jahr *mit* Point-in-Time-Universum — hier sind es
+   +15,8 %/Jahr über SPY. Der Löwenanteil der Differenz ist die
+   Verzerrung, nicht das Signal.
+2. **An wenigen Jahren aufgehängt.** 2019 +52 %, 2020 +91 %, 2024
+   **+158 %**, 2026 +67 %. 2024 allein trägt +133 pp gegen SPY. Genau das
+   Muster aus §G11/§G49 („der ganze Vorsprung hängt an einem Teiljahr").
+3. **Kein Krisenschutz.** 2008: −48 % gegen SPY −36 % — *schlechter*.
+   Der −25 %-Stop drückt den Max-Drawdown von −61 auf −43 % und die CAGR
+   auf ~18 %, hilft aber im Vorzeichen nicht.
+4. **t = 2,14 < 2,90** (Zufallsmaximum bei 18 Varianten). Nach der
+   eigenen Hürde des Projekts **kein Befund** — und das ohne
+   Berücksichtigung des Survivorship-Rückenwinds, der t weiter drücken
+   würde.
+
+### Die saubere Version derselben Idee: §G52
+
+Jährliches Momentum auf **Anlageklassen-ETFs** (§G52, `dualmom`) hat
+keine Survivorship-Verzerrung. Ergebnis dort: Sharpe 0,88, −16 %
+Drawdown — aber **kein Renditevorsprung** gegen 60/40, Walk-Forward
+negativ. Der Mehrertrag der Einzelaktien-Version über die ETF-Version
+**ist** der Survivorship- plus Konzentrationsaufschlag, sichtbar gemacht.
+
+### Was daraus folgt
+
+Einzelaktien-Jahresauswahl lässt sich mit freien Daten **nicht
+validieren** — es bräuchte ein Point-in-Time-Universum (kostenpflichtig).
+§B4 ist eindeutig: ein guter Probelauf beweist nichts (PEAD: t=6,7 auf
+60 Symbolen, tot auf 800). Diese 22,8 % CAGR sind die eindrücklichste
+Illustration von §G11 im ganzen Register — **kein live-fähiger
+Kandidat.** Kein `costs.py`-Bezug, kein Zählerplatz.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
