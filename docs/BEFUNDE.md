@@ -5542,6 +5542,72 @@ idempotent, Bericht vergleicht beide Feeds. 596 Tests grün.
 
 ---
 
+## G52. Trendfolge/Dual-Momentum auf ETFs — defensiv, aber kein Renditevorsprung (04.09.2026)
+
+**Anlass:** der Strategie-Familien-Wechsel (`docs/TRENDBOT.md`). Der
+bisherige Ansatz (kurzfristige Aktiensignale) ist ausgeschöpft; Zeit-
+Serien-Momentum auf liquiden ETFs umgeht die beiden Killer Spanne (§G51)
+und Survivorship (§G11).
+
+**Gebaut:** `src/alpaca_bot/trend.py` + `scripts/43_trend.py` +
+`tests/test_trend.py` (10 Tests). Drei Strategien (`tsmom`, `dualmom`,
+`ma_filter`), monatliches Rebalancing, Kosten beidseitig auf den
+Turnover, Vol-Targeting-Overlay. yfinance-Total-Return, 7 ETFs (EFA fiel
+bei einem Netz-Timeout aus), gemeinsame Historie **2008–2026**.
+
+### Ergebnis — beste Variante (`dualmom`, 9-Monats-Lookback, 10 % Vol-Ziel)
+
+| | Strategie | 60/40 | SPY B&H |
+|---|---:|---:|---:|
+| CAGR | 7,5 % | 8,7 % | 11,9 % |
+| Sharpe | **0,88** | 0,79 | 0,67 |
+| Max Drawdown | **−15,8 %** | −30,8 % | −51,5 % |
+| Calmar | 0,48 | 0,28 | 0,23 |
+
+Kostendrag nur 0,15 %/Jahr (Turnover 5×). Die 10 %-Vol-Ziel-Varianten
+clustern alle bei Sharpe 0,83–0,88 / −15 % DD — konsistent, kein
+Parameter-Glückstreffer. 2008: **+8,4 %** (60/40 −17 %). 2022: **−1,7 %**
+(60/40 −16 %). Die defensive Eigenschaft ist real.
+
+### Das Gate (`TRENDBOT` §5) — vorab festgelegt, 2 von 4
+
+| Kriterium | Ergebnis |
+|---|---|
+| 1. schlägt 60/40 gesamt **und** ≥ 60 % Jahre | **NEIN** — +277 % vs +361 %, nur 37 % der Jahre |
+| 2. Max-Drawdown < SPY B&H | **JA** — −16 % vs −51 % |
+| 3. Walk-Forward-Vorsprung stabil | **NEIN** — t = −1,34, 5/16 Jahre, im Mittel −3,0 %/Jahr gegen 60/40 |
+| 4. überlebt doppelte Kosten (4 bps) | **JA** — CAGR +7,3 % bei 4 bps, +7,1 % bei 8 |
+
+**Phase 1 nicht bestanden** (Kriterium 1 und 3). Kein Renditevorsprung
+gegen ein simples 60/40, und die Lookback-Auswahl trägt **nicht** ins
+nächste Jahr. Kosten sind hier nicht das Problem — der Effekt selbst ist
+zu schwach.
+
+### Einordnung
+
+Das ist das **bislang kohärenteste** Ergebnis des Projekts: eine
+Strategie mit klarem Risiko-Nutzen (Sharpe über beiden Benchmarks,
+Drawdown ein Drittel von SPY, positiv in 2008 und 2022). Aber sie ist
+**risikoärmer, nicht besser** — sie gibt Rendite gegen Ruhe ab. Auf
+einem Fenster (2008–2026), das von einem historischen Anleihen-
+Bullenmarkt dominiert ist, ist genau das erwartbar: 60/40 ist dort
+außergewöhnlich schwer zu schlagen.
+
+**Nicht post-hoc umgewidmet:** Das Gate stand vor der Messung und wird
+nicht auf „Sharpe statt Rendite" geändert — das wäre §B2/§G45. Zwei
+ehrliche Anschlüsse:
+
+1. **Fairerer Test der Familie:** ETFs reichen nur bis 2004–2008. Die
+   stärkste Trendfolge-Evidenz liegt in den 1970er–2000er Jahren.
+   Ein Lauf auf Index-Total-Return-Reihen über 50+ Jahre wäre der
+   eigentliche Test — steht noch aus.
+2. **Andere Zielsetzung:** Wer eine *defensive* Allokation für das
+   Live-Konto will (kompoundiert ~7,5 %/Jahr, verliert im Crash ein
+   Drittel dessen, was SPY verliert), hat sie hier. Das ist eine eigene,
+   vorab zu treffende Produktentscheidung — kein bestandenes Gate.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
