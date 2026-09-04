@@ -255,7 +255,15 @@ class RateLimiter:
                     recent = sum(1 for t in counter.events if now - t <= window)
                     if recent + n <= allowed:
                         break
-                    wait = window - (now - counter.events[0]) + 0.01
+                    # Ein einzelner Aufruf fuer MEHR als ein volles Fenster
+                    # zulaesst (n > allowed) kann nie regulaer durchgehen -
+                    # dann reicht es, das Fenster leerlaufen zu lassen und
+                    # danach bewusst zu ueberschreiten (Aufruferfehler, aber
+                    # besser als Endlosschleife / IndexError bei leerem deque).
+                    if n > allowed and recent == 0:
+                        break
+                    wait = ((window - (now - counter.events[0]) + 0.01)
+                            if counter.events else 0.05)
                 if self.verbose:
                     print(f"  [Drossel] {self.quota.name}: warte {wait:.1f}s "
                           f"({recent}/{allowed} im {window:.0f}s-Fenster)")
