@@ -1,12 +1,12 @@
 """Regressionstests fuer den Trendbot-Vorwaerts-Schatten (`trend_schatten.py`).
 
-Phase 2 aus `docs/TRENDBOT.md`: die defensive ETF-Allokation vorwaerts
-verfolgen, ohne Orders. Wichtig:
+Phase 2 aus `docs/TRENDBOT.md`: mehrere defensive ETF-Allokationen
+parallel vorwaerts verfolgen, ohne Orders. Wichtig:
 
-  * das Startdatum wird EINMAL gesetzt und wandert nicht, wenn neue Tage
-    dazukommen
-  * die fortgeschriebene Equity ist idempotent (kausaler Backtest)
-  * `aktualisieren` liefert die heutigen Zielgewichte
+  * das Startdatum wird EINMAL gesetzt und wandert nicht
+  * jede Strategie startet mit Rendite 0 (heutiger Stand = Nulllinie)
+  * die fortgeschriebene Equity ist idempotent
+  * `aktualisieren` liefert je Strategie die heutigen Zielgewichte
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alpaca_bot import trend_schatten
+from alpaca_bot import trend, trend_schatten
 
 
 @pytest.fixture(autouse=True)
@@ -39,45 +39,67 @@ def _preise(n_jahre: int = 9, seed: int = 0) -> pd.DataFrame:
 
 
 class TestAktualisieren:
-    def test_erster_lauf_setzt_stand_und_ziele(self):
+    def test_erster_lauf_alle_kandidaten_bei_null(self):
         p = _preise(seed=1)
         erg = trend_schatten.aktualisieren(p)
-        assert erg["stand"] == str(p.index[-1].date())
-        assert erg["start_datum"] == str(p.index[-1].date())
-        assert erg["rendite_seit_start"] == pytest.approx(0.0, abs=1e-9)
-        assert isinstance(erg["ziel_gewichte"], dict)
-        # Gewichte plus Cash ergeben rund 1
-        assert erg["cash_anteil"] + sum(erg["ziel_gewichte"].values()) == pytest.approx(
-            1.0, abs=0.05) or erg["cash_anteil"] >= 0
+        assert set(erg["kandidaten"]) == set(trend_schatten.PHASE2_KANDIDATEN)
+        for name, snap in erg["kandidaten"].items():
+            assert "fehler" not in snap, (name, snap)
+            assert snap["rendite_seit_start"] == pytest.approx(0.0, abs=1e-9)
+            assert isinstance(snap["ziel_gewichte"], dict)
+        # rueckwaertskompatible Felder oben (primaerer Kandidat)
+        assert "ziel_gewichte" in erg and "rendite_seit_start" in erg
 
     def test_startdatum_wandert_nicht(self):
         p = _preise(seed=2)
         e1 = trend_schatten.aktualisieren(p.iloc[:-40])
-        e2 = trend_schatten.aktualisieren(p)  # 40 Tage mehr
+        e2 = trend_schatten.aktualisieren(p)
         assert e2["start_datum"] == e1["start_datum"]
         assert e2["stand"] != e1["stand"]
 
     def test_equity_ist_idempotent(self):
         p = _preise(seed=3)
         trend_schatten.aktualisieren(p)
-        trend_schatten.aktualisieren(p)  # zweimal - darf nichts doppeln
+        trend_schatten.aktualisieren(p)
         with trend_schatten._conn() as c:
             eq = pd.read_sql("SELECT * FROM equity", c)
-        assert eq["datum"].is_unique
-        assert len(eq) > 100
+        assert not eq.duplicated(subset=["strategie", "datum"]).any()
+        assert eq["strategie"].nunique() == len(trend_schatten.PHASE2_KANDIDATEN)
 
-    def test_bericht_nennt_die_kernzahlen(self):
+    def test_bericht_zeigt_das_rennen(self):
         p = _preise(seed=4)
         trend_schatten.aktualisieren(p)
         txt = trend_schatten.bericht()
-        assert "Rendite seit Start" in txt
-        assert "Zielallokation" in txt or "Rebalance" in txt
+        assert "Pferderennen" in txt
+        assert "dualmom" in txt and "risk_parity" in txt
         assert "Kein Live-Handel" in txt
 
-    def test_gewichte_werden_geschrieben(self):
+    def test_gewichte_werden_je_strategie_geschrieben(self):
         p = _preise(seed=5)
         trend_schatten.aktualisieren(p)
         with trend_schatten._conn() as c:
             gw = pd.read_sql("SELECT * FROM gewichte", c)
         assert not gw.empty
+        assert gw["strategie"].nunique() >= 4
         assert set(gw["symbol"]).issubset(set(p.columns))
+
+
+class TestNeueStrategien:
+    def test_risk_parity_ist_immer_investiert(self):
+        p = _preise(seed=6)
+        r = p.pct_change()
+        cfg = trend.TrendConfig(strategie="risk_parity", vol_fenster_tage=60)
+        w = trend.ziel_gewichte(p, r, p.index[-1], cfg)
+        assert len(w) >= 4
+        assert w.sum() == pytest.approx(1.0, abs=1e-6)
+
+    def test_gem_haelt_hoechstens_ein_asset(self):
+        p = _preise(seed=7)
+        r = p.pct_change()
+        cfg = trend.TrendConfig(strategie="gem", lookback_monate=12, vol_ziel=0.0)
+        w = trend.ziel_gewichte(p, r, p.index[-1], cfg)
+        assert len(w) <= 1
+
+    @pytest.mark.parametrize("strat", ["gem", "risk_parity"])
+    def test_neue_strategien_bestehen_pruefung(self, strat):
+        trend.TrendConfig(strategie=strat).pruefe()

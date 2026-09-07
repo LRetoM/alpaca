@@ -57,7 +57,8 @@ class TrendConfig:
     rebalance: str = "monatlich"     # monatlich | woechentlich
 
     def pruefe(self) -> None:
-        if self.strategie not in ("tsmom", "dualmom", "ma_filter"):
+        if self.strategie not in ("tsmom", "dualmom", "ma_filter",
+                                  "gem", "risk_parity"):
             raise ValueError(f"strategie: {self.strategie!r}")
         if self.rebalance not in ("monatlich", "woechentlich"):
             raise ValueError(f"rebalance: {self.rebalance!r}")
@@ -116,6 +117,35 @@ def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
     # "absolute Momentum > Cash": der Cash-Ertrag ueber dasselbe Fenster.
     fenster_jahre = (cfg.lookback_monate - cfg.skip_monate) / 12.0
     huerde = cfg.cash_rendite_pa * fenster_jahre
+
+    # --- immer investierte Strategien (kein Momentum-Filter) ---
+    if cfg.strategie == "risk_parity":
+        vol = _realized_vol(returns[verfuegbar], bis, cfg.vol_fenster_tage)
+        inv = (1.0 / vol.replace(0.0, np.nan)).dropna()
+        if inv.empty:
+            return pd.Series(dtype=float)
+        return inv / inv.sum() * cfg.max_brutto
+
+    if cfg.strategie == "gem":
+        # Global-Equities-Momentum (Antonacci, verallgemeinert): das eine
+        # Asset mit dem staerksten Momentum halten - liegt es unter der
+        # Cash-Huerde, ganz in das Asset mit der niedrigsten Vola (Anleihe).
+        mom = _momentum(prices[verfuegbar], bis, cfg.lookback_monate,
+                        cfg.skip_monate).dropna().sort_values(ascending=False)
+        if mom.empty:
+            return pd.Series(dtype=float)
+        if mom.iloc[0] > huerde:
+            an = [mom.index[0]]
+        else:
+            vol = _realized_vol(returns[verfuegbar], bis, cfg.vol_fenster_tage)
+            an = [vol.dropna().idxmin()] if vol.notna().any() else []
+        if not an:
+            return pd.Series(dtype=float)
+        w = pd.Series(1.0, index=an)
+        if cfg.vol_ziel > 0:
+            v = _realized_vol(returns[an], bis, cfg.vol_fenster_tage)
+            w = w * (cfg.vol_ziel / v.replace(0.0, np.nan)).clip(upper=1.5).fillna(1.0)
+        return w * cfg.max_brutto / w.sum() if w.sum() > cfg.max_brutto else w
 
     if cfg.strategie == "ma_filter":
         an = []

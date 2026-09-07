@@ -62,25 +62,28 @@ def main() -> int:
     print(f"      {prices.shape[1]} ETFs, {prices.index[0].date()} .. "
           f"{prices.index[-1].date()} ({len(prices)} Tage)")
 
-    print("[2/2] Konfiguration durchrechnen und fortschreiben ...")
+    print(f"[2/2] {len(trend_schatten.PHASE2_KANDIDATEN)} Strategien "
+          f"durchrechnen und fortschreiben ...")
     erg = trend_schatten.aktualisieren(prices)
-    if "fehler" in erg:
-        print(f"  {erg['fehler']}")
-        return 1
 
     print()
-    print(f"  Stand {erg['stand']}  (Schatten seit {erg['start_datum']})")
-    print(f"  Simulierte Equity     ${erg['equity']:>12,.0f}")
-    print(f"  Rendite seit Start    {erg['rendite_seit_start']:>12.2%}")
-    print(f"  Max Drawdown          {erg['max_drawdown_seit_start']:>12.1%}")
-    print(f"  {erg['n_equity_punkte']} Equity-Punkte gespeichert")
+    print(f"  Stand {erg['stand']}  (Schatten seit {erg['start_datum']}, "
+          f"{erg['tage_vorwaerts']} Kalendertage)")
     print()
-    print("  Zielallokation JETZT:")
-    for sym, g in sorted(erg["ziel_gewichte"].items(), key=lambda x: -x[1]):
-        print(f"    {sym:<6} {g:>7.1%}")
-    print(f"    {'Cash':<6} {erg['cash_anteil']:>7.1%}")
+    print(f"  {'Strategie':<22}{'Rendite':>10}{'Max-DD':>9}  Allokation jetzt")
+    for name, snap in sorted(erg["kandidaten"].items(),
+                             key=lambda x: -x[1].get("rendite_seit_start", -9)):
+        if "fehler" in snap:
+            print(f"  {name:<22}  {snap['fehler']}")
+            continue
+        alloc = " ".join(f"{s}{g*100:.0f}" for s, g in
+                         sorted(snap["ziel_gewichte"].items(), key=lambda x: -x[1]))
+        if snap["cash_anteil"] > 0.01:
+            alloc += f" Cash{snap['cash_anteil']*100:.0f}"
+        print(f"  {name:<22}{snap['rendite_seit_start']:>10.2%}"
+              f"{snap['max_drawdown_seit_start']:>9.1%}  {alloc}")
     print()
-    print("  Kein Live-Handel. Entscheidung folgt in TRENDBOT.md Phase 3.")
+    print("  Kein Live-Handel. Rennen laeuft bis Dez (TRENDBOT.md §6a).")
     return 0
 
 

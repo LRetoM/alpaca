@@ -143,7 +143,7 @@ Rebalancing, 2 bps Kosten. Änderungen hier sind eine neue Voranmeldung.
 | Phase | Zeitraum | Inhalt | Stand |
 |---|---|---|---|
 | **1 — Historie** | erledigt 04.09. | `trend.py` + Backtest, Gate §5. | §G52, 2/4 |
-| **2 — Vorwärts-Schatten** | 04.09. – ~30.11. | `trend_schatten.py` + `scripts/45_trend_schatten.py`, LaunchAgent `de.local.alpacatrend` (werktags nach US-Schluss). **Sendet keine Orders** — schreibt simulierte Equity + Zielgewichte fort. Prüft: deckt sich das Live-Signal mit dem Backtest, ist der Verlauf wie erwartet? | läuft ab 04.09. |
+| **2 — Vorwärts-Schatten (Pferderennen)** | 04.09. – ~30.11. | `trend_schatten.py` + `scripts/45_trend_schatten.py`, LaunchAgent `de.local.alpacatrend` (werktags nach US-Schluss). **Sendet keine Orders** — verfolgt **6 defensive Allokationen parallel** (`PHASE2_KANDIDATEN`: dualmom, tsmom, ma_filter, gem, risk_parity, risk_parity_defensiv), je simulierte Equity + Zielgewichte ab gemeinsamem Startdatum. | läuft ab 04.09. |
 | **3 — Live-Entscheidung** | Dez | Hürde unten. | offen |
 | **Live** | frühestens 01.01.2027 | Bei erfüllter Hürde: klein starten (10–20 % des Kontos), über Monate hochskalieren. | offen |
 
@@ -153,9 +153,14 @@ Live geht der Bot nur, wenn *alle* zutreffen:
 
 1. **≥ 8 Wochen** Vorwärts-Schatten ohne Abweichung zwischen berechneten
    und plausiblen Alpaca-Zielgewichten (Rebalance-Logik greift korrekt).
-2. Der Schatten-Drawdown seit Start bleibt **über −20 %** (die Strategie
-   soll ja gerade defensiv sein — reißt sie das früh, war die Prämisse
-   falsch).
+1a. **Aus dem Pferderennen wird die Strategie gewählt**, die vorwärts am
+   saubersten läuft — bester risikoadjustierter Verlauf (Sharpe seit
+   Start) UND kein Drawdown-Ausreißer. `dualmom` ist der Vorgabe-
+   Kandidat; wird eine andere gewählt, ist das ausdrücklich erlaubt
+   (alle 6 standen vorab fest, kein nachträgliches Cherry-Picking).
+2. Der Drawdown der gewählten Strategie seit Start bleibt **über −20 %**
+   (die Strategie soll ja gerade defensiv sein — reißt sie das früh,
+   war die Prämisse falsch).
 3. Ein separater **Live-Klempner-Test**: eine einzelne 100-$-ETF-
    Testorder auf dem Paper-Konto wird zum erwarteten Kurs (± 5 bps)
    gefüllt.
