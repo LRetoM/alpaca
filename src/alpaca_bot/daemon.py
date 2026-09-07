@@ -384,6 +384,18 @@ class Daemon:
         if not can_trade:
             print(f"  [{dt.datetime.now():%H:%M:%S}] kein Handel: {reason}")
             self.store.heartbeat(ok=True)
+            # Fuellpreise AUCH bei geschlossener Boerse nachtragen. Eine
+            # Order, die Freitag 15:45 ET fuellt, waere sonst bis zum
+            # ersten Montags-Zyklus ohne Fuellpreis - und der
+            # Datenintegritaets-Check meldet ab 6 h ROT (beobachtet
+            # 07.09.2026, TCOM/NIO ueber das Wochenende). Der Aufruf ist
+            # billig: ohne offene Order kehrt er sofort zurueck.
+            try:
+                nach = live.reconcile_fills(lookback_hours=120)
+                if nach:
+                    print(f"      {nach} Fuellpreis(e) nachgetragen (Boerse zu)")
+            except Exception as e:  # noqa: BLE001 - darf den Lauf nicht stoppen
+                print(f"      Fuellpreis-Abgleich (zu) fehlgeschlagen: {type(e).__name__}")
             # Auch das ist ein vollstaendiger Zyklus: Der Bot hat geprueft
             # und entschieden, nicht zu handeln. Die Meldung muss HIER
             # stehen und nicht nur in `live.run_once` - der Daemon kehrt
@@ -397,7 +409,7 @@ class Daemon:
         # Entscheiden passieren, damit die Slippage-Auswertung vollstaendig
         # bleibt, auch wenn der Prozess zwischendurch neu gestartet wurde.
         try:
-            filled = live.reconcile_fills()
+            filled = live.reconcile_fills(lookback_hours=120)
             if filled:
                 print(f"      {filled} Ausfuehrungspreis(e) nachgetragen")
         except Exception as e:  # noqa: BLE001 - darf den Lauf nicht stoppen
