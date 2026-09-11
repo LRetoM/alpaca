@@ -208,7 +208,12 @@ def test_bericht_nennt_das_prueffenster_und_nicht_den_besten_wert():
     text = s.bericht()
     assert "Prueffenster" in text
     assert "URTEIL" in text
-    assert "Zufallsschwelle" in text
+    # Beide Schwellen muessen genannt sein - und die Pruefschwelle als
+    # die massgebliche. Stuende hier nur eine Zahl, waere nicht zu
+    # erkennen, gegen welche der Pruefwert eigentlich antritt.
+    assert "Lernschwelle" in text
+    assert "Pruefschwelle" in text
+    assert "massgeblich" in text
 
 
 def test_bergsteigen_faellt_nicht_auf_wuerfeln_zurueck():
@@ -270,3 +275,112 @@ def test_abgesuchter_raum_beendet_die_suche_statt_zu_haengen():
     n = list(s.laufen(lambda: False))     # KEIN Stoppkriterium von aussen
     assert len(n) <= 4
     assert s.stand.phase == "abgesucht"
+
+
+# ------------------------------------------------- Schwellen-Trennung
+def test_pruefschwelle_haengt_an_den_pruefungen_nicht_an_den_versuchen():
+    """Der wichtigste methodische Punkt der ganzen Suche.
+
+    Die Auswahl ueber N Versuche findet NUR im Lernfenster statt. Das
+    Prueffenster sieht nur die wenigen Gewinner - jede dieser
+    Bewertungen ist ein sauberer Einzeltest auf Daten, die an keiner
+    Auswahl beteiligt waren. Die Vielfachtestung ist auf der Lernseite
+    bereits bezahlt.
+
+    Wuerde man den Pruefwert gegen die Lernschwelle stellen, waere das
+    Verfahren bei 940.000 Versuchen (Schwelle 5,24) per Konstruktion
+    unfaehig, jemals etwas zu finden - auch bei einem echten Effekt.
+    """
+    st = su.Stand()
+    st.versuche = 940_000
+    st.pruef_bewertungen = 50
+
+    assert st.schwelle == pytest.approx(5.24, abs=0.02)
+    assert st.pruef_schwelle == pytest.approx(2.80, abs=0.02)
+    assert st.pruef_schwelle < st.schwelle
+
+
+def test_pruefschwelle_steigt_mit_wiederholten_pruefungen():
+    """Wer die Suche zehnmal wiederholt und sich den besten Pruefwert
+    heraussucht, hebt damit seine eigene Huerde - genau wie es §B2
+    verlangt."""
+    st = su.Stand()
+    st.pruef_bewertungen = 20
+    niedrig = st.pruef_schwelle
+    st.pruef_bewertungen = 2000
+    assert st.pruef_schwelle > niedrig
+
+
+def test_pruefungen_werden_gezaehlt():
+    """Ohne Zaehler keine Schwelle - und ohne Schwelle kein Urteil."""
+    bars = {f"S{i}": _bars(saat=i) for i in range(3)}
+    lern, pruef, _ = su.teilen(bars, 0.7)
+    s = su.Suche(lern, pruef, min_trades=1, erkundung_n=3, saat=7,
+                 pruef_stichprobe=0.0,
+                 raum={"anstieg_pct": [1, 2], "fenster_bars": [4, 8]})
+    n = []
+    for v in s.laufen(lambda: len(n) >= 4):
+        n.append(v)
+    treffer = sum(1 for v in n if v.besser)
+    assert s.stand.pruef_bewertungen == treffer, (
+        "Jeder neue Beste muss genau eine Pruefung ausloesen."
+    )
+
+
+# ----------------------------------------------------- Elite-Austausch
+def test_elite_wird_nur_bei_besserem_wert_ueberschrieben(tmp_path, monkeypatch):
+    """Ein schlechterer Fund darf den gemeinsamen Bestwert nicht kippen -
+    sonst zieht die langsamste Instanz alle anderen herunter."""
+    import alpaca_bot.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+
+    assert su.elite_schreiben(3.0, {"a": 1}, "a") is True
+    assert su.elite_schreiben(1.0, {"a": 2}, "b") is False
+    assert su.elite_lesen()["score"] == 3.0
+    assert su.elite_schreiben(4.5, {"a": 3}, "c") is True
+    assert su.elite_lesen()["score"] == 4.5
+    assert su.elite_lesen()["instanz"] == "c"
+
+
+def test_elite_uebernahme_startet_in_der_umgebung_nicht_exakt(tmp_path, monkeypatch):
+    """Genau beim Bestwert anzusetzen brachte nichts - dessen
+    Nachbarschaft ist bereits abgesucht. Zwei Achsen werden verstellt."""
+    import alpaca_bot.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    raum = {"a": [1, 2, 3, 4], "b": [10, 20, 30], "c": [5, 6, 7]}
+    beste = {"a": 1, "b": 10, "c": 5}
+    su.elite_schreiben(9.0, beste, "x")
+
+    s = su.Suche({}, {}, raum=raum, elite_anteil=1.0, saat=3)
+    punkte = [s._neustartpunkt() for _ in range(20)]
+
+    assert s.stand.elite_uebernahmen == 20
+    abweichungen = [sum(1 for k in raum if p[k] != beste[k]) for p in punkte]
+    assert max(abweichungen) >= 1, "Nie verstellt - waere nur Wiederholung."
+    assert all(a <= 2 for a in abweichungen), (
+        "Mehr als zwei Achsen verstellt - dann ist es kein Ansetzen am "
+        "Bestwert mehr, sondern ein Zufallspunkt."
+    )
+
+
+def test_ohne_elite_datei_wird_zufaellig_gestartet(tmp_path, monkeypatch):
+    """Beim allerersten Lauf gibt es noch keinen gemeinsamen Bestwert."""
+    import alpaca_bot.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    s = su.Suche({}, {}, raum={"a": [1, 2], "b": [3, 4]}, elite_anteil=1.0)
+    p = s._neustartpunkt()
+    assert set(p) == {"a", "b"}
+    assert s.stand.elite_uebernahmen == 0
+
+
+def test_elite_anteil_null_nutzt_nie_die_elite(tmp_path, monkeypatch):
+    """Vier Instanzen, die alle beim selben Punkt ansetzen, sind nur
+    noch eine Suche mit vierfachem Stromverbrauch - deshalb muss sich
+    das abschalten lassen."""
+    import alpaca_bot.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    su.elite_schreiben(9.0, {"a": 1, "b": 3}, "x")
+    s = su.Suche({}, {}, raum={"a": [1, 2], "b": [3, 4]}, elite_anteil=0.0)
+    for _ in range(10):
+        s._neustartpunkt()
+    assert s.stand.elite_uebernahmen == 0

@@ -6122,6 +6122,136 @@ unbemerkt sinkt.
 
 ---
 
+## G58. Die Ausbruch-Suche verglich den Prüfwert mit der falschen Schwelle (11.09.2026)
+
+**Der Fund.** Der Bericht der automatischen Suche stellte den
+**Prüfwert** gegen die **Lernschwelle** `sqrt(2 ln N_Versuche)`. Bei
+einem Dauerlauf mit 940.000 Versuchen liegt die bei **5,24**.
+
+Ein Prüfwert von 3,5 wäre damit als „kein Befund" abgetan worden —
+**auch bei einem echten Effekt.** Das Verfahren war per Konstruktion
+unfähig, jemals etwas zu finden.
+
+### Warum das falsch war
+
+Die Auswahl über N Versuche findet **ausschließlich im Lernfenster**
+statt. Das Prüffenster sieht nur die wenigen Konfigurationen, die dort
+gewonnen haben. Jede dieser Bewertungen ist ein **sauberer Einzeltest**
+auf Daten, die an keiner Auswahl beteiligt waren — die Vielfachtestung
+ist auf der Lernseite bereits bezahlt.
+
+| Schwelle | gilt für | Grundlage | Wert |
+|---|---|---|---:|
+| Lernschwelle | Lernwert | 940.000 Versuche | **5,24** |
+| **Prüfschwelle** | **Prüfwert** | **~50 Prüfungen** | **2,80** |
+
+### Warum das kein Absenken der Latte ist
+
+Der Zähler `pruef_bewertungen` läuft über **alle Instanzen und alle
+Läufe** hinweg weiter. Wer die Suche zehnmal wiederholt und sich den
+besten Prüfwert heraussucht, hebt damit seine eigene Hürde — genau wie
+§B2 es verlangt. Und die Bedingung bleibt unverändert: Es darf nie auf
+den Prüfwert hin ausgewählt werden. `Suche.laufen()` tut das nicht,
+abgesichert durch `test_pruefungen_werden_gezaehlt` und
+`test_pruefschwelle_haengt_an_den_pruefungen_nicht_an_den_versuchen`.
+
+**Einordnung.** Das ist die Umkehrung des üblichen Fehlers in diesem
+Projekt: Sonst waren die Hürden zu niedrig (§G19 Fund 2, §G43). Hier war
+eine so hoch, dass sie das Werkzeug unbrauchbar machte. Beide Richtungen
+sind Fehler — eine Schwelle muss die Frage treffen, die sie stellt.
+
+---
+
+## G59. Dauerbetrieb der Ausbruch-Suche — 4 Instanzen, Protokoll, Elite (11.09.2026)
+
+**Anlass.** Die Suche sollte über Tage bis Wochen laufen und am Ende
+auswertbare Daten liefern. Drei Dinge fehlten dafür.
+
+### 1. Ein einzelner Prozess nutzte einen von zehn Kernen
+
+Gemessen: 100 % CPU auf einem Kern, neun leer. Umgestellt auf **vier
+parallele Instanzen** (`--instanz a|b|c|d`, je eigener LaunchAgent):
+
+| | vorher | nachher |
+|---|---:|---:|
+| Versuche je Sekunde | 1,35 | **5,4** |
+| je Stunde | ~4.900 | **~19.500** |
+| in 48 Stunden | ~235.000 | **~940.000** |
+| Speicher | 1,2 GB | 4,8 GB von 26 GB |
+
+**Handelsbot und Schattenbot laufen weiter** — sie stehen bei 0,0 % CPU
+(33 Minuten Schlaf, 20 Sekunden Arbeit). Sie zu stoppen brächte nichts
+und zerstörte die B11-Messung (10.10.) und das Trendbot-Pferderennen
+(bis 30.11.).
+
+### 2. Kein Fortsetzen nach Neustart
+
+Ein Absturz oder Neustart begann wieder bei Versuch 0. Jetzt:
+Checkpoint alle 200 Versuche, `KeepAlive` startet neu, der Checkpoint
+setzt fort. Getestet: nach Abbruch bei 447 setzte der Neustart bei 447
+fort, nicht bei 0.
+
+**Bewusst nicht gespeichert: die Menge der bereits geprüften
+Konfigurationen.** Bei 6,3·10¹¹ Kombinationen ist die Chance, nach einem
+Neustart zufällig etwas Wiederholtes zu ziehen, verschwindend gering —
+ein paar verschenkte Millisekunden gegen eine Datei, die über Wochen ins
+Unermessliche wächst.
+
+### 3. Nur der beste Fund wurde gespeichert
+
+Das ist genau das Falsche. Der beste Fund aus einer Million Versuchen
+**ist** ein Ausreißer (§B2). Die belastbare Erkenntnis lautet nicht
+„welche Konfiguration gewann", sondern „welche Achsenwerte schneiden
+über hunderttausende Versuche hinweg systematisch besser ab".
+
+Jetzt wird **jeder** Versuch protokolliert (`ausbruch_versuche.py`, eine
+SQLite je Instanz — vier Prozesse in derselben Datei blockieren sich bei
+5 Schreibvorgängen je Sekunde). `scripts/52_ausbruch_auswertung.py`
+rechnet daraus die Randverteilung je Achse. Erste 800 Versuche:
+
+```
+  anstieg_pct
+                15   +0.876  n=108        fenster_bars
+                30   -1.690  n=112                    16   +1.239  n=146
+                                                      52   -1.826  n= 60
+```
+
+Zu lesen als: mittlerer Lern-t-Wert dieses Achsenwerts minus
+Gesamtmittel. **Diese Aussagen stützen sich auf hunderte Versuche, nicht
+auf einen.**
+
+### Dazu: die unverzerrte Stichprobe
+
+Für **1 % der Versuche** wird das Prüffenster zusätzlich gerechnet — nur
+protokolliert, nie verglichen, nie zur Auswahl. Erst das beantwortet die
+eigentliche Frage: *Sagt ein guter Lernwert überhaupt etwas über den
+Prüfwert?* Aus den Gewinnern allein ist das nicht zu beantworten, sie
+sind eine bewusst schiefe Auswahl.
+
+Liegt die Korrelation nahe null, findet die Suche reine
+Zeitraum-Anpassung und die Strategiefamilie trägt in dieser Form nichts.
+**Das wäre ein Befund, kein Misserfolg.**
+
+### Elite-Austausch zwischen den Instanzen
+
+Vier unabhängige Suchen finden vier verschiedene Hügel — das ist
+gewollt. Aber wenn Instanz b nach zwei Stunden bei t=0,3 herumsucht,
+während a längst t=3,1 gefunden hat, ist weiteres Herumirren verschenkte
+Rechenzeit. **40 % der Neustarts** setzen deshalb in der *Umgebung* des
+gemeinsamen Bestwerts an (zwei zufällig verstellte Achsen).
+
+Bewusst nicht 100 %: Vier Instanzen, die alle beim selben Punkt
+ansetzen, sind nur noch eine Suche mit vierfachem Stromverbrauch.
+
+### Stand
+
+22 Tests für Engine, Suche und Protokoll; `22_tests.py` grün. Vier
+Instanzen laufen seit 11.09.2026, 18:44 Uhr auf 1.844 Symbolen über
+2023–2026. **Es liegt noch kein Ergebnis vor** — dieser Eintrag hält
+fest, was gebaut wurde, nicht was gefunden wurde.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

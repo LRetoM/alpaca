@@ -51,7 +51,11 @@ werden.
 | `src/alpaca_bot/ausbruch_suche.py` | Automatische Suche: Erkundung, Bergsteigen, Neustart — mit Lern-/Prüffenster. |
 | `scripts/47_ausbruch_suche.py` | Live-Terminal für die Suche. |
 | `scripts/48_ausbruch_daten.py` | Kursvorrat aufbauen — NASDAQ-weit, mehrjährig, fortsetzbar. |
-| `scripts/49_ausbruch_dauerlauf.py` | **Das Startkommando.** Lädt einmal, sucht dann ohne Unterbrechung. |
+| `scripts/49_ausbruch_dauerlauf.py` | Dauerlauf im Vordergrund, mit Live-Terminal. |
+| `scripts/50_ausbruch_dienst.py` | **Der Hintergrunddienst.** Setzt nach Neustart fort, 4 parallele Instanzen. |
+| `scripts/51_ausbruch_status.py` | Ein Befehl: Stand aller Instanzen, ohne den Lauf anzufassen. |
+| `scripts/52_ausbruch_auswertung.py` | Die Ernte: Randverteilung je Achse über alle Versuche. |
+| `src/alpaca_bot/ausbruch_versuche.py` | Versuchsprotokoll, eine SQLite je Instanz. |
 | `tests/test_ausbruch.py` | 25 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
 | `tests/test_ausbruch_suche.py` | 16 Tests, Schwerpunkt auf der Fenster-Trennung. |
 
@@ -291,6 +295,132 @@ Minute:
 Überanpassung — genau wie die Theorie es vorhersagt. Ohne das
 Prüffenster stünde hier „t = 5,99 gefunden", und das wäre die Illusion
 mit Nachkommastellen, vor der §B2 warnt.
+
+---
+
+## 5c. Der Dauerbetrieb — 4 Instanzen, beliebig lange (11.09.2026)
+
+```
+# Starten (laufen dann dauerhaft, auch nach Neustart des Rechners):
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacaausbruch.a.plist
+#   ... ebenso b, c, d
+
+# Jederzeit nachsehen, ohne den Lauf anzufassen:
+python scripts/51_ausbruch_status.py
+
+# Auswerten (nach Stunden, Tagen oder Wochen):
+python scripts/52_ausbruch_auswertung.py
+
+# Stoppen:
+launchctl bootout gui/$(id -u)/de.local.alpacaausbruch.a
+```
+
+**Kein Zeitlimit.** Der Dienst läuft, bis er gestoppt wird — zehn
+Stunden oder einen Monat. Checkpoint alle 200 Versuche, also kostet ein
+Absturz höchstens ~40 Sekunden. `KeepAlive` startet ihn neu, der
+Checkpoint setzt fort.
+
+### Vier Instanzen statt einer
+
+Gemessen: eine Instanz lastete **einen von zehn Kernen** aus. Vier
+Instanzen (passend zu den 4 Performance-Kernen) bringen **5,4 Versuche
+je Sekunde**, also ~19.500 je Stunde oder **~940.000 in 48 Stunden**.
+Speicher: 4 × 1,2 GB von 26 GB.
+
+**Der Handelsbot und der Schattenbot laufen weiter.** Sie stehen bei
+0,0 % CPU (sie schlafen 33 Minuten, arbeiten 20 Sekunden) — sie zu
+stoppen brächte nichts und würde die B11-Messung (10.10.) und das
+Trendbot-Pferderennen (bis 30.11.) zerstören.
+
+### Was die Instanzen teilen — und was nicht
+
+| | geteilt? |
+|---|---|
+| Versuchszähler / Schwelle | **ja** — `ausbruch.sqlite`, über alle Instanzen |
+| Bester Fund (`ausbruch_elite.json`) | **ja** — 40 % der Neustarts setzen dort an |
+| Suchweg, `_gesehen`, Checkpoint | **nein** — je Instanz eigen |
+| Versuchsprotokoll | **nein** — eine SQLite je Instanz |
+
+**Warum nur 40 % der Neustarts beim gemeinsamen Besten ansetzen:**
+Würden alle vier immer dort ansetzen, wären vier parallele Suchen nur
+noch eine — mit vierfachem Stromverbrauch. Und „ansetzen" heißt *in der
+Umgebung*, mit zwei zufällig verstellten Achsen: Der Bestwert selbst ist
+schon geprüft, seine direkte Nachbarschaft meist auch.
+
+**Warum eine SQLite je Instanz:** Vier Prozesse, die bei 5 Schreib­vorgängen
+je Sekunde in dieselbe Datei schreiben, blockieren sich (`database is
+locked`). `zusammenfuehren()` liest am Ende alle in einem Rutsch.
+
+---
+
+## 5d. Die Korrektur, ohne die das Ganze nichts finden könnte
+
+**Bis zum 11.09.2026 verglich der Bericht den PRÜFwert mit der
+LERNschwelle.** Das ist ein Denkfehler mit drastischer Folge: Bei
+940.000 Versuchen liegt die Lernschwelle bei `sqrt(2 ln 940000)` =
+**5,24**. Ein Prüfwert von 3,5 wäre damit als „kein Befund" abgetan
+worden — auch bei einem echten Effekt. Das Verfahren wäre per
+Konstruktion unfähig gewesen, jemals etwas zu finden.
+
+**Richtig sind zwei getrennte Schwellen:**
+
+| | gilt für | Grundlage | typisch |
+|---|---|---|---|
+| **Lernschwelle** | den Lernwert | alle N Versuche | 5,24 bei 940.000 |
+| **Prüfschwelle** | den Prüfwert | die Zahl der **Prüfungen** | 2,8 bei 50 |
+
+Die Auswahl über N Versuche findet **ausschließlich im Lernfenster**
+statt. Das Prüffenster sieht nur die wenigen Konfigurationen, die dort
+gewonnen haben — jede dieser Bewertungen ist ein sauberer Einzeltest auf
+Daten, die an keiner Auswahl beteiligt waren. Die Vielfachtestung ist auf
+der Lernseite bereits bezahlt.
+
+> **Das ist kein Absenken der Latte.** Der Zähler `pruef_bewertungen`
+> läuft über alle Instanzen und alle Läufe hinweg weiter. Wer die Suche
+> zehnmal wiederholt und sich den besten Prüfwert heraussucht, hebt damit
+> seine eigene Hürde — genau wie §B2 es verlangt. Und die Bedingung
+> bleibt: Es darf **nie** auf den Prüfwert hin ausgewählt werden
+> (durch Tests abgesichert).
+
+---
+
+## 5e. Das Versuchsprotokoll — die eigentliche Ernte
+
+Jeder Versuch wird gespeichert, nicht nur der beste
+(`ausbruch_versuche_<instanz>.sqlite`). Der Grund:
+
+> Der beste Fund aus einer Million Versuchen ist per Konstruktion ein
+> Ausreißer. Die belastbare Erkenntnis ist nicht **welche Konfiguration
+> gewann**, sondern **welche Achsenwerte über hunderttausende Versuche
+> hinweg systematisch besser abschneiden.**
+
+`scripts/52_ausbruch_auswertung.py` rechnet daraus die Randverteilung je
+Achse — ein Balkendiagramm pro Stellschraube, mit der Zahl der Versuche
+dahinter. Beispiel aus den ersten 800 Versuchen:
+
+```
+  anstieg_pct
+                15   +0.876  n=    108  +##########
+                30   -1.690  n=    112  -####################
+```
+
+Das heißt: Konfigurationen mit `anstieg_pct=15` liegen im Mittel 0,88
+t-Punkte über dem Gesamtmittel, solche mit 30 liegen 1,69 darunter.
+**Diese Aussage stützt sich auf 220 Versuche, nicht auf einen.**
+
+### Die unverzerrte Stichprobe
+
+Für 1 % der Versuche wird das Prüffenster **zusätzlich** gerechnet —
+rein zur Protokollierung, nie zum Vergleich, nie zur Auswahl. Nur so
+lässt sich die eigentliche Frage beantworten:
+
+> Sagt ein guter Lernwert überhaupt etwas über den Prüfwert?
+
+Aus den Gewinnern allein ist das nicht zu beantworten — sie sind eine
+bewusst schiefe Auswahl. Die Auswertung gibt die Korrelation aus:
+nahe null heißt, dass die Suche reine Zeitraum-Anpassung findet und
+die ganze Strategiefamilie in dieser Form nichts trägt. **Das wäre ein
+Befund, kein Misserfolg.**
 
 ---
 
