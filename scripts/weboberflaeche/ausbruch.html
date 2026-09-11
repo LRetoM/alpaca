@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ausbruch-Werkstatt</title>
+<link rel="stylesheet" href="ausbruch.css">
+</head>
+<body>
+
+<header>
+  <div class="marke">
+    <h1>Ausbruch-Werkstatt</h1>
+    <p>Kaufen, was gerade stark gestiegen ist &mdash; an der Historie durchgespielt.</p>
+  </div>
+  <div class="zaehler">
+    <div class="kachel"><span class="k-wert" id="k-versuche">&ndash;</span><span class="k-name">Versuche</span></div>
+    <div class="kachel"><span class="k-wert" id="k-schwelle">&ndash;</span><span class="k-name">Zufallsschwelle t</span></div>
+    <div class="kachel"><span class="k-wert" id="k-vorrat">&ndash;</span><span class="k-name">Symbole im Vorrat</span></div>
+  </div>
+</header>
+
+<div class="warnband">
+  <strong>Obergrenze, kein Erwartungswert.</strong>
+  Das Universum kennt nur heute gelistete Symbole. Werte, die nach einem Ausbruch
+  verschwanden, fehlen vollst&auml;ndig &mdash; bei dieser Strategie ist das der
+  gr&ouml;&szlig;te Vorbehalt &uuml;berhaupt. Jeder Lauf z&auml;hlt mit: bei N Versuchen liegt
+  das Zufallsmaximum bei &radic;(2&nbsp;ln&nbsp;N).
+</div>
+
+<main>
+
+  <!-- ============ LINKS: Einstellungen ============ -->
+  <section class="spalte einstellungen">
+    <div class="block">
+      <h2>1 &middot; Kursdaten</h2>
+      <p class="hinweis">Einmalig laden, danach l&auml;uft jeder Test in Sekunden.</p>
+      <div class="zeile">
+        <label>Jahr <input type="number" id="jahr" value="2025" min="2016" max="2026"></label>
+        <label>Raster
+          <select id="raster">
+            <option value="15Min" selected>15 Minuten</option>
+            <option value="5Min">5 Minuten</option>
+            <option value="1H">1 Stunde</option>
+            <option value="1D">1 Tag</option>
+          </select>
+        </label>
+      </div>
+      <label>Universumsgr&ouml;&szlig;e
+        <input type="number" id="n_symbole" value="500" min="20" max="3000">
+        <span class="mini">umsatzst&auml;rkste Symbole. 500 &asymp; 20 Min Ladezeit, 1200 &asymp; 50 Min.</span>
+      </label>
+      <button id="btn-daten" class="sekundaer">Kursdaten laden</button>
+      <div id="vorrat-stand" class="mini"></div>
+    </div>
+
+    <div class="block">
+      <h2>2 &middot; Strategie</h2>
+      <div class="schnellwahl">
+        <span class="mini">Fenster schnell setzen:</span>
+        <button type="button" data-bars="2" class="chip">30 Min</button>
+        <button type="button" data-bars="4" class="chip">1 Std</button>
+        <button type="button" data-bars="8" class="chip">2 Std</button>
+        <button type="button" data-bars="16" class="chip">4 Std</button>
+        <button type="button" data-bars="26" class="chip">1 Tag</button>
+        <button type="button" data-bars="78" class="chip">3 Tage</button>
+      </div>
+      <div id="felder"></div>
+    </div>
+
+    <div class="block">
+      <h2>3 &middot; Lauf starten</h2>
+      <label>Notiz zu diesem Versuch
+        <input type="text" id="notiz" placeholder="z.B. enger Stop, 2h-Fenster">
+      </label>
+      <label>Nur die ersten N Symbole (leer = alle)
+        <input type="number" id="max_symbole" placeholder="alle" min="5">
+      </label>
+      <div id="kostenvorschau" class="vorschau"></div>
+      <div class="knopfreihe">
+        <button id="btn-start" class="haupt">Testlauf starten</button>
+        <button id="btn-stop" class="abbruch" disabled>Abbrechen</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RECHTS: Live + Ergebnis ============ -->
+  <section class="spalte ergebnis">
+
+    <div class="block live">
+      <h2>Live</h2>
+      <div class="fortschritt"><div id="balken"></div><span id="balken-text">bereit</span></div>
+      <div class="kacheln">
+        <div class="kachel gross"><span class="k-wert" id="l-kapital">&ndash;</span><span class="k-name">Kontostand</span></div>
+        <div class="kachel gross"><span class="k-wert" id="l-gewinn">&ndash;</span><span class="k-name">Gewinn / Verlust</span></div>
+        <div class="kachel"><span class="k-wert" id="l-trades">0</span><span class="k-name">Trades</span></div>
+        <div class="kachel"><span class="k-wert" id="l-offen">0</span><span class="k-name">offene Positionen</span></div>
+        <div class="kachel"><span class="k-wert" id="l-treffer">&ndash;</span><span class="k-name">Trefferquote</span></div>
+        <div class="kachel"><span class="k-wert" id="l-zeit">&ndash;</span><span class="k-name">Zeitpunkt im Jahr</span></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>Protokoll</h2>
+      <div id="log" class="terminal"></div>
+    </div>
+
+    <div class="block" id="ergebnisblock" hidden>
+      <h2>Ergebnis</h2>
+      <div id="kennzahlen" class="kacheln"></div>
+      <div id="hinweise"></div>
+    </div>
+
+    <div class="block">
+      <div class="reiter">
+        <button class="reiter-knopf aktiv" data-ziel="tab-besten">Beste Aktien</button>
+        <button class="reiter-knopf" data-ziel="tab-trades">Trades</button>
+        <button class="reiter-knopf" data-ziel="tab-laeufe">Alle L&auml;ufe</button>
+      </div>
+      <div id="tab-besten" class="tab"><p class="mini">Noch kein Lauf.</p></div>
+      <div id="tab-trades" class="tab" hidden></div>
+      <div id="tab-laeufe" class="tab" hidden></div>
+    </div>
+
+  </section>
+</main>
+
+<script src="ausbruch.js"></script>
+</body>
+</html>

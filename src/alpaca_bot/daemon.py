@@ -48,6 +48,17 @@ from .state import Store
 # bestehende Aufrufe unveraendert weiterlaufen.
 from .lifecycle import handelstage as _handelstage
 
+# Welche Vorwaertshorizonte der Live-Bot je Entscheidung nachtraegt.
+# Frueher stand die Zahlenreihe direkt am Aufruf - dann kann die
+# Symbolauswahl nicht wissen, welche Horizonte sie offenhalten muss.
+HORIZONTE_LIVE: tuple[int, ...] = (1, 3, 5)
+
+# Sicherheitsnetz gegen einen Datenabruf, der alles laden will. Greift
+# erst, wenn wirklich so viele Symbole offene Horizonte haben - der
+# Normalfall liegt weit darunter, weil ein Symbol nach dem laengsten
+# Horizont fertig ist und herausfaellt.
+MAX_SYMBOLE_JE_LAUF = 1_500
+
 
 @dataclass
 class DaemonConfig:
@@ -297,6 +308,50 @@ class Daemon:
             print(f"      Kapitalfluss-Abgleich fehlgeschlagen: "
                   f"{type(e).__name__}: {e}")
 
+    @staticmethod
+    def _symbole_mit_offenen_horizonten(
+        decisions: pd.DataFrame,
+        outcomes: pd.DataFrame,
+        horizonte: tuple[int, ...],
+    ) -> list[str]:
+        """Welche Symbole brauchen noch Kurse - gemessen am PAAR aus
+        Entscheidung und Horizont.
+
+        Der Fehler, gegen den diese Methode existiert (BEFUNDE §G55):
+        Wer nur `decision_id` vergleicht, haelt eine Entscheidung fuer
+        fertig, sobald irgendein Horizont gefuellt ist. Der lange
+        Horizont ist aber genau der, der am Tag der Bewertung noch nicht
+        verfuegbar war - er bleibt dann fuer immer leer.
+
+        Reihenfolge: Symbole mit offenen Horizonten zuerst, danach der
+        Rest. Schneidet die Obergrenze doch einmal, trifft sie die
+        bereits fertigen Symbole - nie die offenen.
+        """
+        if decisions.empty:
+            return []
+
+        alle = decisions["symbol"].dropna()
+        if outcomes.empty:
+            offen_syms = list(dict.fromkeys(alle))
+        else:
+            # Ein Paar (decision_id, horizon) ist erledigt, wenn es in
+            # `outcomes` steht. Alles andere ist offen.
+            erledigt = set(
+                zip(outcomes["decision_id"], outcomes["horizon"].astype(int))
+            )
+            offen_syms = list(
+                dict.fromkeys(
+                    d["symbol"]
+                    for _, d in decisions.iterrows()
+                    if pd.notna(d["symbol"])
+                    and any((d["decision_id"], int(h)) not in erledigt
+                            for h in horizonte)
+                )
+            )
+
+        rest = [x for x in sorted(set(alle)) if x not in set(offen_syms)]
+        return (offen_syms + rest)[:MAX_SYMBOLE_JE_LAUF]
+
     def _maybe_evaluate_outcomes(self) -> None:
         """Ordnet einmal taeglich jeder Entscheidung ihr Ergebnis zu.
 
@@ -321,20 +376,31 @@ class Daemon:
             # Symbole mit NOCH OFFENEN Ergebnissen zuerst. Frueher stand
             # hier `sorted(...)[:200]` - eine rein alphabetische Auswahl.
             # Solange weniger als 200 Symbole zusammenkommen, faellt das
-            # nicht auf (aktuell 157); darueber hinaus wuerde alles ab
-            # etwa "T" systematisch NIE ausgewertet, ohne dass es jemand
-            # bemerkt. Die Prioritaet nach offenen Ergebnissen stellt
-            # sicher, dass die Grenze zuerst die bereits fertigen Symbole
-            # abschneidet, nicht die noch fehlenden.
+            # nicht auf; darueber hinaus wuerde alles ab etwa "T"
+            # systematisch NIE ausgewertet, ohne dass es jemand bemerkt.
+            #
+            # **Der zweite Anlauf war auch falsch (BEFUNDE §G55, 11.09.2026).**
+            # Die Vorrangliste verglich ueber `decision_id` allein. Eine
+            # Entscheidung, deren 1- und 3-Tage-Ergebnis schon steht und
+            # der nur der 5-Tage-Wert fehlt, galt damit als erledigt -
+            # und genau das ist der Normalfall, weil am Tag der Bewertung
+            # die kurzen Horizonte verfuegbar sind und der lange nicht.
+            # Am Folgetag fiel das Symbol durch das alphabetische Raster.
+            # Gemessen: 277 von 685 Live-Entscheidungen ohne 5-Tage-Wert,
+            # 128 davon dauerhaft unerreichbar, `vorrang` hatte 18 statt
+            # mehrerer hundert Eintraege.
+            #
+            # Jetzt zaehlt das Paar (decision_id, horizon), und die Grenze
+            # richtet sich nach der Zahl der Symbole mit offenen
+            # Horizonten - nicht nach einer festen Zahl, die die
+            # Symbolmenge ein zweites Mal ueberholt.
             offen = self.journal.table("outcomes")
-            fehlend = decisions[~decisions["decision_id"].isin(offen["decision_id"])]
-            vorrang = list(dict.fromkeys(fehlend["symbol"].dropna()))
-            rest = [s for s in sorted(decisions["symbol"].dropna().unique())
-                    if s not in set(vorrang)]
-            symbols = (vorrang + rest)[:300]
+            symbols = self._symbole_mit_offenen_horizonten(
+                decisions, offen, HORIZONTE_LIVE
+            )
             bars = data.get_bars(symbols, "1D", lookback_days=120)
             n = self.journal.evaluate_outcomes(
-                make_price_lookup(bars), horizons=(1, 3, 5)
+                make_price_lookup(bars), horizons=HORIZONTE_LIVE
             )
             print(f"      {n} Ergebnis(se) zu Entscheidungen nachgetragen")
             self._analyse_closed_trades()

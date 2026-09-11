@@ -66,7 +66,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from alpaca_bot import account, data, universe  # noqa: E402
+from alpaca_bot import account, data, trend, universe  # noqa: E402
 from alpaca_bot.config import DATA_DIR  # noqa: E402
 
 DB = DATA_DIR / "spannen.sqlite"
@@ -114,6 +114,15 @@ IEX sieht ~2 % des US-Volumens (§G29). Bei duenn gehandelten Werten
 bedeutet das nicht 'weite Spanne', sondern 'seit Stunden kein Update'.
 Wer beides zusammenwirft, misst die Abwesenheit des Feeds und nennt sie
 Transaktionskosten."""
+
+ETF_DEZIL = 0
+"""Reservierte Dezil-Marke fuer die Trendbot-ETFs.
+
+Die Liquiditaetsdezile 1-10 beschreiben das AKTIEN-Universum. Die ETFs
+gehoeren nicht hinein - sie wuerden die Dezilgrenzen verschieben und
+waeren in der Auswertung nicht mehr von Aktien zu trennen. Deshalb eine
+eigene Marke ausserhalb des Wertebereichs, die in `bericht()` einen
+eigenen Block bekommt und aus 'Dezile 1-6' herausfaellt."""
 
 MAX_PLAUSIBEL_BPS = 2000.0
 """Ueber 20 % Spanne ist keine Spanne mehr, sondern eine kaputte Quote.
@@ -274,6 +283,23 @@ def _feed_block(df: pd.DataFrame, feed: str, *, mit_eroeffnung: bool) -> tuple[s
             median_16 = float(gehandelt.median())
             L.append(f"    -> Dezile 1-6 (dort kauft der Bot): Median "
                      f"{median_16:.1f} bps")
+
+    # Die Trendbot-ETFs, je Symbol einzeln. Bei acht Werten ist ein
+    # Median wertlos - entscheidend ist, ob EINER von ihnen teuer ist,
+    # denn die Allokation haelt sie alle.
+    etf = df[df["liq_dezil"] == ETF_DEZIL]
+    if not etf.empty:
+        L.append("")
+        L.append(f"    TREND-ETFs (trend.UNIVERSEN['broad']) - "
+                 f"`trend_schatten.PHASE2_CONFIG` rechnet mit "
+                 f"{trend.TrendConfig.kosten_bps:g} bps je Seite")
+        L.append(f"    {'ETF':<7}{'n':>6}{'Median':>10}{'75%':>9}{'90%':>9}")
+        for sym, teil in etf.groupby("symbol")["spanne_bps"]:
+            L.append(f"    {sym:<7}{len(teil):>6}{teil.median():>10.2f}"
+                     f"{teil.quantile(.75):>9.2f}{teil.quantile(.90):>9.2f}")
+        L.append(f"    -> Median ueber alle ETFs: {etf['spanne_bps'].median():.2f} bps"
+                 f"   |   schlechtester Einzelwert: "
+                 f"{etf.groupby('symbol')['spanne_bps'].median().max():.2f} bps")
     return "\n".join(L), median_16
 
 
@@ -356,6 +382,8 @@ def main() -> int:
     p.add_argument("--mit-eroeffnung", action="store_true",
                    help=f"auch die ersten {EROEFFNUNG_MINUTEN} Minuten nach "
                         f"Handelsbeginn mitzaehlen - NICHT verwertbar")
+    p.add_argument("--ohne-etfs", action="store_true",
+                   help="die Trendbot-ETFs NICHT mitmessen (Vorgabe: mitmessen)")
     p.add_argument("--trotz-geschlossener-boerse", action="store_true",
                    help="Messung erzwingen - das Ergebnis ist dann NICHT verwertbar")
     p.add_argument("--feed", choices=("iex", "delayed_sip"), default="iex",
@@ -389,6 +417,16 @@ def main() -> int:
           f"Feed: {args.feed}")
     print("=" * 78)
     syms = universe.load_universe(max_symbols=args.symbole)
+    etfs: list[str] = []
+    if not args.ohne_etfs:
+        # Die Trendbot-ETFs mitmessen. Sie kosten eine Handvoll Quotes,
+        # beantworten aber eine Frage, die sonst offen bliebe:
+        # `trend.TrendConfig` rechnet mit 2 bps je Seite, und genau so
+        # eine ungemessene Annahme hat beim Aktien-Bot das Vorzeichen
+        # gedreht (BEFUNDE §G39/§G54). Sie tragen ETF_DEZIL und fallen
+        # damit aus 'Dezile 1-6' heraus.
+        etfs = [x for x in trend.UNIVERSEN["broad"] if x not in set(syms)]
+        print(f"  Trend-ETFs: {len(etfs)} zusaetzlich ({', '.join(etfs)})")
     print(f"  Universum : {len(syms)} Symbole")
     if len(syms) < 200:
         print("      HINWEIS: Die Dezile werden INNERHALB der uebergebenen")
@@ -405,12 +443,19 @@ def main() -> int:
     for n in range(1, args.wiederholungen + 1):
         print(f"\n  [{n}/{args.wiederholungen}] Aufnahme ({args.feed}) ...",
               flush=True)
-        df = eine_aufnahme(syms, dezile, feed=args.feed)
+        df = eine_aufnahme(syms + etfs,
+                           {**dezile, **{e: ETF_DEZIL for e in etfs}},
+                           feed=args.feed)
         if df.empty:
             print("      keine verwertbaren Quotes")
         else:
-            print(f"      {len(df)} Quotes, Median "
-                  f"{df['spanne_bps'].median():.1f} bps")
+            aktien = df[df["liq_dezil"] != ETF_DEZIL]["spanne_bps"]
+            print(f"      {len(df)} Quotes, Median Aktien "
+                  f"{aktien.median():.1f} bps"
+                  if not aktien.empty else f"      {len(df)} Quotes")
+            e = df[df["liq_dezil"] == ETF_DEZIL]["spanne_bps"]
+            if not e.empty:
+                print(f"      {len(e)} ETF-Quotes, Median {e.median():.2f} bps")
         if n < args.wiederholungen:
             time.sleep(args.abstand)
 

@@ -1,0 +1,195 @@
+# Ausbruch-Werkstatt — kaufen, was gerade stark gestiegen ist
+
+> Angelegt 11.09.2026. **Voranmeldung: Dieses Dokument entsteht, bevor
+> ein einziges Ergebnis existiert.** Nach dem ersten Lauf wäre jede
+> Festlegung hier eine Erzählung über eine bereits bekannte Zahl.
+
+---
+
+## 1. Die Idee
+
+Alle 15 Minuten das ganze Universum absuchen. Springt ein Wert innerhalb
+weniger Stunden um X Prozent, einen großen Teil des Kapitals
+hineinlegen — in der Erwartung, dass die Bewegung weiterläuft. Verkauft
+wird nach fester Zeit, bei Gewinnziel oder am Stop.
+
+Bewusst ein volatiles System: große Gewinne sollen möglich sein, große
+Verluste werden dafür in Kauf genommen.
+
+**Das ist das Gegenteil der bisherigen Strategie.** `engine.py` kauft,
+was *gefallen* ist (Umkehr). Diese hier kauft, was *gestiegen* ist
+(Ausbruch/Momentum). Beide können nicht gleichzeitig recht haben — und
+genau deshalb ist es ein sauber getrennter, eigener Versuch und kein
+Parameter am bestehenden Bot.
+
+## 2. Warum das überhaupt einen Versuch wert ist
+
+Der Umkehr-Bot ist an der Kostenhürde gescheitert (§G54): Vorsprung
++0,11 % je Trade gegen 0,287 % Rundlaufkosten, Faktor 2,6 zu wenig.
+Eine Idee, die diese Hürde nehmen soll, muss **je Trade deutlich mehr
+verdienen** — nicht ein bisschen mehr.
+
+Genau das ist das Argument für Ausbrüche: Eine Bewegung von 10–20 % in
+Stunden ist zwei Größenordnungen über der Kostenschwelle. Wenn davon
+auch nur ein Bruchteil nachläuft, trägt es die Kosten mühelos.
+
+**Das Gegenargument, das genauso ernst zu nehmen ist:** Genau diese
+Werte haben die weitesten Spannen. Die gemessenen 12,2 bps sind der
+Median des *liquiden* Universums im Normalzustand. Ein Wert mitten in
+einem 20-%-Sprung liegt deutlich darüber. Deshalb ist `spanne_bps`
+einstellbar und sollte hier eher zu hoch als zu niedrig angesetzt
+werden.
+
+## 3. Was gebaut wurde
+
+| Datei | Zweck |
+|---|---|
+| `src/alpaca_bot/ausbruch.py` | Die Strategie. Reine Rechnung, keine I/O, 23 Stellschrauben. |
+| `src/alpaca_bot/ausbruch_daten.py` | Lokaler Bar-Vorrat als Parquet. Einmal laden, dann liest jeder Test von der Platte. |
+| `src/alpaca_bot/ausbruch_store.py` | `ausbruch.sqlite`: Läufe, Trades, Depotkurve, Symbol-Bestenliste, **Versuchszähler**. |
+| `scripts/46_ausbruch.py` | Oberfläche. Lokaler Server, Browser-UI, Live-Strom. |
+| `tests/test_ausbruch.py` | 20 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
+
+**Handelt nicht.** Kein Import von `trading.py`, kein Dienst ruft es
+auf. Der Weg zu echtem Geld führt über die Flotte
+(`UMBAUPLAN` Schritt 6), nie von hier.
+
+**Warum Browser statt Fenster:** `tkinter` fehlt in dieser
+Python-Installation (`_tkinter` nicht vorhanden). Der lokale Server
+braucht nur die Standardbibliothek, keine neue Abhängigkeit und keinen
+`ratelimit.QUOTAS`-Eintrag — er spricht mit niemandem außer 127.0.0.1.
+
+## 4. Die drei Stellen, an denen so ein Backtest lügt
+
+Alle drei sind zu unseren Ungunsten aufgelöst und durch Tests
+festgenagelt. **Wer eine davon umdreht, bekommt deutlich schönere Zahlen
+und ein System, das live verliert.**
+
+### 4.1 Lookahead beim Einstieg
+
+Das Signal entsteht auf dem **Schlusskurs** von Bar t. Gekauft wird zum
+**Eröffnungskurs** von Bar t+1.
+
+Wer stattdessen zum Schlusskurs von Bar t kauft, kauft zu dem Kurs, der
+den Anstieg gerade erzeugt hat. Das ist der häufigste Fehler in genau
+dieser Strategiefamilie und macht aus jedem Ergebnis eine Fiktion.
+Test: `test_kauf_erfolgt_zum_folgebar_nicht_zum_signalkurs`.
+
+### 4.2 Stop und Ziel in derselben Bar
+
+Berührt eine Bar den Stop **und** das Ziel, ist aus den Daten nicht zu
+erkennen, was zuerst kam. **Hier gilt immer der Stop.**
+
+Die Gegenannahme lässt jede Konfiguration mit weitem Ziel und engem Stop
+künstlich gut aussehen — und das ist genau die Ecke des Parameterraums,
+in die ein Sweep von selbst läuft.
+Test: `test_stop_gewinnt_wenn_eine_bar_beides_beruehrt`.
+
+### 4.3 Survivorship — hier härter als anderswo
+
+Das Universum kennt nur **heute gelistete** Symbole. Bei einer
+Ausbruch-Strategie ist das der größte Einzelvorbehalt des ganzen
+Vorhabens: Der Wert, der +40 % macht und ein halbes Jahr später
+verschwindet, ist gar nicht erst in den Daten. Übrig bleiben die
+Ausbrüche, die *überlebt* haben.
+
+§G11 beziffert den Schein-Vorteil auf 2–4 Prozentpunkte pro Jahr — für
+dieses Segment eher darüber. **Jede Zahl aus dieser Werkstatt ist eine
+Obergrenze.** Der Hinweis steht deshalb dauerhaft im Kopf der
+Oberfläche, nicht hinter einem Aufklapp-Pfeil.
+
+## 5. Der Versuchszähler — der eigentliche Zweck der Datenbank
+
+Eine Oberfläche zum Herumprobieren **ist** eine Maschine zur Herstellung
+von Scheingewinnern. Bei N Versuchen liegt das Zufallsmaximum bei
+`sqrt(2 ln N)` (§B2). Das lässt sich nicht abschalten — nur zählen.
+
+Deshalb:
+
+* Jeder Lauf wird **vor** der Rechnung angemeldet. Ein Lauf, der erst
+  nach dem Ergebnis gezählt würde, ließe sich stillschweigend verwerfen,
+  wenn er nicht gefällt.
+* `lauf_loeschen()` entfernt Trades und Kurve, **nicht** den
+  Zählereintrag — der Lauf bleibt als `verworfen` stehen.
+* Die Schwelle steht bei jedem Ergebnis neben dem t-Wert.
+
+**Getrennt von `fleet.schwelle_sigma()`.** Der Flottenzähler zählt
+angemeldete Vorwärtsbots; Historienläufe kosten dort bewusst keinen
+Platz (`BETRIEBSPLAN` §4). Hier läuft ein eigener Zähler für eine eigene
+Frage.
+
+## 6. Das Gate — vorab festgelegt, bevor eine Zahl existiert
+
+Die Werkstatt darf eine Idee **verwerfen**, nie abnehmen
+(`BETRIEBSPLAN` §4). Der Weg nach vorn ist ein Flottenbot im
+Vorwärtsschatten — und dafür muss **alles** davon zutreffen:
+
+1. **t über der Zufallsschwelle** von `ausbruch_store.schwelle_sigma()`,
+   überlappungskorrigiert, bei mindestens **60 Handelstagen** mit Trades.
+2. **Mindestens 200 Trades.** Darunter trägt die Streuungsschätzung nicht.
+3. **Trägt bei 30 bps Spanne**, nicht nur bei 12,2. Wenn eine
+   Konfiguration nur mit der optimistischen Kostenannahme funktioniert,
+   ist sie keine Strategie, sondern eine Kostenwette.
+4. **Trägt in beiden Jahreshälften.** Ein Ergebnis, das allein aus
+   Januar–Juni kommt, ist ein Zeitraum, kein Effekt.
+5. **Hängt nicht an fünf Symbolen.** Die Top-5 der Bestenliste dürfen
+   nicht mehr als 50 % des Gesamtgewinns tragen.
+6. **Der maximale Rückgang ist ausgehalten worden** — also vorab
+   benannt, nicht nachträglich als „damit muss man leben" erklärt.
+
+**Fällt eines durch, gibt es keinen Flottenplatz.** Und diese sechs
+Punkte werden nicht nachträglich gelockert (§B2) — auch nicht, wenn
+fünf davon erfüllt sind.
+
+## 7. Ehrliche Vorbehalte
+
+* **Der Nachrichtenfaktor fehlt.** Ein 20-%-Sprung hat fast immer eine
+  Meldung als Ursache (Studienergebnis, Übernahme, Zahlen). Ob die
+  Bewegung nachläuft, hängt an der Art der Meldung — und die kennt diese
+  Rechnung nicht. `news.py` und `gdelt.py` existieren im Projekt; sie
+  anzubinden wäre der nächste ehrliche Schritt, nicht ein weiterer
+  Parameter.
+* **Ein Jahr ist wenig.** 2025 war ein steigender Markt. Momentum
+  funktioniert in steigenden Märkten fast immer und bricht in Wenden
+  zusammen. Ein Ergebnis aus 2025 allein sagt wenig; 2018 und 2022
+  gehören dazu.
+* **Die Datenlage ist besser als die Handelbarkeit.** 15-Minuten-Bars
+  sagen nichts darüber, ob zum Eröffnungskurs des Folgebars wirklich
+  Stück verfügbar waren. Bei einem Wert, der gerade 20 % gesprungen ist,
+  ist das keine Kleinigkeit.
+* **Diese Idee ist alt und gut untersucht.** Momentum auf kurzen
+  Horizonten ist eines der meistgetesteten Muster überhaupt. Dass es hier
+  zu finden wäre, ist nicht ausgeschlossen — aber die Vorannahme sollte
+  sein, dass die einfache Fassung nicht trägt.
+
+## 8. Bedienung
+
+```
+python scripts/46_ausbruch.py          # Browser öffnet sich
+python scripts/46_ausbruch.py --port 9000 --kein-browser
+```
+
+**Schritt 1 — Kursdaten.** Einmalig. 600 Symbole × ein Jahr
+15-Minuten-Bars sind rund 4 Millionen Zeilen und etwa 20 Minuten
+Ladezeit. Danach liest jeder Testlauf von der Platte und braucht
+Sekunden. Der Abruf ist fortsetzbar: Ein Abbruch kostet nichts.
+
+**Schritt 2 — Einstellen.** Alle 23 Stellschrauben, gruppiert nach
+Einstieg, Filter, Position, Ausstieg, Kosten, Betrieb. Die
+Kostenvorschau rechnet **vor** dem Lauf aus, wie viel Kostenlast die
+gewählte Haltedauer im Jahr erzeugt.
+
+**Schritt 3 — Laufen lassen.** Fortschrittsbalken, Live-Kontostand,
+Live-Gewinn, offene Positionen und ein Protokoll, das mitläuft.
+Abbrechen jederzeit möglich.
+
+Danach: Kennzahlen mit t-Wert gegen die Zufallsschwelle, die
+Bestenliste der Symbole, alle Trades und die Liste aller bisherigen
+Läufe.
+
+**Speicherorte** (nicht unter `~/Documents`, macOS-TCC):
+
+```
+~/Library/Application Support/alpaca-bot/data/intraday/15Min_2025/
+~/Library/Application Support/alpaca-bot/data/ausbruch.sqlite
+```

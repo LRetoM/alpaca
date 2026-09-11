@@ -5679,6 +5679,379 @@ Kandidat.** Kein `costs.py`-Bezug, kein Zählerplatz.
 
 ---
 
+## G54. Die gemessene Spanne dreht das Vorzeichen der Strategie (11.09.2026)
+
+**Anlass:** Zwischenbilanz, von der geplanten 12.09. auf den 11.09.
+vorgezogen (der 12.09. ist ein Samstag, kein Handelstag).
+
+### Zuerst: die Datengrundlage aus §3.5 ist erfüllt
+
+`BETRIEBSPLAN` §3.5 hat am 04.09.2026 vorab festgelegt, wann der
+`costs.py`-Wert gewechselt werden darf: **mindestens 4 Handelstage** und
+**Spannweite der Tagesmediane < 4 bps**. Beides liegt jetzt vor.
+
+| Handelstag | Aufnahmen | Median Dezile 1–6 |
+|---|---:|---:|
+| 03.09.2026 | 3 | 12,20 bps |
+| 04.09.2026 | 6 | 12,23 bps |
+| 08.09.2026 | 6 | 11,73 bps |
+| 09.09.2026 | 6 | 11,51 bps |
+| 10.09.2026 | 6 | 12,85 bps |
+
+**5 Handelstage, Spannweite 1,34 bps, Median der Tagesmediane 12,2 bps.**
+Feed `delayed_sip` (konsolidierte NBBO), Quotes < 20 min alt, erste
+20 Minuten nach Eröffnung ausgeschlossen. Die Momentaufnahme aus §G51
+war also keine: der Wert ist stabil.
+
+### Der Test, den §3.4 für diesen Fall vorgesehen hat
+
+`scripts/10_simulate.py` nimmt `--spread` entgegen. **Zweimal derselbe
+Lauf**, Live-Konfiguration, 1.201 Symbole, 8 Jahre, nur die Spanne
+verändert — `costs.py` wurde dabei **nicht** angefasst:
+
+| | 5,0 bps (Annahme) | **12,2 bps (gemessen)** |
+|---|---:|---:|
+| CAGR über 8 Jahre | +1,95 % | **−2,84 %** |
+| Erwartungswert je Trade | +0,07 % | **−0,10 %** |
+| Rendite je Trade, gruppiert und marktbereinigt | +0,0245 % (t = 0,14) | −0,1229 % (t = −0,68) |
+| Kosten gesamt | 6.114 $ | 8.649 $ |
+| Trades | 3.682 | 3.681 |
+| Trefferquote | 50,1 % | 48,6 % |
+
+**Das Vorzeichen kippt.** Und es kippt auf einem Universum, dessen
+Survivorship-Bonus derselbe Lauf mit **+2 bis +4 Prozentpunkten pro
+Jahr** beziffert — die ehrliche Zahl liegt also eher bei −5 bis −7 %/Jahr.
+
+### Der Rundlauf-Breakeven, neu gerechnet
+
+`costs.breakeven_move_pct`, Slippage 2 bps wie in §3.4:
+
+| Spanne | Breakeven je Rundlauf | gegen +0,110 % | bei ~50 Rundläufen p. a. |
+|---:|---:|---:|---:|
+| 5,0 bps (Annahme) | 0,142 % | +0,032 pp | −1,6 %/Jahr |
+| **12,2 bps (gemessen)** | **0,287 %** | **+0,177 pp** | **−8,8 %/Jahr** |
+
+Der Vorsprung müsste **0,287 % je Trade** betragen. Gemessen sind
+0,110 % — **Faktor 2,61 zu wenig**. §A sprach von +29 %, die fehlen.
+Es sind 161 %.
+
+### Keine Haltedauer schließt die Lücke
+
+`TAKTIKWECHSEL` §3 verlangt genau diese Rechnung („Vorsprung je Trade
+als Funktion der Haltedauer, ausgewertet je Trade statt als
+Endrendite") und sie war nie gemacht. Aus dem 15-Jahre-Lernlauf
+`d44ad22a8731` (20 Achsen, 790 Symbole) rekonstruiert — Bruttoertrag je
+Rundlauf = Jahresrendite / Rundläufe je Positionsplatz, zuzüglich der in
+der Simulation bereits abgezogenen Kosten (5 bps Spanne + 3 bps
+Slippage = 0,162 % je Rundlauf):
+
+| Achse | Rundläufe je Platz p. a. | Brutto je Rundlauf | netto bei 12,2 bps (Schwelle 0,307 %) |
+|---|---:|---:|---:|
+| `halten_40` | 31,2 | 0,296 % | **−0,011 pp** |
+| `halten_lang` (10 T) | 34,1 | 0,282 % | −0,025 pp |
+| `halten_20` | 31,1 | 0,274 % | −0,033 pp |
+| `ohne_regime` | 56,9 | 0,288 % | −0,018 pp |
+| `basis` (5 T) | 49,1 | 0,182 % | −0,125 pp |
+| `halten_kurz` (3 T) | 71,4 | 0,207 % | −0,100 pp |
+
+**Keine der 20 Achsen trägt.** Die beste (`halten_40`) verfehlt die
+Schwelle um 0,011 Prozentpunkte — und das vor Abzug des Survivorship-
+Bonus. `halten_20` und `halten_40` erzeugen fast identisch viele Trades
+(467,2 gegen 467,3 p. a.): ab etwa 20 Tagen bindet der Zeitausstieg
+kaum noch, die Kurve läuft flach aus. Ein noch längerer Horizont ist
+deshalb keine offene Frage mehr.
+
+> **Vorbehalt zur Rekonstruktion.** Die Bruttospalte ist gerechnet, nicht
+> direkt gemessen: Der Lernlauf speichert nur Jahresrendite und
+> Trade-Zahl, nicht `erwartungswert_pro_trade`. Die Näherung setzt
+> 15 durchgehend besetzte Positionsplätze an und verkettet arithmetisch
+> statt geometrisch. Die **direkt gemessenen** Zahlen sind die der
+> Tabelle darüber (`basis`, 8 Jahre, zwei Läufe) — und sie zeigen
+> dasselbe Vorzeichen.
+
+### Das Einstellungskriterium greift NICHT — genau gelesen
+
+`TAKTIKWECHSEL` §7 verlangt **beides**:
+
+| Bedingung | Stand |
+|---|---|
+| Spanne **über 15 bps**, durch Nicht-IEX-Quelle bestätigt | **NEIN** — 12,2 bps, bestätigt, aber unter 15 |
+| Keine Haltedauer 5–40 Tage über der Kostenschwelle | **JA** — siehe Tabelle |
+
+**Eines von zwei.** Das Kriterium ist damit nicht erfüllt, und es wird
+nicht nachträglich auf „eines reicht" gelockert (§B2). Festgehalten ist
+aber, dass der Puffer nur noch aus 2,8 bps Spanne besteht.
+
+### Was daraus NICHT folgt
+
+* **Kein neuer Wert in `costs.py`.** §3.5 hat die Reihenfolge vorab
+  festgelegt: erst die B11-Entscheidung am 10.10. mit der alten Basis,
+  dann der Wechsel. Diese beiden Läufe haben `costs.py` nicht berührt —
+  sie sind Übergabeparameter an `simulate.run`, keine Änderung.
+* **Keine Änderung an der Handelslogik.** Gilt unverändert bis 10.10.
+* **Keine Stilllegung des Umkehr-Bots.** §7 ist nicht erfüllt.
+
+### Was daraus folgt
+
+Der Engpass ist ab jetzt benannt und beziffert: **die Strategie muss
+ihren Vorsprung je Trade um Faktor 2,6 heben, und keine der 34 bisher
+gemessenen Achsen tut das.** Das ist die belastbarste negative Aussage,
+die das Projekt bisher hat — und sie stützt die Produktentscheidung vom
+04.09. (`TRENDBOT` §5b), den Schwerpunkt auf die ETF-Allokation zu legen,
+ohne dass dafür ein Gate umgangen werden musste.
+
+---
+
+## G55. `evaluate_outcomes` wertet nur 300 von 1.031 Symbolen aus (11.09.2026)
+
+**Der Fund.** Der Tagesbericht meldete „60 Entscheidung(en) ohne
+bewertetes Ergebnis". Nachgesehen: seit dem 02.09.2026 hat **keine
+einzige** Entscheidung mehr ein 5-Tage-Ergebnis bekommen.
+
+```
+02.09.  35 Entscheidungen,  35 ohne Ergebnis
+03.09.  54                  54
+04.09.  61                  61
+08.09.  13                  13
+09.09.  51                  51
+10.09.  12                  12
+```
+
+**Die Bewertung läuft.** `daemon._maybe_evaluate_outcomes` lief zuletzt
+am 10.09.2026 um 14:02 UTC und schrieb 93 Zeilen. Der Fehler steckt in
+der Auswahl der Symbole, für die Kurse geladen werden:
+
+```python
+symbols = (vorrang + rest)[:300]     # daemon.py:335
+```
+
+`rest` ist **alphabetisch sortiert**. Bei 1.031 Symbolen in `decisions`
+wird ab `DPZ` nichts mehr geladen — **731 Symbole, 71 %, sind
+systematisch unerreichbar.**
+
+**`vorrang` fängt das nicht auf.** Die Vorrangliste sammelt
+Entscheidungen, zu denen *gar kein* Ergebnis existiert:
+
+```python
+fehlend = decisions[~decisions["decision_id"].isin(offen["decision_id"])]
+```
+
+Der Vergleich läuft über `decision_id`, **nicht über (decision_id,
+horizon)**. Eine Entscheidung, deren 1- und 3-Tage-Ergebnis bereits
+steht und der nur der 5-Tage-Wert fehlt, gilt damit als erledigt. Genau
+das ist der Normalfall: Am Tag der Bewertung sind 1 und 3 Tage
+verfügbar, 5 noch nicht — und am nächsten Tag fällt das Symbol durch
+das alphabetische Raster. `vorrang` hat deshalb nur **18** Einträge
+statt der nötigen Hunderte.
+
+**Der Umfang, gemessen:**
+
+| | Zahl |
+|---|---:|
+| Live-Entscheidungen gesamt | 685 |
+| davon ohne 5-Tage-Ergebnis | **277 (40 %)** |
+| davon Symbol außerhalb des 300er-Fensters | **128 — dauerhaft unerreichbar** |
+
+**Das ist derselbe Fehler zum zweiten Mal.** Der Kommentar über der
+Zeile beschreibt ihn bereits: „Früher stand hier `sorted(...)[:200]` —
+eine rein alphabetische Auswahl. Solange weniger als 200 Symbole
+zusammenkommen, fällt das nicht auf (aktuell 157); darüber hinaus würde
+alles ab etwa ‚T‘ systematisch NIE ausgewertet." Die Reparatur hob die
+Grenze auf 300 und fügte `vorrang` hinzu — aber `vorrang` prüft die
+falsche Schlüsselgröße, und aus 157 Symbolen sind 1.031 geworden.
+
+**Folge.** `journal.decision_quality()` — laut eigenem Docstring „die
+wichtigste Auswertung im ganzen System" — rechnet auf 60 % der
+Live-Entscheidungen. Die Auswahl ist alphabetisch und damit
+voraussichtlich unkorreliert mit der Rendite: es ist ein Verlust an
+Trennschärfe, keine Verzerrung in eine Richtung. Bei einer ohnehin
+knappen Live-Stichprobe ist das trotzdem teuer.
+
+### Behoben am selben Tag (11.09.2026)
+
+1. `daemon._symbole_mit_offenen_horizonten()` vergleicht jetzt das **Paar**
+   `(decision_id, horizon)`. Die Horizonte stehen als `HORIZONTE_LIVE`
+   am Modul, damit die Symbolauswahl weiß, was sie offenhalten muss —
+   vorher stand die Zahlenreihe nur am Aufruf.
+2. Die Obergrenze liegt bei `MAX_SYMBOLE_JE_LAUF = 1.500` und ist ein
+   Sicherheitsnetz, kein Filter: Greift sie doch, trifft sie zuerst die
+   **fertigen** Symbole. Ein Symbol mit offenem Horizont kann sie nicht
+   kosten — genau das prüft ein eigener Test.
+3. **Zweite Fundstelle, beim Reparieren entdeckt.**
+   `scripts/13_tagesbericht.py:121` trug noch die *Urfassung* des
+   Fehlers: `sorted(...)[:200]`, rein alphabetisch, ohne Vorrangliste.
+   Im Daemon war sie längst ersetzt, im Bericht nicht. Bei 1.046
+   Symbolen fiel dort alles ab etwa „C" heraus. Ebenfalls auf die neue
+   Methode gezogen.
+4. Regressionstest `tests/test_ergebnisfenster.py`, 6 Fälle. Er enthält
+   die **alte Logik als Vergleichsfunktion** und prüft ausdrücklich, dass
+   sie durchfällt — ein Test, den auch der kaputte Code besteht, sichert
+   nichts.
+
+**Wirkung, gemessen nach dem Nachtrag:**
+
+| | vorher | nachher |
+|---|---:|---:|
+| Symbole im Ladefenster | 300 | **1.046 (alle)** |
+| Live-Entscheidungen ohne 5-Tage-Wert | 277 | **222** |
+| Ergebniszeilen gesamt | 55.885 | **99.825** |
+
+Die verbleibenden 222 sind **kein Rest des Fehlers**: Sie stammen alle
+vom 02.09. oder später. `make_price_lookup` setzt am Bar *nach* der
+Entscheidung an, ein 5-Tage-Wert für den 02.09. braucht deshalb Kurse bis
+zum 11.09. — den heute noch nicht geschlossenen Tag. Sie füllen sich von
+selbst.
+
+Dienste nach `CLAUDE.md` vollständig neu gestartet, Tests und
+Health-Check davor und danach grün.
+
+---
+
+## G56. B11 — Zwischenschau vom 11.09.2026, keine Entscheidung
+
+**`BETRIEBSPLAN` §4 sieht für ca. 12.09. eine reine Zwischenschau vor,
+ausdrücklich ohne Entscheidung.** Der 12.09.2026 ist ein Samstag; die
+Schau wurde deshalb auf den 11.09. vorgezogen. Der Entscheidungstermin
+bleibt der **10.10.2026** mit allen vier Kriterien aus §3.3.
+
+```
+python scripts/21_fleet.py --kriterien B11_dyn_ausstieg_live
+```
+
+| Kriterium | Stand | Soll |
+|---|---|---|
+| 1. t über Zufallsschwelle | 1,41 | > 2,88 |
+| 2. auswertbare Handelstage | 14 | ≥ 20 |
+| 3. Verlängerungsquote | **33,3 % — erfüllt** | 10–60 % |
+| 4. Median der verlängerten Trades | **−0,0133** | > 0 |
+
+### Was neu ist: Kriterium 4 steht negativ, aber auf 7 Trades
+
+§7.1 hatte Kriterium 4 als eine der Fragen geführt, die „sicher kommen":
+„~22 verlängerte Trades, reine Vorzeichenfrage". Nachgezählt:
+
+| | Zahl |
+|---|---:|
+| B11-Ausstiege gesamt | 36 |
+| davon Frist erreicht (`bars_held >= 5`) | 21 |
+| davon verlängert | **7** |
+| davon im Plus | 2 (28,6 %) |
+
+**Sieben Trades nach 14 Tagen.** Linear auf die 31 auswertbaren Tage des
+10.10. hochgerechnet: **etwa 15**, nicht 22. Bei 15 Beobachtungen ist
+eine Vorzeichenfrage mit 28 % Trefferquote noch gut mit Zufall
+vereinbar — zwei von sieben Positiven liegen bei einem fairen Vorzeichen
+bei p ≈ 0,45 einseitig.
+
+**Diese Hochrechnung steht hier vor dem Termin, nicht danach** — aus
+demselben Grund wie §G22: Am 10.10. wäre sie eine Erklärung für ein
+unerwünschtes Ergebnis, heute ist sie eine Vorhersage. **Der Vertrag aus
+§3.3 wird nicht geändert.** Fällt Kriterium 4 durch, gilt das; es ist
+nur festgehalten, dass die Datenbasis dünner ausfällt als §7.1 erwartet
+hat.
+
+### Der Nebenbefund, der die Richtung dreht
+
+Innerhalb von B11 schneiden die **verlängerten** Positionen besser ab als
+die, die zum Stichtag verkauft wurden:
+
+| | n | Median |
+|---|---:|---:|
+| verlängert (`bars_held > 5`) | 7 | **−1,33 %** |
+| nicht verlängert (`bars_held == 5`) | 14 | −3,94 % |
+
+Kriterium 4 prüft das **absolute** Vorzeichen, nicht diesen Vergleich —
+und das bleibt so. Aber es erklärt, warum ein negativer Median hier
+nicht dasselbe heißt wie „die Regel schadet": Der Zeitraum war für
+beide Gruppen schlecht (Depot −1,85 % seit dem 18.08., SPY −1,24 %).
+
+### Der Betrieb in der Zwischenschau
+
+| | Stand 11.09.2026 |
+|---|---|
+| Health-Check | **GRÜN** — die befristete Ausnahme aus §8.1 (Stichtag 10.09.) ist eingehalten, der §G36-Zustand aus dem Fenster gewandert |
+| Regelabgleich | keine Abweichungen, 9 Regeln, 0 Verstöße |
+| Risiko-Dach | frei, Drawdown 4,8 % (Grenze 20 %), Exposure 90 % |
+| Tests | 48 Prüfungen, 0 Fehler, beide Schichten grün |
+| Kapital | 104.644 $ |
+| Depot seit 15.08. | −3,60 % gegen SPY −1,91 % |
+| Slippage-Median | +0,0 bps über 284 Orders |
+| `shadow.pruefungen()` | 9 von 11 grün; Nr. 10 und 11 weiter FEHL (§G16, bekannt) |
+
+Die Depot-Unterrendite von 1,7 Prozentpunkten über 18 Handelstage ist
+**kein Befund** (§5.3) und wird hier nur zur Vollständigkeit geführt.
+
+---
+
+## G57. Ausbruch-Werkstatt gebaut — Voranmeldung, noch kein Ergebnis (11.09.2026)
+
+**Anlass:** Nutzerentscheidung. Nach §G54 (Umkehr-Strategie trägt die
+Kosten nicht) wird eine Idee der Gegenrichtung geprüft: kaufen, was
+gerade stark gestiegen ist, in der Erwartung, dass die Bewegung
+nachläuft.
+
+**Das Argument dafür, in einer Zahl.** Der Umkehr-Bot scheitert an
+0,287 % Rundlaufkosten gegen +0,11 % Vorsprung je Trade. Eine Bewegung
+von 10–20 % in Stunden liegt zwei Größenordnungen darüber — läuft davon
+auch nur ein Bruchteil nach, ist die Kostenhürde kein Thema mehr.
+
+**Das Gegenargument, gleich stark.** Genau diese Werte haben die
+weitesten Spannen. Die 12,2 bps aus §G54 sind der Median des *liquiden*
+Universums im Normalzustand, nicht der eines Wertes mitten im Sprung.
+
+**Gebaut:** `ausbruch.py` (Strategie, 23 Stellschrauben),
+`ausbruch_daten.py` (Parquet-Vorrat für 15-Minuten-Bars),
+`ausbruch_store.py` (Läufe/Trades/Bestenliste + eigener Versuchszähler),
+`scripts/46_ausbruch.py` (lokale Weboberfläche mit Live-Anzeige),
+`tests/test_ausbruch.py` (20 Tests). Vollständige Voranmeldung mit
+Sechs-Punkte-Gate in `docs/AUSBRUCH.md` — **geschrieben, bevor der erste
+Lauf existierte.**
+
+### Die drei Lügen-Stellen, vorab zu unseren Ungunsten aufgelöst
+
+| Stelle | Entscheidung | Test |
+|---|---|---|
+| Lookahead | Signal auf Schluss von Bar t, **Kauf zum Open von t+1** | `test_kauf_erfolgt_zum_folgebar_nicht_zum_signalkurs` |
+| Stop und Ziel in einer Bar | **immer der Stop** | `test_stop_gewinnt_wenn_eine_bar_beides_beruehrt` |
+| Survivorship | dauerhaft im Kopf der Oberfläche, nicht wegklickbar | `test_hinweise_nennen_survivorship_und_kosten` |
+
+Jede dieser drei Entscheidungen macht die Zahlen schlechter. Das ist der
+Punkt: Die Gegenannahme lässt genau die Ecke des Parameterraums gut
+aussehen, in die ein Sweep von selbst läuft.
+
+### Zwei Fehler beim Bauen gefunden
+
+1. **Schluss-Sperre prüfte einen Punkt statt eines Bereichs.** Bei
+   `schluss_sperre_bars=3` waren die Bars t+1 und t+2 erlaubt und nur
+   t+3 gesperrt — das Gegenteil der Absicht. Beim Vorgabewert 1 tun
+   beide Fassungen dasselbe, deshalb wäre es ohne Test nie aufgefallen.
+   Behoben, Regressionstest `test_schlusssperre_deckt_den_ganzen_bereich_ab`.
+2. **Ein Testdatensatz löste zwei Signale statt einem aus** und prüfte
+   damit das Zusammenspiel mehrerer Regeln statt der einen gemeinten
+   Frage. Die Engine lag richtig, der Test war unscharf.
+
+### Der Versuchszähler ist der eigentliche Zweck der Datenbank
+
+Eine Oberfläche zum Herumprobieren **ist** eine Maschine zur Herstellung
+von Scheingewinnern (§B2). Das lässt sich nicht abschalten, nur zählen:
+Jeder Lauf wird **vor** der Rechnung angemeldet, `lauf_loeschen()`
+entfernt die Daten aber **nicht** den Zählereintrag, und die Schwelle
+`sqrt(2 ln N)` steht bei jedem Ergebnis neben dem t-Wert. Getrennt vom
+Flottenzähler, weil Historienläufe dort bewusst keinen Platz kosten
+(`BETRIEBSPLAN` §4).
+
+### Stand
+
+Rauchtest über 10 Symbole: 286 Signale, 79 Trades, +4,7 % über 2025,
+t = 1,06 bei 56 Handelstagen — **kein Befund**, und bei 10 Symbolen auch
+keiner zu erwarten. Der Lauf zählt trotzdem als Versuch Nr. 1.
+
+Der Vorrat für 600 Symbole wird geladen. **Es liegt noch kein Ergebnis
+vor, das eine Aussage trüge** — dieser Eintrag hält fest, was gebaut und
+was vorab festgelegt wurde, nicht was gefunden wurde.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

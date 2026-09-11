@@ -417,6 +417,21 @@ je Tag in `spannen.sqlite`. Der Wechsel wird vorbereitet, sobald
 Handelslogik (`EngineConfig`) und keine an `costs.py` vor dem 10.10. Der
 laufende Betrieb und alle laufenden Messungen bleiben unberührt.
 
+> **Die Bedingung ist erfüllt — Stand 11.09.2026 (`BEFUNDE.md` §G54).**
+> 5 Handelstage (03./04./08./09./10.09.), Tagesmediane 11,51–12,85 bps,
+> **Spannweite 1,34 bps** gegen die geforderten < 4. Der Median der
+> Tagesmediane liegt bei **12,2 bps**. Damit ist der Wechsel
+> *vorbereitungsreif* — er findet trotzdem erst **nach dem 10.10.** statt,
+> genau wie oben festgelegt. Die Stabilität ist das eigentlich Neue: §G51
+> war eine Momentaufnahme an einem Tag, jetzt sind es fünf.
+>
+> **Was vorgezogen wurde und warum es erlaubt war:** Zwei Läufe von
+> `10_simulate.py --spread 5.0` und `--spread 12.2` über 8 Jahre. Das
+> ändert `costs.py` nicht — die Spanne ist dort ein Übergabeparameter an
+> `simulate.run`. Ergebnis: CAGR **+1,95 % → −2,84 %**, Erwartungswert je
+> Trade **+0,07 % → −0,10 %**. Die laufende B11-Messung ist davon
+> unberührt; sie rechnet weiter mit der alten Basis.
+
 ---
 
 ## 4. Zeitplan — wie lange laufen lassen
@@ -426,7 +441,7 @@ B11 ist seit **18.08.2026** angemeldet. Alle Tagesangaben zählen ab dort.
 | Zeitraum | Was passiert | Was NICHT passiert |
 |---|---|---|
 | **jetzt – ca. 12.09.** (≈19 roh / **15 auswertbar**) | B11 und B00 laufen unverändert und sammeln Daten. | Keine Parameteränderung, keine neue Hypothese, **keine neue Bot-Anmeldung** |
-| **ca. 12.09.** | Erste Zwischenauswertung — **reine Zwischenschau**. Kriterium 2 ist an diesem Tag noch nicht erfüllbar (15 < 20 auswertbare Tage). | **Keine Entscheidung.** Auch kein Abbruch, wenn es schlecht aussieht. |
+| **~~ca. 12.09.~~ 11.09.2026 — erledigt** | Erste Zwischenauswertung — **reine Zwischenschau**. Kriterium 2 war an diesem Tag noch nicht erfüllbar (14 < 20 auswertbare Tage). Vorgezogen, weil der 12.09.2026 ein Samstag ist. Ergebnis: `BEFUNDE.md` §G56. | **Keine Entscheidung** getroffen. Auch kein Abbruch. |
 | **ca. 10.10.** (≈39 roh / **31 auswertbar**) | Entscheidung über `B11_dyn_ausstieg_live` nach §3.3 | — |
 
 ### Rohe gegen auswertbare Handelstage
@@ -648,7 +663,7 @@ ist das Risiko-Dach Pflicht.**
 | 1 | Bots laufen lassen, nichts ändern | jetzt – ~12.09. | — |
 | 2 | ~~Risiko-Dach bauen~~ | **erledigt 15.08.** | — |
 | 3 | ~~Kapitalflüsse erfassen~~ | **erledigt 15.08.** | — |
-| 4 | Zwischenauswertung (**keine** Entscheidung) | ~12.09. | — |
+| 4 | ~~Zwischenauswertung (**keine** Entscheidung)~~ | **erledigt 11.09.** | §G56 |
 | 5 | Entscheidung über `B11_dyn_ausstieg_live` | ~10.10. | alle 4 Kriterien aus §3.3, geprüft mit `--kriterien` |
 | 6 | Echtgeld erwägen | frühestens danach | Slippage-Median < 8 bps **und** Risiko-Dach steht |
 
@@ -722,6 +737,16 @@ Vier Schritte, in dieser Reihenfolge:
    kostet keinen Versuchszähler und darf verwerfen (§4). Der nächste
    Kandidat ist die auffälligste nie gemessene Achse:
 
+> **Überholt seit 26.08.2026, hier nachgezogen am 11.09.2026.** Der
+> Absatz unten sagt, `exit_score` sei nie gegengeprüft. Der Lernlauf
+> `d44ad22a8731` hat ihn als `exit_score_null` (t = +1,03) und
+> `exit_score_hoch` (t = −0,31) gegen die Basis gemessen — beide weit
+> unter der Schwelle, beide ohne Befund. Ebenso `trail_after_atr`
+> (`trailing`, t = −3,53, das klarste Negativsignal des Laufs) und
+> `reenter_cooldown_days` (`kein_cooldown`, t = +0,28). **Damit ist die
+> Liste der ungemessenen Achsen leer.** Der Absatz bleibt stehen, weil er
+> die Begründung trägt, warum diese Achsen überhaupt drankamen.
+>
 > **`exit_score` (0,10) wurde nie gegengeprüft** — obwohl §E ihn
 > ausdrücklich als den Wert ausweist, der `target_atr` wirkungslos macht
 > („Ausstieg am selben Tag zum selben Kurs, nur mit anderem Etikett").

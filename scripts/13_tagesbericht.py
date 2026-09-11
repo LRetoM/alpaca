@@ -22,6 +22,7 @@ import sys
 import pandas as pd
 
 from alpaca_bot import account, costs, data, live
+from alpaca_bot.daemon import HORIZONTE_LIVE, Daemon
 from alpaca_bot.journal import Journal, make_price_lookup
 from alpaca_bot.state import Store
 
@@ -117,10 +118,18 @@ def main() -> int:
     print("\n[4] WELCHE BEGRUENDUNG HAT SICH BEWAEHRT?")
     dec = j.table("decisions")
     if not dec.empty:
-        symbols = sorted(dec["symbol"].dropna().unique())[:200]
+        # Dieselbe Auswahl wie im Daemon (BEFUNDE §G55). Hier stand bis
+        # zum 11.09.2026 `sorted(...)[:200]` - die Urfassung des Fehlers,
+        # die im Daemon laengst ersetzt war: rein alphabetisch, und bei
+        # 1.046 Symbolen fiel alles ab etwa "C" heraus. Der Bericht trug
+        # damit weniger nach, als er konnte, und tat es unbemerkt.
+        symbols = Daemon._symbole_mit_offenen_horizonten(
+            dec, j.table("outcomes"), HORIZONTE_LIVE
+        )
         try:
             bars = data.get_bars(symbols, "1D", lookback_days=120)
-            added = j.evaluate_outcomes(make_price_lookup(bars), horizons=(1, 3, 5))
+            added = j.evaluate_outcomes(make_price_lookup(bars),
+                                        horizons=HORIZONTE_LIVE)
             if added:
                 print(f"    {added} Ergebnis(se) nachgetragen.")
         except Exception as e:  # noqa: BLE001

@@ -1,0 +1,181 @@
+/* Ausbruch-Werkstatt - Oberflaeche.
+   Dunkel, weil das Protokoll waehrend eines Laufs im Mittelpunkt steht
+   und lange angesehen wird. */
+
+:root {
+  --bg:        #12151c;
+  --bg-block:  #1a1e27;
+  --bg-tief:   #0d1015;
+  --rand:      #2a3040;
+  --text:      #dde3ee;
+  --text-matt: #8c96ab;
+  --gut:       #3ddc84;
+  --schlecht:  #ff6b6b;
+  --warn:      #ffb454;
+  --akzent:    #5aa9ff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 16px;
+  padding: 18px 24px;
+  background: var(--bg-block);
+  border-bottom: 1px solid var(--rand);
+}
+.marke h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+.marke p  { margin: 3px 0 0; color: var(--text-matt); font-size: 13px; }
+.zaehler { display: flex; gap: 10px; }
+
+.warnband {
+  background: #3a2a12;
+  border-bottom: 1px solid #5a4220;
+  color: #ffd9a0;
+  padding: 10px 24px;
+  font-size: 12.5px;
+}
+.warnband strong { color: var(--warn); }
+
+main {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 18px;
+  padding: 18px 24px 40px;
+  align-items: start;
+}
+@media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+.spalte { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.block {
+  background: var(--bg-block);
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.block h2 {
+  margin: 0 0 10px;
+  font-size: 13px; text-transform: uppercase; letter-spacing: .8px;
+  color: var(--text-matt);
+}
+
+label { display: block; margin: 9px 0; font-size: 13px; }
+input, select {
+  width: 100%; margin-top: 4px;
+  background: var(--bg-tief);
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font: inherit;
+}
+input:focus, select:focus { outline: 2px solid var(--akzent); outline-offset: -1px; }
+.zeile { display: flex; gap: 10px; }
+.zeile label { flex: 1; }
+
+.mini { display: block; color: var(--text-matt); font-size: 11.5px; margin-top: 3px; }
+.hinweis { color: var(--text-matt); font-size: 12.5px; margin: 0 0 10px; }
+
+button {
+  background: var(--bg-tief);
+  border: 1px solid var(--rand);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 9px 14px;
+  font: inherit; font-weight: 500;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--akzent); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.haupt { background: var(--akzent); border-color: var(--akzent); color: #06121f; font-weight: 600; }
+button.abbruch { border-color: #6b2f2f; color: #ff9b9b; }
+button.sekundaer { width: 100%; }
+.knopfreihe { display: flex; gap: 10px; margin-top: 12px; }
+.knopfreihe button { flex: 1; }
+
+.schnellwahl { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.chip { padding: 4px 10px; font-size: 12px; border-radius: 20px; }
+
+fieldset {
+  border: none; border-top: 1px solid var(--rand);
+  margin: 16px 0 0; padding: 12px 0 0;
+}
+legend { color: var(--akzent); font-size: 11.5px; text-transform: uppercase; letter-spacing: .7px; padding: 0 6px 0 0; }
+.feld-hilfe { color: var(--text-matt); font-size: 11.5px; margin: 2px 0 0; }
+.einheit { color: var(--text-matt); font-weight: 400; }
+
+/* --- Kacheln --- */
+.kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 9px; }
+.kachel {
+  background: var(--bg-tief);
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  padding: 9px 11px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.kachel.gross .k-wert { font-size: 21px; }
+.k-wert { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.k-name { font-size: 11px; color: var(--text-matt); }
+.gut { color: var(--gut); } .schlecht { color: var(--schlecht); } .warnfarbe { color: var(--warn); }
+
+/* --- Fortschritt --- */
+.fortschritt {
+  position: relative; height: 26px; margin-bottom: 12px;
+  background: var(--bg-tief); border: 1px solid var(--rand);
+  border-radius: 6px; overflow: hidden;
+}
+#balken { height: 100%; width: 0; background: linear-gradient(90deg, #2d6fb8, var(--akzent)); transition: width .25s; }
+#balken-text {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+}
+
+/* --- Terminal --- */
+.terminal {
+  height: 260px; overflow-y: auto;
+  background: var(--bg-tief);
+  border: 1px solid var(--rand); border-radius: 7px;
+  padding: 9px 11px;
+  font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.terminal div { padding: 1px 0; }
+.z-info { color: var(--text-matt); }
+.z-gut { color: var(--gut); }
+.z-warn { color: var(--warn); }
+.z-fehler { color: var(--schlecht); }
+.z-zeit { color: #55607a; }
+
+/* --- Hinweise --- */
+#hinweise { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+.hinweiskarte {
+  background: #23190c; border-left: 3px solid var(--warn);
+  padding: 8px 11px; border-radius: 0 6px 6px 0;
+  font-size: 12.5px; color: #ffd9a0;
+}
+
+/* --- Tabellen --- */
+.reiter { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--rand); }
+.reiter-knopf { border: none; background: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--text-matt); padding: 7px 12px; }
+.reiter-knopf.aktiv { color: var(--akzent); border-bottom-color: var(--akzent); }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--rand); font-variant-numeric: tabular-nums; }
+th { color: var(--text-matt); font-weight: 500; text-align: right; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--bg-block); }
+th:first-child, td:first-child { text-align: left; }
+tbody tr:hover { background: rgba(90,169,255,.07); }
+.tabellenrahmen { max-height: 400px; overflow: auto; }
+.vorschau {
+  background: var(--bg-tief); border: 1px solid var(--rand); border-radius: 7px;
+  padding: 9px 11px; font-size: 12.5px; margin-top: 10px; color: var(--text-matt);
+}
+.vorschau b { color: var(--warn); }
