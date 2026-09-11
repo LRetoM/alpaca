@@ -384,3 +384,47 @@ def test_elite_anteil_null_nutzt_nie_die_elite(tmp_path, monkeypatch):
     for _ in range(10):
         s._neustartpunkt()
     assert s.stand.elite_uebernahmen == 0
+
+
+# ------------------------------------------------- Die Liquiditaetsfalle
+def test_suchraum_laesst_keine_unmessbaren_liquiditaeten_zu():
+    """Regression zu BEFUNDE §G60 - der teuerste Fehler dieser Werkstatt.
+
+    Bis zum 11.09.2026 standen `min_dollar_volumen=0` und
+    `min_preis=1` im Raster. Die Suche waehlte sie systematisch: Die
+    besten 5 % der Konfigurationen hatten Median 0 bzw. 1, gegen 2e6
+    bzw. 3 ueber alle Versuche.
+
+    Das war kein Alpha, sondern das Ausbeuten eines Modellfehlers.
+    `AusbruchConfig.spanne_bps` rechnet mit 12,2 bps - gemessen an den
+    1.200 liquidesten Werten (§G54, Dezile 1-6: 7,1 bis 17,8 bps). Fuer
+    eine Ein-Dollar-Aktie ohne Umsatz sind 200+ bps normal, und dafuer
+    existiert ueberhaupt keine Messung. Je illiquider der Wert, desto
+    groesser der Scheingewinn.
+
+    Eine Suche ueber 10^11 Kombinationen findet so einen Modellfehler
+    zuverlaessig - er ist die groesste Quelle von "Gewinn" im ganzen
+    Raum. Deshalb darf das Raster ihn gar nicht erst anbieten.
+    """
+    assert min(su.RAUM["min_dollar_volumen"]) >= 2e6, (
+        "Ein Mindestumsatz unter 2 Mio $ liegt ausserhalb des Bereichs, "
+        "fuer den die 12,2 bps gemessen sind (§G54)."
+    )
+    assert min(su.RAUM["min_preis"]) >= 5, (
+        "Unter 5 $ dominieren Spanne und Tick-Groesse jede Bewegung - "
+        "und es gibt keine Spannenmessung fuer dieses Segment."
+    )
+
+
+def test_kostenannahme_und_suchraum_passen_zusammen():
+    """Die Vorgabe-Spanne muss zum erlaubten Universum passen.
+
+    Wird `spanne_bps` spaeter einmal gesenkt, ohne die Filter
+    anzuheben, ist §G60 sofort zurueck - nur leiser.
+    """
+    from alpaca_bot.ausbruch import AusbruchConfig
+    cfg = AusbruchConfig()
+    assert cfg.spanne_bps >= 12.0, (
+        "Die Vorgabe muss mindestens der gemessenen 12,2 bps entsprechen "
+        "(§G54). Eine niedrigere Annahme braucht eine eigene Messung."
+    )

@@ -144,8 +144,20 @@ RAUM: dict[str, list] = {
     "einstieg_verzoegerung_bars": [0, 1, 2, 4, 8],
     # Filter
     "min_rel_volumen":        [0, 1.5, 2, 3, 5, 10],
-    "min_dollar_volumen":     [0, 5e5, 2e6, 1e7, 5e7],
-    "min_preis":              [1, 3, 5, 10, 20],
+    # ACHTUNG, das ist keine Geschmacksfrage (BEFUNDE §G60):
+    # `min_dollar_volumen=0` und `min_preis=1` standen bis zum
+    # 11.09.2026 im Raster. Die Suche waehlte sie systematisch - die
+    # besten 5 % der Konfigurationen hatten Median 0 bzw. 1, gegen 2e6
+    # bzw. 3 ueber alle. Der Grund ist kein Alpha, sondern ein Fehler
+    # im Kostenmodell: `spanne_bps` rechnet mit 12,2 bps, gemessen an
+    # den 1.200 LIQUIDESTEN Werten (§G54, Dezile 1-6: 7,1 bis 17,8).
+    # Fuer eine Ein-Dollar-Aktie ohne Umsatz sind 200+ bps normal, und
+    # dafuer gibt es ueberhaupt keine Messung. Wer diese Werte zulaesst,
+    # laesst die Suche den Modellfehler ausbeuten statt den Markt.
+    # Die Untergrenzen halten sie im Bereich, fuer den die
+    # Kostenannahme belegt ist.
+    "min_dollar_volumen":     [2e6, 1e7, 5e7],
+    "min_preis":              [5, 10, 20],
     "tageszeit_von_bar":      [0, 2, 4, 8],
     "tageszeit_bis_bar":      [10, 16, 22, 26],
     # Position

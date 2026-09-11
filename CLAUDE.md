@@ -1,3 +1,14 @@
+cd ~/Documents/alpaca
+
+# Jederzeit reinschauen (stört nichts):
+.venv/bin/python scripts/51_ausbruch_status.py
+
+# Auswerten, wann immer du willst (auch während es läuft):
+.venv/bin/python scripts/52_ausbruch_auswertung.py
+
+# Stoppen (nur wenn du willst):
+for i in a b c d; do launchctl bootout gui/$(id -u)/de.local.alpacaausbruch.$i; done
+
 # Projektanweisungen
 
 ## Vor jeder Änderung

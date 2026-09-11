@@ -6252,6 +6252,100 @@ fest, was gebaut wurde, nicht was gefunden wurde.
 
 ---
 
+## G60. Die Ausbruch-Suche beutete das Kostenmodell aus statt den Markt (11.09.2026)
+
+**Der Fund.** Nach 3.000 Versuchen im Dauerbetrieb gefragt, was die
+besten Konfigurationen gemeinsam haben. Antwort: **sie schalten die
+Liquiditätsfilter ab.**
+
+| Filter | Top 5 % (Median) | alle (Median) |
+|---|---:|---:|
+| `min_dollar_volumen` | **0 $** | 2.000.000 $ |
+| `min_preis` | **1 $** | 3 $ |
+
+Der beste Fund (Lern-t = 5,43) hatte **gar keine Filter**:
+`min_dollar_volumen=0`, `min_preis=1`, `min_rel_volumen=0`.
+
+### Warum das kein Alpha ist
+
+`AusbruchConfig.spanne_bps` rechnet mit **12,2 bps** — gemessen an den
+**1.200 liquidesten** Werten (§G54). Die Aufschlüsselung:
+
+| Dezil | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| Spanne | 7,1 | 12,0 | 11,7 | 14,7 | 16,8 | 17,8 bps |
+
+**Für Werte unterhalb dieses Universums existiert überhaupt keine
+Messung.** Bei einer Ein-Dollar-Aktie ohne Umsatz sind 200 bps und mehr
+normal — das Sechzehnfache der angesetzten Kosten.
+
+Je illiquider der Wert, desto größer also der Scheingewinn. Eine Suche
+über 10¹¹ Kombinationen findet so einen Modellfehler **zuverlässig** —
+er ist die größte einzelne Gewinnquelle im ganzen Raum, größer als
+jeder echte Effekt es sein könnte.
+
+### Die zweite Zahl, die dazugehört
+
+Aus der unverzerrten Stichprobe (n=30, nur protokolliert, nie zur
+Auswahl):
+
+| | Lernfenster | Prüffenster |
+|---|---:|---:|
+| zufällige Konfiguration | **+1,93** | **+0,14** |
+| Gewinner (n=3) | +5,45 | +0,85 |
+
+**Selbst eine zufällig gezogene Konfiguration sieht im Lernfenster gut
+aus.** Das ist kein Überanpassen einzelner Konfigurationen mehr,
+sondern ein Eigenschaft des Zeitraums plus des Modellfehlers. Die
+Korrelation zwischen Lern- und Prüfwert lag bei +0,21 (n=30, also von
+null nicht zu unterscheiden).
+
+### Behoben
+
+Untergrenzen im Suchraster, damit die Suche den Modellfehler gar nicht
+erst angeboten bekommt:
+
+```python
+"min_dollar_volumen": [2e6, 1e7, 5e7]    # vorher [0, 5e5, 2e6, 1e7, 5e7]
+"min_preis":          [5, 10, 20]        # vorher [1, 3, 5, 10, 20]
+```
+
+Suchraum damit 2,3·10¹¹ statt 6,3·10¹¹ Kombinationen — kleiner, aber im
+Bereich, für den die Kostenannahme **belegt** ist.
+
+Zwei Regressionstests: `test_suchraum_laesst_keine_unmessbaren_liquiditaeten_zu`
+und `test_kostenannahme_und_suchraum_passen_zusammen`. Der zweite fängt
+den Rückweg ab — wer später `spanne_bps` senkt, ohne die Filter
+anzuheben, holt §G60 leise zurück.
+
+**Die 3.000 Versuche wurden verworfen** (nach
+`data/ausbruch_verworfen_G60/` verschoben, nicht gelöscht — sie sind
+der Beleg). Sie zählen weiter im Versuchszähler: Die Historie ist
+3.000-mal befragt worden, auch wenn die Antwort ein Artefakt war.
+
+### Die allgemeine Lehre
+
+**Ein Optimierer findet den größten Fehler im Modell, nicht den größten
+Effekt im Markt.** Das ist kein Zufall, sondern seine Aufgabe: Er
+maximiert die Zielfunktion, und ein Modellfehler ist der billigste Weg
+dorthin.
+
+Daraus folgt eine Regel für jede weitere Achse, die in den Suchraum
+aufgenommen wird:
+
+> **Bevor eine Achse in den Suchraum darf, muss geklärt sein, ob das
+> Kostenmodell über ihren gesamten Wertebereich gilt.** Tut es das
+> nicht, gehört der ungültige Bereich nicht ins Raster — auch nicht
+> „zum Ausprobieren".
+
+Dasselbe gilt rückwirkend für die Werkstatt (`scripts/46_ausbruch.py`):
+Dort lassen sich die Filter weiterhin von Hand auf 0 setzen. Das ist
+vertretbar, weil ein Mensch dabei eine bewusste Entscheidung trifft und
+die Oberfläche die gemessene Spanne danebenschreibt — eine Suche über
+Millionen Versuche trifft keine bewusste Entscheidung.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
