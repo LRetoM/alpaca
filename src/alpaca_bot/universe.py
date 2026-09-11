@@ -74,6 +74,36 @@ def all_tradable_assets(
     return df.sort_values("symbol").reset_index(drop=True)
 
 
+def nasdaq_universum(nur_shortable: bool = False) -> list[str]:
+    """Alle heute an der NASDAQ handelbaren Symbole (Stand 11.09.2026: 5.568).
+
+    **Der Vorbehalt, der hier groesser ist als sonst irgendwo.** Diese
+    Liste ist "heute handelbar" - also genau die Survivorship-Falle
+    (§G11). Fuer eine AUSBRUCH-Strategie wirkt sie besonders stark: Ein
+    Wert, der +40 % machte und danach verschwand, fehlt vollstaendig;
+    uebrig bleiben die Ausbrueche, die ueberlebt haben.
+
+    **Und ein zweiter, der oft uebersehen wird.** Von den 5.568 haben
+    die meisten fast keinen Umsatz. Bei denen ist die Annahme von
+    12,2 bps Spanne (§G54, gemessen am LIQUIDEN Universum) nicht
+    optimistisch, sondern falsch - dort sind 200 bps und mehr normal.
+    Ein Backtest ueber die volle Liste sieht deshalb besser aus als die
+    Wirklichkeit, nicht schlechter.
+
+    Gegenmittel ist der Umsatzfilter der Strategie selbst
+    (`AusbruchConfig.min_dollar_volumen`), nicht diese Liste.
+
+    Args:
+        nur_shortable: nur Werte, die Alpaca auch leerverkaufen laesst -
+            ein grober, aber brauchbarer Liquiditaetshinweis (2.171 von
+            5.568).
+    """
+    df = all_tradable_assets(exchanges=("NASDAQ",))
+    if nur_shortable and "shortable" in df.columns:
+        df = df[df["shortable"]]
+    return df["symbol"].dropna().astype(str).tolist()
+
+
 UNIVERSE_FILE = PROJECT_ROOT / "results" / "factor_lab" / "universum.csv"
 
 

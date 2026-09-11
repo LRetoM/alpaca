@@ -50,6 +50,8 @@ werden.
 | `scripts/46_ausbruch.py` | Oberfläche. Lokaler Server, Browser-UI, Live-Strom. |
 | `src/alpaca_bot/ausbruch_suche.py` | Automatische Suche: Erkundung, Bergsteigen, Neustart — mit Lern-/Prüffenster. |
 | `scripts/47_ausbruch_suche.py` | Live-Terminal für die Suche. |
+| `scripts/48_ausbruch_daten.py` | Kursvorrat aufbauen — NASDAQ-weit, mehrjährig, fortsetzbar. |
+| `scripts/49_ausbruch_dauerlauf.py` | **Das Startkommando.** Lädt einmal, sucht dann ohne Unterbrechung. |
 | `tests/test_ausbruch.py` | 25 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
 | `tests/test_ausbruch_suche.py` | 16 Tests, Schwerpunkt auf der Fenster-Trennung. |
 
@@ -203,6 +205,92 @@ Neustarts schneller, nachvollziehbar und hat keine eigenen
 Hyperparameter, die wieder angepasst werden müssten. Ein DQN würde hier
 dasselbe tun, nur langsamer und undurchsichtiger — und seine
 Zwischenergebnisse wären nicht als Konfigurationszeile lesbar.
+
+---
+
+## 5b. Der Dauerlauf — mehr Symbole, mehr Jahre (11.09.2026)
+
+```
+# Schritt 1 (einmalig, Stunden):
+python scripts/48_ausbruch_daten.py --nasdaq --shortable --jahre 2021-2025
+
+# Schritt 2 (läuft, bis du Strg+C drückst):
+python scripts/49_ausbruch_dauerlauf.py
+```
+
+### Was den Sprung möglich gemacht hat
+
+Ein Profillauf zeigte: von 5,7 Sekunden je Versuch gingen **5,3 in den
+Aufbau der gemeinsamen Zeitachse** — `set().union()` über 3,7 Mio
+`Timestamp`-Objekte. Die Strategie selbst kostete 0,4.
+
+Ersetzt durch `np.unique` auf rohen int64-Werten, dazu `Kursdaten` als
+Behälter, der **einmal** ausrichtet und beliebig oft durchgerechnet
+wird, in `float32` statt `float64`:
+
+| | vorher | nachher |
+|---|---:|---:|
+| je Versuch (598 Symbole) | 5,7 s | **0,08 s** |
+| Versuche je Stunde | 630 | **~45.000** |
+| Speicher je 1.000 Symbol-Jahre | ~1,3 GB | **~0,18 GB** |
+
+Der Lern-/Prüf-Schnitt erzeugt jetzt **Sichten statt Kopien**
+(`np.shares_memory` bestätigt) — bei 5 GB Kursdaten der Unterschied
+zwischen „läuft" und „Rechner steht".
+
+### Was das kostet — vor dem Download lesen
+
+| Auswahl | Symbole | Jahre | Download | Platte | Speicher |
+|---|---:|---:|---:|---:|---:|
+| Top 600 (liegt vor) | 598 | 1 | fertig | 86 MB | 0,1 GB |
+| NASDAQ shortable | 2.171 | 3 | ~4,6 h | 0,9 GB | 1,0 GB |
+| **NASDAQ shortable** | **2.171** | **5** | **~7,7 h** | **1,6 GB** | **1,7 GB** |
+| NASDAQ vollständig | 5.568 | 2 | ~7,9 h | 1,6 GB | 1,7 GB |
+| NASDAQ vollständig | 5.568 | 5 | ~19,8 h | 4,1 GB | 4,2 GB |
+
+**Warum die volle NASDAQ-Liste nicht besser ist.** Von 5.568 handelbaren
+Werten hat die Mehrheit kaum Umsatz. Dort ist die Kostenannahme von
+12,2 bps (§G54, gemessen am *liquiden* Universum) nicht optimistisch,
+sondern falsch — 200 bps und mehr sind normal. Und der
+Survivorship-Vorbehalt aus §4.3 trifft gerade diese Werte am härtesten.
+**Mehr Symbole machen den Backtest besser aussehend, nicht ehrlicher.**
+
+Empfehlung deshalb `--shortable` (2.171): Was Alpaca nicht leerverkaufen
+lässt, ist meist auch nicht sinnvoll kaufbar. Und **fünf Jahre statt
+einem**, weil 2022 einen Bärenmarkt enthält — Ausbruch-Strategien
+funktionieren in steigenden Märkten fast immer und brechen in Wenden
+zusammen. Ein Lauf über 2025 allein kann das nicht zeigen.
+
+### Ein Fehler im Suchverfahren, gefunden und behoben
+
+Die erste Fassung kletterte immer nur von der **global** besten
+Konfiguration aus. War deren Nachbarschaft abgesucht, fiel die Suche für
+immer auf reines Würfeln zurück — gemessen **1.198 „Neustarts" bei 1.448
+Versuchen**, also praktisch kein Bergsteigen mehr.
+
+Behoben durch die übliche Trennung: `aktuell` ist der Punkt, von dem
+geklettert wird (ein Nachbar übernimmt, sobald er *ihn* schlägt, auch
+wenn er unter dem globalen Besten liegt), `beste_*` hält nur fest.
+Danach: **11 Neustarts bei 1.325 Versuchen.**
+
+Zweiter Fehler dabei: War der Raum vollständig abgesucht, drehte die
+Schleife endlos. Mit kleinem Raster oder vielen `--fest`-Achsen in der
+Praxis erreichbar. Beide mit Regressionstest.
+
+### Und das Ergebnis, das die ganze Konstruktion rechtfertigt
+
+Mit der besser arbeitenden Suche, 300 Symbole, 1.325 Versuche in einer
+Minute:
+
+| | Lernfenster | Prüffenster |
+|---|---:|---:|
+| t-Wert | **+5,99** | **−2,36** |
+| Rendite | +24,78 % | −4,69 % |
+
+**Abstand +8,35.** Je besser der Optimierer arbeitet, desto extremer die
+Überanpassung — genau wie die Theorie es vorhersagt. Ohne das
+Prüffenster stünde hier „t = 5,99 gefunden", und das wäre die Illusion
+mit Nachkommastellen, vor der §B2 warnt.
 
 ---
 

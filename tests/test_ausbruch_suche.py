@@ -209,3 +209,64 @@ def test_bericht_nennt_das_prueffenster_und_nicht_den_besten_wert():
     assert "Prueffenster" in text
     assert "URTEIL" in text
     assert "Zufallsschwelle" in text
+
+
+def test_bergsteigen_faellt_nicht_auf_wuerfeln_zurueck():
+    """Regression: Die erste Fassung kletterte nur vom GLOBAL Besten.
+
+    War dessen Nachbarschaft abgesucht, wurde jeder weitere Versuch ein
+    "Neustart" - gemessen 1.198 Neustarts bei 1.448 Versuchen, also
+    praktisch kein Bergsteigen mehr. Richtig ist die Trennung zwischen
+    dem Punkt, von dem geklettert wird, und dem global Besten.
+    """
+    bars = {f"S{i}": _bars(saat=i) for i in range(3)}
+    lern, pruef, _ = su.teilen(bars, 0.7)
+    s = su.Suche(lern, pruef, min_trades=1, erkundung_n=5, saat=11,
+                 raum={"anstieg_pct": [1, 2, 3, 4], "fenster_bars": [2, 4, 8],
+                       "halten_bars": [4, 13, 26], "gewinn_pct": [0, 5, 10]})
+    n = []
+    for v in s.laufen(lambda: len(n) >= 60):
+        n.append(v)
+
+    berg = sum(1 for v in n if v.phase == "Bergsteigen")
+    neu = sum(1 for v in n if v.phase == "Neustart")
+    assert berg > neu, (
+        f"Nur {berg} Kletterschritte gegen {neu} Neustarts - die Suche "
+        f"wuerfelt statt zu klettern."
+    )
+
+
+def test_globaler_bester_ueberlebt_einen_neustart():
+    """Ein Neustart darf den besten gefundenen Punkt nie verlieren."""
+    bars = {f"S{i}": _bars(saat=i) for i in range(3)}
+    lern, pruef, _ = su.teilen(bars, 0.7)
+    s = su.Suche(lern, pruef, min_trades=1, erkundung_n=3, saat=4, geduld=1,
+                 raum={"anstieg_pct": [1, 2], "fenster_bars": [2, 4]})
+    beste = []
+    n = []
+    for v in s.laufen(lambda: len(n) >= 12):
+        n.append(v)
+        if s.stand.beste_score > float("-inf"):
+            beste.append(s.stand.beste_score)
+    # Der beste Wert darf nie sinken.
+    assert all(b >= a for a, b in zip(beste, beste[1:])), (
+        "Der globale Beste ist unterwegs schlechter geworden."
+    )
+
+
+def test_abgesuchter_raum_beendet_die_suche_statt_zu_haengen():
+    """Regression (11.09.2026): Ist jede Kombination durch, zog die
+    Schleife endlos schon Gesehenes und kehrte nie zurueck.
+
+    In der Praxis erreichbar mit einem kleinen Raster oder vielen
+    festgehaltenen Achsen - dann haengt das Terminal ohne Fehlermeldung.
+    """
+    bars = {f"S{i}": _bars(saat=i) for i in range(2)}
+    lern, pruef, _ = su.teilen(bars, 0.7)
+    # Nur 2 x 2 = 4 Kombinationen.
+    s = su.Suche(lern, pruef, min_trades=1, erkundung_n=2, saat=1,
+                 raum={"anstieg_pct": [1, 2], "fenster_bars": [2, 4]})
+
+    n = list(s.laufen(lambda: False))     # KEIN Stoppkriterium von aussen
+    assert len(n) <= 4
+    assert s.stand.phase == "abgesucht"

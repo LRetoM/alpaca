@@ -149,8 +149,7 @@ SCORES: dict[str, Callable[[dict], float]] = {
 }
 
 
-def teilen(bars: dict[str, pd.DataFrame], anteil: float = 0.7
-           ) -> tuple[dict, dict, pd.Timestamp]:
+def teilen(bars, anteil: float = 0.7):
     """Schneidet den Datensatz nach ZEIT in Lern- und Prueffenster.
 
     Nach Zeit, nicht nach Symbolen: Ein Schnitt nach Symbolen liesse die
@@ -158,7 +157,14 @@ def teilen(bars: dict[str, pd.DataFrame], anteil: float = 0.7
 
     Der Schnitt ist fuer alle Symbole derselbe Zeitpunkt - sonst haetten
     verschiedene Symbole verschiedene Marktphasen im Prueffenster.
+
+    Nimmt ein `ausbruch.Kursdaten` (dann Sichten statt Kopien) oder ein
+    dict von DataFrames (fuer Tests).
     """
+    from .ausbruch import Kursdaten
+    if isinstance(bars, Kursdaten):
+        lern, pruef = bars.teilen(anteil)
+        return lern, pruef, pruef.achse[0]
     alle = sorted(set().union(*(d.index for d in bars.values())))
     if len(alle) < 100:
         raise ValueError("Zu wenige Bars zum Teilen.")
@@ -295,36 +301,71 @@ class Suche:
 
         Als Generator, damit die Oberflaeche live mitlesen kann, ohne
         dass die Suche etwas ueber sie wissen muss.
+
+        **Zwei Punkte, nicht einer (korrigiert 11.09.2026).** Die erste
+        Fassung kletterte immer nur von der GLOBAL besten Konfiguration
+        aus. War deren Nachbarschaft abgesucht, fiel die Suche fuer
+        immer auf reines Wuerfeln zurueck - gemessen 1.198 "Neustarts"
+        bei 1.448 Versuchen, also praktisch kein Bergsteigen mehr.
+
+        Richtig ist die uebliche Trennung:
+
+        * `aktuell` - der Punkt, von dem gerade geklettert wird. Ein
+          Nachbar uebernimmt, sobald er **ihn** schlaegt, auch wenn er
+          unter dem globalen Besten liegt.
+        * `stand.beste_*` - der globale Beste. Wird nur festgehalten,
+          nie zum Klettern benutzt.
+
+        Ist die Umgebung von `aktuell` erschoepft, beginnt an einem
+        neuen Zufallspunkt eine neue Kletterpartie. Der globale Beste
+        bleibt davon unberuehrt.
         """
         aktuell: dict | None = None
+        aktuell_score = float("-inf")
         warteschlange: list[dict] = []
+        leerlauf = 0
+        # Wie oft hintereinander nur schon Gesehenes gezogen werden darf,
+        # bevor der Raum als abgesucht gilt. Grosszuegig, damit ein
+        # kurzer Pechstraehne-Zufall nicht schon als Ende zaehlt - aber
+        # endlich, denn ohne diese Grenze dreht die Schleife ewig, sobald
+        # alle Kombinationen durch sind (passiert bei kleinem Raum oder
+        # vielen `--fest`-Achsen).
+        leerlauf_grenze = max(500, 20 * len(self.raum))
 
         while not stoppen():
-            # --- Punkt waehlen ---
+            # --- Punkt waehlen -------------------------------------
             if self.stand.versuche < self.erkundung_n:
                 phase, cfg = "Erkundung", self._zufallspunkt()
             elif warteschlange:
                 phase, cfg = "Bergsteigen", warteschlange.pop()
-            elif self.stand.beste_config:
-                nachbarn = self._nachbarn(self.stand.beste_config)
-                nachbarn = [n for n in nachbarn
+            else:
+                if aktuell is None:
+                    # Erste Kletterpartie startet beim bisher Besten.
+                    aktuell = dict(self.stand.beste_config or
+                                   self._zufallspunkt())
+                    aktuell_score = self.stand.beste_score
+                nachbarn = [n for n in self._nachbarn(aktuell)
                             if self._schluessel(n) not in self._gesehen]
                 if nachbarn:
                     warteschlange = nachbarn
                     phase, cfg = "Bergsteigen", warteschlange.pop()
                 else:
-                    # Nachbarschaft erschoepft: oertliches Maximum.
+                    # Umgebung abgesucht: neue Partie an neuer Stelle.
                     self.stand.neustarts += 1
-                    phase, cfg = "Neustart", self._zufallspunkt()
-            else:
-                phase, cfg = "Erkundung", self._zufallspunkt()
+                    aktuell, aktuell_score = self._zufallspunkt(), float("-inf")
+                    phase, cfg = "Neustart", dict(aktuell)
 
             schl = self._schluessel(cfg)
             if schl in self._gesehen:
+                leerlauf += 1
+                if leerlauf > leerlauf_grenze:
+                    self.stand.phase = "abgesucht"
+                    return          # Der Raum ist vollstaendig durch.
                 continue
+            leerlauf = 0
             self._gesehen.add(schl)
 
-            # --- Rechnen ---
+            # --- Rechnen -------------------------------------------
             t0 = time.time()
             score, k = self._bewerten(cfg, self.lern)
             dauer = time.time() - t0
@@ -337,32 +378,40 @@ class Suche:
                         score=score, kennzahlen=k, besser=besser,
                         dauer_s=dauer)
 
+            # --- Oertlicher Fortschritt ----------------------------
+            if score > aktuell_score:
+                aktuell, aktuell_score = dict(cfg), score
+                warteschlange = []      # Umgebung des neuen Punktes
+                self.stand.seit_verbesserung = 0
+            else:
+                self.stand.seit_verbesserung += 1
+
+            # --- Globaler Bester -----------------------------------
             if besser:
                 self.stand.beste_score = score
                 self.stand.beste_config = dict(cfg)
                 self.stand.beste_kennzahlen = k
-                self.stand.seit_verbesserung = 0
-                warteschlange = []      # Nachbarschaft neu aufspannen
 
                 # EINMAL im Prueffenster nachsehen - und NIE danach
-                # auswaehlen. Sonst waere es nach dem zweiten Versuch
+                # auswaehlen. Sonst waere es nach dem zweiten Treffer
                 # genauso verbraucht wie das Lernfenster.
                 _, pk = self._bewerten(cfg, self.pruef)
                 self.stand.pruef_kennzahlen = pk
                 v.pruef_kennzahlen = pk
-            else:
-                self.stand.seit_verbesserung += 1
 
             self.stand.verlauf.append(
                 (self.stand.versuche, score, self.stand.beste_score))
             yield v
 
-            # Lange ohne Verbesserung und Nachbarschaft leer -> Neustart
-            if (self.stand.seit_verbesserung
-                    > self.geduld * max(len(self.raum), 1)
-                    and not warteschlange):
+            # Lange ohne oertlichen Fortschritt: Partie abbrechen, auch
+            # wenn die Warteschlange noch Nachbarn haette. Sonst
+            # arbeitet die Suche 70 aussichtslose Nachbarn ab, bevor
+            # sie weiterzieht.
+            if self.stand.seit_verbesserung > self.geduld * len(self.raum):
                 self.stand.neustarts += 1
                 self.stand.seit_verbesserung = 0
+                aktuell, aktuell_score = self._zufallspunkt(), float("-inf")
+                warteschlange = []
 
     # --- Abschluss ---------------------------------------------------
     def bericht(self) -> str:

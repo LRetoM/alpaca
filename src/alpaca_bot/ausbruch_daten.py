@@ -37,7 +37,8 @@ VORRAT = DATA_DIR / "intraday"
 
 SPALTEN = ["open", "high", "low", "close", "volume"]
 
-__all__ = ["VORRAT", "laden", "vorrat_aufbauen", "bestand", "bestand_loeschen"]
+__all__ = ["VORRAT", "laden", "laden_kursdaten", "vorrat_aufbauen",
+           "bestand", "bestand_loeschen", "jahre_vorhanden"]
 
 
 def _ordner(raster: str, jahr: int) -> Path:
@@ -195,3 +196,113 @@ def laden(
             continue
     melde(1.0, f"{len(out)} Symbole im Speicher")
     return out
+
+def jahre_vorhanden(raster: str = "15Min") -> list[int]:
+    """Welche Jahre liegen fuer dieses Raster auf der Platte?"""
+    if not VORRAT.exists():
+        return []
+    aus = []
+    for d in VORRAT.iterdir():
+        if d.is_dir() and d.name.startswith(f"{raster}_"):
+            try:
+                aus.append(int(d.name.rsplit("_", 1)[1]))
+            except ValueError:
+                continue
+    return sorted(aus)
+
+
+def laden_kursdaten(
+    jahre: Sequence[int] | int = 2025,
+    *,
+    raster: str = "15Min",
+    max_symbole: int | None = None,
+    min_bars: int = 500,
+    fortschritt: Callable[[float, str], None] | None = None,
+):
+    """Laedt den Vorrat direkt in ein `ausbruch.Kursdaten`-Objekt.
+
+    **Der Unterschied zu `laden()` ist der Speicher.** `laden()` gibt
+    ein dict voller DataFrames zurueck; bei 5.000 Symbolen ueber fuenf
+    Jahre sind das ueber 6 GB allein an pandas-Objekten, bevor die
+    Ausrichtung ueberhaupt beginnt. Hier wird **je Symbol geladen,
+    sofort auf float32 ausgerichtet und der DataFrame verworfen** -
+    der Spitzenbedarf entspricht damit dem Endergebnis statt dem
+    Doppelten.
+
+    Mehrere Jahre werden aneinandergehaengt. Die Zeitachse entsteht
+    aus einem ersten Durchgang, der nur die INDIZES liest (Parquet
+    erlaubt das ohne die Datenspalten) - das ist der Grund, warum zwei
+    Durchgaenge hier billiger sind als einer.
+    """
+    from . import ausbruch as _a
+
+    melde = fortschritt or (lambda *_: None)
+    jahre = [jahre] if isinstance(jahre, int) else sorted(jahre)
+    fehlend = [j for j in jahre if not _ordner(raster, j).exists()]
+    if fehlend:
+        raise FileNotFoundError(
+            f"Kein Vorrat fuer {fehlend} ({raster}). Vorhanden: "
+            f"{jahre_vorhanden(raster)}. Erst laden: "
+            f"scripts/48_ausbruch_daten.py"
+        )
+
+    # Welche Symbole in ALLEN gewuenschten Jahren vorliegen. Ein Symbol,
+    # das nur die Haelfte des Zeitraums abdeckt, brauchte eine
+    # Sonderbehandlung bei jeder Kennzahl - und waere zugleich ein
+    # stiller Survivorship-Filter in die andere Richtung.
+    je_jahr = [{f.stem for f in _ordner(raster, j).glob("*.parquet")}
+               for j in jahre]
+    gemeinsam = sorted(set.intersection(*je_jahr)) if je_jahr else []
+    if max_symbole:
+        gemeinsam = gemeinsam[:max_symbole]
+    if not gemeinsam:
+        raise FileNotFoundError("Kein Symbol deckt alle gewuenschten Jahre ab.")
+
+    # --- Durchgang 1: nur die Zeitstempel -----------------------------
+    melde(0.0, f"Zeitachse aus {len(gemeinsam)} Symbolen x {len(jahre)} Jahr(en)")
+    indizes = []
+    for i, stem in enumerate(gemeinsam):
+        if i % 250 == 0:
+            melde(0.3 * i / len(gemeinsam), f"Zeitachse: {i}/{len(gemeinsam)}")
+        for j in jahre:
+            try:
+                indizes.append(pd.read_parquet(
+                    _ordner(raster, j) / f"{stem}.parquet", columns=[]).index)
+            except Exception:  # noqa: BLE001
+                continue
+    if not indizes:
+        raise FileNotFoundError("Keine lesbaren Dateien im Vorrat.")
+    achse = _a._achse_bauen(indizes)
+    del indizes
+
+    # --- Durchgang 2: ausrichten, DataFrame sofort verwerfen ----------
+    arrays: dict[str, tuple] = {}
+    for i, stem in enumerate(gemeinsam):
+        if i % 100 == 0:
+            mb = sum(a.nbytes for t in arrays.values() for a in t) / 1e6
+            melde(0.3 + 0.7 * i / len(gemeinsam),
+                  f"Ausrichten: {i}/{len(gemeinsam)} Symbole, {mb:,.0f} MB")
+        teile = []
+        for j in jahre:
+            try:
+                teile.append(pd.read_parquet(
+                    _ordner(raster, j) / f"{stem}.parquet"))
+            except Exception:  # noqa: BLE001
+                continue
+        if not teile:
+            continue
+        df = pd.concat(teile) if len(teile) > 1 else teile[0]
+        if len(df) < min_bars:
+            continue
+        a = _a._ausrichten(df, achse)
+        del df, teile
+        if a is not None:
+            arrays[stem.replace("-", ".")] = a
+
+    if not arrays:
+        raise FileNotFoundError("Kein Symbol hatte genug verwertbare Bars.")
+    bit, ldt = _a._tagesraster(achse)
+    kd = _a.Kursdaten(achse, arrays, bit, ldt)
+    melde(1.0, f"{len(arrays)} Symbole, {kd.n_bars:,} Bars, "
+               f"{kd.speicher_mb():,.0f} MB")
+    return kd
