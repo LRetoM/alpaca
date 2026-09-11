@@ -6040,15 +6040,45 @@ entfernt die Daten aber **nicht** den Zählereintrag, und die Schwelle
 Flottenzähler, weil Historienläufe dort bewusst keinen Platz kosten
 (`BETRIEBSPLAN` §4).
 
-### Stand
+**Die Grenze des Zählers, benannt statt beschönigt:** Gezählt wird nur,
+was über die Oberfläche läuft. `ausbruch.lauf()` ist eine reine Funktion
+und kennt die Datenbank nicht — ein Direktaufruf erscheint nirgends. Das
+ist bewusst so (eine Rechenfunktion, die beim Aufruf in eine Datenbank
+schreibt, wäre in Tests unbrauchbar), heißt aber: **Der Zähler ist
+ehrliche Buchführung, keine Schranke.**
 
-Rauchtest über 10 Symbole: 286 Signale, 79 Trades, +4,7 % über 2025,
-t = 1,06 bei 56 Handelstagen — **kein Befund**, und bei 10 Symbolen auch
-keiner zu erwarten. Der Lauf zählt trotzdem als Versuch Nr. 1.
+### Stand — erste Zahlen, ausdrücklich kein Befund
 
-Der Vorrat für 600 Symbole wird geladen. **Es liegt noch kein Ergebnis
-vor, das eine Aussage trüge** — dieser Eintrag hält fest, was gebaut und
-was vorab festgelegt wurde, nicht was gefunden wurde.
+| | Rauchtest | Belastungstest |
+|---|---:|---:|
+| Symbole | 10 | **598** |
+| Bars | 70.000 | **3,72 Mio** |
+| Laufzeit | 0,1 s | **5,2 s** |
+| Signale → Trades | 286 → 79 | 1.686 → 210 |
+| Rendite 2025 | +4,7 % | **+2,71 %** |
+| max. Rückgang | — | −11,7 % |
+| Trefferquote | 53,2 % | 41,9 % |
+| je Trade brutto → netto | — | **+0,312 % → +0,130 %** |
+| t (Handelstage) | 1,06 (56) | **0,19 (121)** |
+
+Konfiguration des Belastungstests: 10 % Anstieg über 2 Stunden,
+Umsatzschub ≥ 2×, 1 Tag Haltedauer, +10 % Ziel, −5 % Stop, 12,2 bps.
+
+**t = 0,19 über 121 Handelstage — kein Befund.** Der Vorrat umfasst 598
+Symbole, 86 MB; ein voller Durchlauf dauert 5 Sekunden, Herumprobieren
+ist damit praktikabel.
+
+**Eine Beobachtung, die den Unterschied zu §G54 zeigt:** Der
+Bruttoertrag je Trade liegt mit **+0,312 %** über der Kostenschwelle von
+0,182 % — anders als beim Umkehr-Bot, wo er sie nie erreicht. Die Kosten
+fressen hier 58 % des Bruttoergebnisses, nicht 160 %. Das ist genau das
+strukturelle Argument für diese Strategiefamilie.
+
+**Es ist trotzdem kein Befund.** Ein Punktschätzer mit t = 0,19 ist von
+null nicht zu unterscheiden, 2025 war ein steigender Markt, und der
+Survivorship-Vorbehalt aus §4.3 gilt in voller Stärke. Dieser Eintrag
+hält fest, was gebaut und was vorab festgelegt wurde — nicht, was
+gefunden wurde.
 
 ---
 

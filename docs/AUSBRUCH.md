@@ -118,6 +118,25 @@ angemeldete Vorwärtsbots; Historienläufe kosten dort bewusst keinen
 Platz (`BETRIEBSPLAN` §4). Hier läuft ein eigener Zähler für eine eigene
 Frage.
 
+### Die Grenze des Zählers — benannt, nicht beschönigt
+
+**Gezählt wird nur, was über die Oberfläche läuft.** `ausbruch.lauf()`
+ist eine reine Funktion und kennt die Datenbank nicht; ein direkter
+Aufruf aus einem Skript oder aus `python -c` erscheint nirgends im
+Zähler.
+
+Das ist bewusst so — eine Rechenfunktion, die beim Aufruf in eine
+Datenbank schreibt, wäre in Tests und in jedem anderen Zusammenhang
+unbrauchbar. Aber es heißt: **Der Zähler ist eine ehrliche Buchführung,
+keine Schranke.** Wer an ihm vorbei rechnet, hat die Historie genauso
+befragt; die Zahl in der Oberfläche ist dann zu niedrig, und die
+Schwelle damit zu leicht.
+
+Konkret betroffen: Der Belastungstest vom 11.09.2026 (598 Symbole,
+5,2 Sekunden) lief als Direktaufruf und steht deshalb nicht in
+`laeufe`. Wer Läufe außerhalb der Oberfläche fährt, führt sie von Hand
+nach — oder ruft `ausbruch_store.neuer_lauf()` selbst auf.
+
 ## 6. Das Gate — vorab festgelegt, bevor eine Zahl existiert
 
 Die Werkstatt darf eine Idee **verwerfen**, nie abnehmen
