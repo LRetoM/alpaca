@@ -151,8 +151,23 @@ def main() -> int:
         print("  (Sammelt sich mit der Laufzeit von selbst an.)")
     else:
         r = float(np.corrcoef(stich["t_lern"], stich["t_pruef"])[0, 1])
-        print(f"  {len(stich):,} unverzerrte Stichproben.")
+        n = len(stich)
+        print(f"  {n:,} unverzerrte Stichproben.")
         print(f"  Korrelation Lern gegen Pruef: {r:+.3f}")
+
+        # Die Unsicherheit gehoert danebengeschrieben, sonst liest sich
+        # +0,26 wie ein Befund. Und der ausgewiesene Fehler ist noch zu
+        # klein: Die Stichproben stammen aus Bergsteig-Ketten, benachbarte
+        # Konfigurationen sind also aehnlich. Die wirksame Zahl
+        # unabhaengiger Beobachtungen liegt unter n.
+        se = 1.0 / math.sqrt(max(n - 3, 1))
+        print(f"  Standardfehler (bei Unabhaengigkeit): +-{se:.3f}")
+        if abs(r) < 2 * se:
+            print("  -> von null NICHT zu unterscheiden.")
+        else:
+            print(f"  -> nominell von null verschieden. ACHTUNG: benachbarte")
+            print(f"     Versuche einer Bergsteig-Kette sind aehnlich, die")
+            print(f"     wirksame Stichprobe ist kleiner als {n:,}.")
         print()
         if r < 0.05:
             print("  Ein guter Lernwert sagt NICHTS ueber das Prueffenster.")

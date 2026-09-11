@@ -22,14 +22,39 @@ from alpaca_bot import ausbruch
 from alpaca_bot.ausbruch import AusbruchConfig, bars_aus_zeit, lauf
 
 
-def _reihe(kurse, volumen=None, start="2025-01-02 14:30", freq="15min"):
+def _handelszeit_index(n: int, start_tag="2025-01-02") -> pd.DatetimeIndex:
+    """`n` aufeinanderfolgende Bars INNERHALB der Handelszeit.
+
+    Seit §G62 wirft `Kursdaten` alles ausserhalb 09:30-16:00 weg. Ein
+    Testindex, der mit `date_range(freq="15min")` einfach durchlaeuft,
+    verliert dadurch die Mehrheit seiner Bars - der Test prueft dann
+    etwas anderes als gemeint. Deshalb wird hier wie in Wirklichkeit
+    nach 26 Bars auf den naechsten Handelstag umgebrochen.
+    """
+    stempel, tag, im_tag = [], pd.Timestamp(start_tag), 0
+    while len(stempel) < n:
+        if tag.weekday() >= 5:              # Wochenende ueberspringen
+            tag += pd.Timedelta(days=1)
+            continue
+        minute = 9 * 60 + 30 + 15 * im_tag
+        stempel.append(pd.Timestamp(
+            f"{tag:%Y-%m-%d} {minute // 60:02d}:{minute % 60:02d}",
+            tz="America/New_York"))
+        im_tag += 1
+        if im_tag >= 26:
+            im_tag = 0
+            tag += pd.Timedelta(days=1)
+    return pd.DatetimeIndex(stempel).tz_convert("UTC")
+
+
+def _reihe(kurse, volumen=None, start="2025-01-02", freq=None):
     """Baut einen Bar-Datensatz aus einer Schlusskursliste.
 
     open == close des Vorgaengers, high/low knapp darum - so bleibt der
     Datensatz frei von Zufaelligkeiten, die einen Test verrauschen.
     """
     n = len(kurse)
-    idx = pd.date_range(start, periods=n, freq=freq, tz="UTC")
+    idx = _handelszeit_index(n, start)
     c = np.asarray(kurse, dtype=float)
     o = np.concatenate([[c[0]], c[:-1]])
     return pd.DataFrame(
@@ -380,3 +405,71 @@ def test_tageszeitfenster_begrenzt_die_einstiege():
               _cfg(tageszeit_von_bar=20, tageszeit_bis_bar=26))
     assert len(offen.trades) >= 1
     assert len(zu.trades) == 0
+
+
+# ------------------------------------------------- Handelszeit (§G62)
+def _tagesreihe(zeiten, kurs=100.0):
+    """Bars zu genau diesen New Yorker Uhrzeiten an einem Tag."""
+    idx = pd.DatetimeIndex(
+        [pd.Timestamp(f"2025-06-02 {z}", tz="America/New_York") for z in zeiten]
+    ).tz_convert("UTC")
+    n = len(idx)
+    return pd.DataFrame(
+        {"open": [kurs] * n, "high": [kurs] * n, "low": [kurs] * n,
+         "close": [kurs] * n, "volume": [1e6] * n}, index=idx)
+
+
+def test_vorboersliche_bars_werden_verworfen():
+    """Regression zu BEFUNDE §G62 - der folgenschwerste Fund des Audits.
+
+    Alpaca liefert 15-Minuten-Bars ab 08:00 und bis 16:45. Gemessen
+    waren das 8,6 % aller Bars. Sie machen drei Dinge kaputt:
+    die Eroeffnungssperre schuetzt die falsche Tageszeit, die
+    Tageszeit-Suchachsen bedeuten jeden Tag etwas anderes, und die
+    Strategie darf dort handeln, wo die Spanne ein Vielfaches der
+    gemessenen 12,2 bps betraegt.
+    """
+    zeiten = ["08:00", "08:30", "09:00", "09:30", "12:00", "15:45",
+              "16:00", "16:30"]
+    kd = ausbruch.Kursdaten.aus_bars({"AAA": _tagesreihe(zeiten)})
+    ny = kd.achse.tz_convert("America/New_York")
+    minuten = ny.hour * 60 + ny.minute
+
+    assert minuten.min() >= 9 * 60 + 30, "Vorboerslicher Bar durchgerutscht."
+    assert minuten.max() < 16 * 60, "Nachboerslicher Bar durchgerutscht."
+    assert kd.n_bars == 3, f"Erwartet 09:30/12:00/15:45, bekam {kd.n_bars}"
+
+
+def test_erster_bar_des_tages_ist_die_eroeffnung():
+    """`bar_im_tag = 0` MUSS 09:30 sein.
+
+    Vor der Reparatur war es an den meisten Tagen 08:00 - die
+    Eroeffnungssperre schuetzte damit die vorboersliche Phase und liess
+    die eigentliche Eroeffnung ungeschuetzt. Gemessen: von 250 Tagen
+    begannen 104 um 08:00 und nur 52 um 09:30.
+    """
+    zeiten = ["08:00", "08:45", "09:30", "09:45", "10:00", "15:45", "16:30"]
+    kd = ausbruch.Kursdaten.aus_bars({"AAA": _tagesreihe(zeiten)})
+    ny = kd.achse.tz_convert("America/New_York")
+    erster = ny[kd.bar_im_tag == 0]
+    assert len(erster) == 1
+    assert erster[0].strftime("%H:%M") == "09:30"
+
+
+def test_tageslaenge_entspricht_der_konstanten():
+    """`BARS_JE_TAG = 26` steckt in der Horizontrechnung des
+    gruppierten Tests. Waren vor-/nachboersliche Bars dabei, hatte ein
+    Tag 27,6 bis 29,9 Bars - und der Horizont war entsprechend falsch."""
+    zeiten = [f"{9 + (30 + 15 * i) // 60:02d}:{(30 + 15 * i) % 60:02d}"
+              for i in range(26)]
+    kd = ausbruch.Kursdaten.aus_bars({"AAA": _tagesreihe(zeiten)})
+    assert kd.n_bars == ausbruch.BARS_JE_TAG == 26
+    assert kd.letzter_des_tages.sum() == 1
+
+
+def test_handelszeitfilter_laesst_sich_abschalten():
+    """Nur fuer Tests - der Vorgabewert bleibt True."""
+    zeiten = ["08:00", "09:30", "16:30"]
+    kd = ausbruch.Kursdaten.aus_bars({"AAA": _tagesreihe(zeiten)},
+                                     handelszeit_only=False)
+    assert kd.n_bars == 3

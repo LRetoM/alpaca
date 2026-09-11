@@ -395,11 +395,18 @@ class Kursdaten:
         return lern, pruef
 
     @classmethod
-    def aus_bars(cls, bars: dict[str, pd.DataFrame]) -> "Kursdaten":
-        """Baut die Ausrichtung aus fertig geladenen DataFrames."""
+    def aus_bars(cls, bars: dict[str, pd.DataFrame], *,
+                 handelszeit_only: bool = True) -> "Kursdaten":
+        """Baut die Ausrichtung aus fertig geladenen DataFrames.
+
+        `handelszeit_only` wirft vor- und nachboersliche Bars weg -
+        siehe `nur_handelszeit()`. Abschaltbar nur fuer Tests.
+        """
         if not bars:
             raise ValueError("Keine Kursdaten uebergeben.")
         achse = _achse_bauen(d.index for d in bars.values())
+        if handelszeit_only:
+            achse = achse[nur_handelszeit(achse)]
         arrays = {}
         for sym, df in bars.items():
             a = _ausrichten(df, achse)
@@ -409,6 +416,37 @@ class Kursdaten:
             raise ValueError("Kein Symbol hatte vollstaendige Spalten.")
         bit, ldt = _tagesraster(achse)
         return cls(achse, arrays, bit, ldt)
+
+
+# Regulaere US-Handelszeit in New Yorker Zeit.
+HANDEL_VON = 9 * 60 + 30      # 09:30
+HANDEL_BIS = 16 * 60          # 16:00, letzter Bar beginnt 15:45
+
+
+def nur_handelszeit(achse: pd.DatetimeIndex) -> np.ndarray:
+    """Maske: welche Bars liegen in der regulaeren Handelszeit?
+
+    **Warum das sein muss (BEFUNDE §G62).** Alpaca liefert
+    15-Minuten-Bars auch vor- und nachboerslich, gemessen ab 08:00 und
+    bis 16:45. Das waren 8,6 % aller Bars - und sie haben drei Dinge
+    kaputtgemacht:
+
+    * `bar_im_tag = 0` war an den meisten Tagen **08:00**, nicht 09:30.
+      Die Eroeffnungssperre schuetzte damit die vorboersliche Phase und
+      liess die eigentliche Eroeffnung um 09:30 voellig ungeschuetzt.
+    * `tageszeit_von_bar` und `tageszeit_bis_bar` sind Suchachsen. Wenn
+      ein Tag mal 14 und mal 36 Bars hat, bedeutet "Bar 8" jeden Tag
+      etwas anderes - die Achse misst dann Rauschen.
+    * Vor- und nachboerslich ist die Spanne ein Vielfaches der
+      gemessenen 12,2 bps. Die Suche darf dort nicht handeln, aus
+      demselben Grund wie bei den Pennystocks in §G60.
+
+    Nebenbei wird `BARS_JE_TAG = 26` damit wieder richtig: gemessen
+    waren es 27,6 bis 29,9.
+    """
+    ny = achse.tz_convert("America/New_York") if achse.tz is not None else achse
+    minuten = ny.hour * 60 + ny.minute
+    return np.asarray((minuten >= HANDEL_VON) & (minuten < HANDEL_BIS))
 
 
 def _achse_bauen(indizes) -> pd.DatetimeIndex:
@@ -761,8 +799,15 @@ def _kennzahlen(erg: Ergebnis, cfg: AusbruchConfig) -> dict:
                 t["rendite_pct"], pd.Series(tage.values),
                 horizont=horizont, min_gruppen=20,
             )
-            roh_t = float(getattr(res, "t_ueberlappung", None)
-                          or getattr(res, "t", 0.0))
+            # NICHT `t_ueberlappung or t`: `t_ueberlappung` ist per
+            # Vorgabe NaN, und NaN ist in Python WAHR - ein `or` wuerde
+            # das NaN durchreichen statt auf `t` auszuweichen. Ebenso
+            # wuerde ein legitimer Wert von exakt 0,0 faelschlich durch
+            # `t` ersetzt. `gruppierter_test` fuellt das Feld zwar immer,
+            # aber eine Auswahl, die nur zufaellig richtig liegt, ist
+            # keine Auswahl.
+            tu = getattr(res, "t_ueberlappung", float("nan"))
+            roh_t = float(tu) if tu == tu else float(getattr(res, "t", 0.0))
             # Bei zwei bis drei Handelstagen teilt der Test durch eine
             # Streuung nahe null und liefert Werte wie -1.598.723
             # (gemessen 11.09.2026, 7 von 10.912 Versuchen). Das ist

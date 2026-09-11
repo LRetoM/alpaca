@@ -217,6 +217,7 @@ def laden_kursdaten(
     raster: str = "15Min",
     max_symbole: int | None = None,
     min_bars: int = 500,
+    handelszeit_only: bool = True,
     fortschritt: Callable[[float, str], None] | None = None,
 ):
     """Laedt den Vorrat direkt in ein `ausbruch.Kursdaten`-Objekt.
@@ -274,6 +275,13 @@ def laden_kursdaten(
         raise FileNotFoundError("Keine lesbaren Dateien im Vorrat.")
     achse = _a._achse_bauen(indizes)
     del indizes
+    if handelszeit_only:
+        # Vor- und nachboersliche Bars raus - siehe
+        # `ausbruch.nur_handelszeit()` und BEFUNDE §G62.
+        vorher = len(achse)
+        achse = achse[_a.nur_handelszeit(achse)]
+        melde(0.3, f"Handelszeit-Filter: {vorher - len(achse):,} von "
+                   f"{vorher:,} Bars verworfen (vor-/nachboerslich)")
 
     # --- Durchgang 2: ausrichten, DataFrame sofort verwerfen ----------
     arrays: dict[str, tuple] = {}

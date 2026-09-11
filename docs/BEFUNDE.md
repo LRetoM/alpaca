@@ -6410,6 +6410,131 @@ Bestwert an (§G59). Die Suche baut also auf, sie würfelt nicht.
 
 ---
 
+## G62. Systematisches Audit der Ausbruch-Werkstatt — ein schwerer Fund, drei Entwarnungen (11.09.2026)
+
+**Anlass.** Drei Fehler an einem Tag (§G55, §G60, §G61), alle drei
+**zufällig** beim Beantworten anderer Fragen gefunden, keiner durch
+systematisches Prüfen. Der Nutzer hat das zu Recht beanstandet. Dieser
+Eintrag ist das nachgeholte Audit: die Kette von den Rohdaten bis zur
+Auswertung, Stück für Stück.
+
+### Der schwere Fund: vor- und nachbörsliche Bars
+
+Alpaca liefert 15-Minuten-Bars **ab 08:00 und bis 16:45**. Gemessen:
+
+| | Anteil |
+|---|---:|
+| vor 09:30 | 6,7 % |
+| ab 16:00 | 1,9 % |
+| **gesamt außerhalb** | **8,6 %** |
+
+Das hat drei Dinge kaputtgemacht — und keines davon hätte einen Absturz
+erzeugt:
+
+**1. Die Eröffnungssperre schützte die falsche Tageszeit.**
+
+| `bar_im_tag` | war | sollte |
+|---|---|---|
+| 0 (geschützt) | **08:00** an 104 von 250 Tagen | 09:30 |
+| 2 (erster Kauf) | **08:30** | 10:00 |
+
+Die Sperre schützte also die vorbörsliche Phase und ließ die
+eigentliche Eröffnung um 09:30 — die volatilste Viertelstunde des
+Tages — völlig ungeschützt.
+
+**2. Die Tageszeit-Achsen maßen Rauschen.** `tageszeit_von_bar` und
+`tageszeit_bis_bar` sind Suchachsen. Bei 14 bis 36 Bars je Tag
+(Median 29) bedeutet „Bar 8" jeden Tag eine andere Uhrzeit.
+
+**3. Die Strategie durfte vor- und nachbörslich handeln.** Dort ist die
+Spanne ein Vielfaches der gemessenen 12,2 bps — dieselbe Klasse von
+Fehler wie die Pennystocks in §G60, nur eine Ebene tiefer versteckt.
+
+**Nebenwirkung:** `BARS_JE_TAG = 26` steckt in der Horizontrechnung des
+gruppierten Tests. Tatsächlich waren es 27,6 (Lernfenster) bis 29,9
+(Prüffenster) — der Überlappungshorizont war entsprechend falsch.
+
+### Behoben
+
+`ausbruch.nur_handelszeit()` filtert die Zeitachse auf
+09:30 ≤ t < 16:00 New Yorker Zeit, angewandt in `Kursdaten.aus_bars`
+und `ausbruch_daten.laden_kursdaten`. Nachher gemessen:
+
+| | vorher | nachher |
+|---|---|---|
+| Zeitfenster | 08:00–16:45 | **09:30–15:45** |
+| Bars je Tag | 27,6–29,9 | **25,85** |
+| `bar_im_tag = 0` | 08:00 (meist) | **09:30 an allen 923 Tagen** |
+
+Vier Regressionstests. Dazu mussten die Test-Hilfsfunktionen
+umgeschrieben werden: Ein durchlaufender `date_range` erzeugt Bars
+rund um die Uhr, verliert nach dem Filter die Mehrheit und lässt die
+Tests ins Leere prüfen — sie brechen jetzt wie in Wirklichkeit nach 26
+Bars auf den nächsten Handelstag um.
+
+### Was geprüft wurde und in Ordnung war
+
+| Geprüft | Ergebnis |
+|---|---|
+| Lookahead beim Einstieg | **sauber** — Kauf liegt immer nach dem Signalbar |
+| Lookahead im Umsatzschub-Filter | **sauber** — das Referenzfenster endet vor dem Signalfenster (Indizes nachgerechnet) |
+| Mehrjahres-Verkettung | **sauber** — 0 doppelte Zeitstempel, aufsteigend, saubere Jahresübergänge |
+| Depotwert negativ? | **nein** — auch bei 10 Positionen à 50 % und −95 % Kurssturz |
+| Positionsgrenzen | **eingehalten** |
+| Renditerechnung | stimmt mit den Kursen überein |
+| Versuche mit < 20 Handelstagen | **0** — `min_trades = 60` fängt sie ab |
+| Lern-/Prüf-Schnitt | 662 gegen 262 Handelstage, sinnvoll |
+
+### Eine fragile Stelle, kein aktiver Fehler
+
+```python
+float(getattr(res, "t_ueberlappung", None) or getattr(res, "t", 0.0))
+```
+
+`t_ueberlappung` ist per Vorgabe `NaN`, und **`NaN` ist in Python wahr** —
+ein `or` reicht das `NaN` durch, statt auf `t` auszuweichen. Ebenso
+würde ein legitimer Wert von exakt `0.0` fälschlich ersetzt.
+
+**Aktuell richtet das keinen Schaden an**, weil `gruppierter_test` das
+Feld immer füllt (nachgemessen bei Horizont 1, 2 und 5). Trotzdem
+ersetzt durch eine ausdrückliche `NaN`-Prüfung: Eine Auswahl, die nur
+zufällig richtig liegt, ist keine Auswahl.
+
+### Ergänzt: die Unsicherheit neben der Korrelation
+
+`52_ausbruch_auswertung.py` gab die Korrelation zwischen Lern- und
+Prüfwert ohne Fehlerangabe aus — so liest sich +0,26 wie ein Befund.
+Jetzt steht der Standardfehler daneben, **mit dem Hinweis, dass er zu
+klein ist**: Die Stichproben stammen aus Bergsteig-Ketten, benachbarte
+Konfigurationen sind ähnlich, die wirksame Zahl unabhängiger
+Beobachtungen liegt unter n.
+
+### Die 13.723 Versuche sind verworfen
+
+Nach `data/ausbruch_verworfen_G62/` verschoben. Sie liefen auf Daten mit
+vorbörslichen Bars und sind mit den neuen nicht vergleichbar. Im
+Versuchszähler bleiben sie.
+
+### Die Lehre
+
+**Drei der vier Fehler dieses Tages (§G60, §G61, §G62) haben dieselbe
+Form:** Das Werkzeug lief, stürzte nicht ab, lieferte plausible Zahlen —
+und die Zahlen beschrieben etwas anderes als gemeint. Kein Test hätte
+angeschlagen, weil kein Test die Frage stellte.
+
+Daraus folgt für jedes weitere Messwerkzeug in diesem Projekt:
+
+> **Bevor ein Werkzeug tagelang läuft, gehört einmal die ganze Kette
+> geprüft — von den Rohdaten bis zur Kennzahl. Nicht ob es läuft,
+> sondern ob jede Zwischengröße das bedeutet, was ihr Name sagt.**
+
+Die vier Fragen, die dieses Audit gefunden haben:
+*Liegen die Daten im erwarteten Wertebereich? Bedeutet jeder Index das,
+was er soll? Gilt das Kostenmodell über den ganzen zugelassenen Bereich?
+Kann eine Kennzahl entarten?*
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

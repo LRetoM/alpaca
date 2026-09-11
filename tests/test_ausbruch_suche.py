@@ -23,8 +23,16 @@ from alpaca_bot import ausbruch_store, ausbruch_suche as su
 
 
 def _bars(n=1200, saat=7):
+    """Zufaellige Kursreihe INNERHALB der Handelszeit.
+
+    Seit §G62 wirft `Kursdaten` alles ausserhalb 09:30-16:00 weg. Ein
+    durchlaufender `date_range` verliert dadurch die Mehrheit seiner
+    Bars, und keine Konfiguration erreicht mehr die Mindestzahl Trades -
+    die Tests pruefen dann nichts mehr.
+    """
+    from tests.test_ausbruch import _handelszeit_index
     r = np.random.default_rng(saat)
-    idx = pd.date_range("2025-01-02 14:30", periods=n, freq="15min", tz="UTC")
+    idx = _handelszeit_index(n)
     c = 100 * np.exp(np.cumsum(r.normal(0, 0.004, n)))
     o = np.concatenate([[c[0]], c[:-1]])
     return pd.DataFrame(
