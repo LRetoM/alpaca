@@ -71,11 +71,14 @@ CREATE TABLE IF NOT EXISTS symbol_stat (
     median_pct REAL, summe_usd REAL, bester_pct REAL, schlechtester_pct REAL
 );
 CREATE INDEX IF NOT EXISTS idx_symstat_lauf ON symbol_stat(lauf_id);
+CREATE TABLE IF NOT EXISTS suchversuche (
+    lauf_id TEXT PRIMARY KEY, n INTEGER NOT NULL, gebucht_am TEXT
+);
 """
 
 __all__ = ["DB", "neuer_lauf", "abschliessen", "speichern", "n_versuche",
            "schwelle_sigma", "laeufe", "trades_von", "bestenliste",
-           "lauf_loeschen"]
+           "lauf_loeschen", "suchversuche_buchen"]
 
 
 @contextmanager
@@ -155,15 +158,41 @@ def speichern(lauf_id: str, trades: pd.DataFrame, equity: pd.Series,
                          ).to_sql("equity", c, if_exists="append", index=False)
 
 
-def n_versuche() -> int:
-    """Wie viele Ausbruch-Laeufe je gestartet wurden.
+def suchversuche_buchen(lauf_id: str, n: int) -> None:
+    """Traegt die Teilversuche einer automatischen Suche nach.
 
-    Gezaehlt werden auch abgebrochene: Ein Lauf, den man ansieht und
-    wegwirft, hat die Historie genauso befragt wie einer, den man
-    behaelt.
+    Eine Suche ist EIN Eintrag in `laeufe`, hat die Daten aber
+    n-mal befragt. Ohne diese Buchung wuerde eine Suche mit 3.000
+    Durchlaeufen die Schwelle um denselben Betrag heben wie ein
+    einziger Handlauf - und genau daran wuerde die ganze Zaehlung
+    wertlos.
     """
     with _conn() as c:
-        return int(c.execute("SELECT COUNT(*) FROM laeufe").fetchone()[0])
+        c.execute("INSERT OR REPLACE INTO suchversuche VALUES (?,?,?)",
+                  (lauf_id, int(n), dt.datetime.now(dt.UTC).isoformat()))
+
+
+def n_versuche() -> int:
+    """Wie oft die Historie fuer diese Strategiefamilie befragt wurde.
+
+    **Handlaeufe plus alle Teilversuche automatischer Suchen.** Das ist
+    die unbequeme, aber einzige ehrliche Zaehlung: Eine Suche mit 3.000
+    Durchlaeufen hat die Daten 3.000-mal gesehen, und keine spaetere
+    Auswertung kann so tun, als waere sie die erste. Die Schwelle steigt
+    entsprechend fuer ALLE - auch fuer Handlaeufe in der Werkstatt.
+
+    Gezaehlt werden auch abgebrochene und verworfene Laeufe: Ein Lauf,
+    den man ansieht und wegwirft, hat die Historie genauso befragt wie
+    einer, den man behaelt.
+    """
+    with _conn() as c:
+        hand = int(c.execute("SELECT COUNT(*) FROM laeufe").fetchone()[0])
+        # Eine Suche zaehlt als ihre Teilversuche, nicht zusaetzlich als
+        # eigener Lauf - sonst waere sie um eins zu teuer.
+        such_n = c.execute(
+            "SELECT COALESCE(SUM(n), 0), COUNT(*) FROM suchversuche"
+        ).fetchone()
+    return hand - int(such_n[1]) + int(such_n[0])
 
 
 def schwelle_sigma(n: int | None = None) -> float:

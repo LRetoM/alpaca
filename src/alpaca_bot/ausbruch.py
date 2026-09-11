@@ -152,6 +152,35 @@ class AusbruchConfig:
     trailing_pct: float = 0.0
     """Nachziehender Stop unter dem Hoechstkurs seit Einstieg. 0 = aus."""
 
+    zeitausstieg_nur_bei_verlust: bool = False
+    """Laeuft die Frist ab und die Position steht im GEWINN, wird
+    weitergehalten statt verkauft - bis `halten_bars_hart`.
+
+    Das ist die Fassung von "Gewinner laufen lassen", die den Umschlag
+    wirklich senkt: Verlierer gehen puenktlich, Gewinner bleiben. Im
+    Umkehr-Bot heisst dieselbe Idee `zeitausstieg_dynamisch` und wird
+    dort seit dem 18.08.2026 als B11 vorwaerts gemessen."""
+
+    halten_bars_hart: int = 0
+    """Absolute Obergrenze, wenn `zeitausstieg_nur_bei_verlust` greift.
+    0 = das Dreifache von `halten_bars`. Ohne diese Grenze koennte eine
+    Position bis zum Jahresende gehalten werden, solange sie einen Cent
+    im Plus steht."""
+
+    einstieg_verzoegerung_bars: int = 0
+    """Erst so viele Bars NACH dem Folgebar kaufen. 0 = wie bisher.
+
+    Der eigentliche Test der Idee: Laeuft die Bewegung wirklich nach?
+    Wer erst eine Stunde spaeter einsteigt, zahlt nicht den Sprung
+    selbst - verpasst aber den Teil der Bewegung, der sofort kommt.
+    Welche Seite ueberwiegt, ist genau die offene Frage."""
+
+    tageszeit_von_bar: int = 0
+    tageszeit_bis_bar: int = 26
+    """Nur zwischen diesen Bars des Handelstages einsteigen (0 = 09:30).
+    Ausbrueche am Vormittag und am Nachmittag haben verschiedene
+    Ursachen - Meldungen kommen ueberwiegend vor Handelsbeginn."""
+
     # --- Kosten --------------------------------------------------------
     spanne_bps: float = 12.2
     """Geld-Brief-Spanne in bps. 12,2 ist der gemessene Median des
@@ -484,8 +513,13 @@ def lauf(
                                         else p["ziel"]), "gewinnziel")
                 continue
             if i - p["bar"] >= cfg.halten_bars:
-                _schliessen(sym, i, c[i], "zeit")
-                continue
+                hart = cfg.halten_bars_hart or cfg.halten_bars * 3
+                im_gewinn = np.isfinite(c[i]) and c[i] > p["roh_einstieg"]
+                if not (cfg.zeitausstieg_nur_bei_verlust and im_gewinn
+                        and i - p["bar"] < hart):
+                    _schliessen(sym, i, c[i],
+                                "zeit_hart" if i - p["bar"] >= hart else "zeit")
+                    continue
             if not cfg.ueber_nacht and letzter_des_tages[i]:
                 _schliessen(sym, i, c[i], "tagesschluss")
                 continue
@@ -500,10 +534,15 @@ def lauf(
         equity_werte[i] = wert
 
         # --- 3c. Einstiege: Signal von Bar i-1, Kauf zum Open von i ---
-        kandidaten = signale.get(i - 1, [])
+        # Signal von Bar i-1-Verzoegerung: bei 0 also der Vorgaengerbar,
+        # wie bisher. Der Kauf bleibt in jedem Fall NACH dem Signalbar -
+        # eine Verzoegerung kann Lookahead nicht erzeugen, nur vermeiden.
+        kandidaten = signale.get(i - 1 - cfg.einstieg_verzoegerung_bars, [])
         if not kandidaten:
             continue
         if bar_im_tag[i] < cfg.eroeffnung_sperre_bars:
+            continue
+        if not (cfg.tageszeit_von_bar <= bar_im_tag[i] <= cfg.tageszeit_bis_bar):
             continue
         # Der GANZE Bereich bis zum Schluss ist gesperrt, nicht nur der
         # eine Bar `i + schluss_sperre_bars`. Bei einem Wert von 3 waere

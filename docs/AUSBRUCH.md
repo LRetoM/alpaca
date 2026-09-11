@@ -48,7 +48,10 @@ werden.
 | `src/alpaca_bot/ausbruch_daten.py` | Lokaler Bar-Vorrat als Parquet. Einmal laden, dann liest jeder Test von der Platte. |
 | `src/alpaca_bot/ausbruch_store.py` | `ausbruch.sqlite`: Läufe, Trades, Depotkurve, Symbol-Bestenliste, **Versuchszähler**. |
 | `scripts/46_ausbruch.py` | Oberfläche. Lokaler Server, Browser-UI, Live-Strom. |
-| `tests/test_ausbruch.py` | 20 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
+| `src/alpaca_bot/ausbruch_suche.py` | Automatische Suche: Erkundung, Bergsteigen, Neustart — mit Lern-/Prüffenster. |
+| `scripts/47_ausbruch_suche.py` | Live-Terminal für die Suche. |
+| `tests/test_ausbruch.py` | 25 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
+| `tests/test_ausbruch_suche.py` | 16 Tests, Schwerpunkt auf der Fenster-Trennung. |
 
 **Handelt nicht.** Kein Import von `trading.py`, kein Dienst ruft es
 auf. Der Weg zu echtem Geld führt über die Flotte
@@ -137,12 +140,81 @@ Konkret betroffen: Der Belastungstest vom 11.09.2026 (598 Symbole,
 `laeufe`. Wer Läufe außerhalb der Oberfläche fährt, führt sie von Hand
 nach — oder ruft `ausbruch_store.neuer_lauf()` selbst auf.
 
+## 5a. Die automatische Suche (`scripts/47_ausbruch_suche.py`)
+
+```
+python scripts/47_ausbruch_suche.py                  # Strg+C beendet
+python scripts/47_ausbruch_suche.py --symbole 200    # schneller, gröber
+python scripts/47_ausbruch_suche.py --score calmar
+python scripts/47_ausbruch_suche.py --fest halten_bars=26
+```
+
+Probiert Kombinationen durch, merkt sich die beste und sucht von dort
+weiter — **Erkundung → Bergsteigen → Neustart** im Wechsel, bis du
+abbrichst. Live-Terminal mit Versuchszahl, Tempo, Phase, aktuell bester
+Konfiguration und den letzten zwölf Versuchen.
+
+Tempo gemessen: **~1 Sekunde je Versuch bei 150 Symbolen**, ~5 s bei
+598. Also 700–3.600 Versuche pro Stunde.
+
+### Die eine Sache, die diese Suche überhaupt zulässig macht
+
+Eine Suche über 6·10¹¹ Kombinationen ist die perfekte Maschine zur
+Herstellung von Scheingewinnern. Bei N Versuchen liegt das
+Zufallsmaximum bei `sqrt(2 ln N)` — nach 3.000 Durchläufen bei **4,00**.
+Sie *wird* eine Konfiguration mit t > 4 finden, auch auf reinem Rauschen.
+
+Deshalb wird das Jahr geschnitten:
+
+```
+|<------- LERNFENSTER (70 %) ------->|<-- PRÜFFENSTER (30 %) -->|
+   Hier wird optimiert.                 Hier wird NUR nachgesehen.
+   Tausende Versuche.                   Kein Versuch wählt danach aus.
+```
+
+Findet die Suche im Lernfenster etwas Besseres, wird dieselbe
+Konfiguration **einmal** im Prüffenster nachgerechnet — protokolliert,
+aber **nie zur Auswahl benutzt**. Sonst wäre das Prüffenster nach dem
+zweiten Treffer genauso verbraucht wie das Lernfenster.
+
+**Die Zahl, auf die es ankommt, steht deshalb rechts, nicht links.**
+Und noch aussagekräftiger ist der **Abstand** zwischen beiden: Fällt eine
+Konfiguration von t=2,2 im Lernfenster auf t=−0,6 im Prüffenster, ist
+sie an den Lernzeitraum angepasst und nicht gut.
+
+> **Erster Probelauf (11.09.2026, 60 Symbole, 107 Versuche in 42
+> Sekunden):** Lernfenster t = 2,17 (+2,07 %), Prüffenster t = −0,55
+> (−0,88 %), **Abstand +2,72**. Genau das erwartete Bild. Die Suche
+> funktioniert — und ihr erstes Ergebnis ist die Bestätigung, dass der
+> Schutzmechanismus greift.
+
+### Jeder Teilversuch hebt die Schwelle — für alle
+
+`ausbruch_store.n_versuche()` zählt Handläufe **und** Suchversuche
+zusammen. Eine Suche mit 3.000 Durchläufen hebt die Hürde auf 4,00 —
+auch für spätere Handläufe in der Werkstatt. Das ist unbequem und
+richtig: Die Daten sind 3.000-mal befragt worden, und keine spätere
+Auswertung kann so tun, als wäre sie die erste.
+
+### Warum kein neuronales Netz
+
+Bei ~17 Achsen und Sekunden je Durchlauf ist örtliche Suche mit
+Neustarts schneller, nachvollziehbar und hat keine eigenen
+Hyperparameter, die wieder angepasst werden müssten. Ein DQN würde hier
+dasselbe tun, nur langsamer und undurchsichtiger — und seine
+Zwischenergebnisse wären nicht als Konfigurationszeile lesbar.
+
+---
+
 ## 6. Das Gate — vorab festgelegt, bevor eine Zahl existiert
 
 Die Werkstatt darf eine Idee **verwerfen**, nie abnehmen
 (`BETRIEBSPLAN` §4). Der Weg nach vorn ist ein Flottenbot im
 Vorwärtsschatten — und dafür muss **alles** davon zutreffen:
 
+0. **Wenn die Konfiguration aus einer automatischen Suche stammt:
+   Maßgeblich ist allein das Prüffenster.** Der beste Wert im
+   Lernfenster ist bei genug Versuchen garantiert gut und zählt nicht.
 1. **t über der Zufallsschwelle** von `ausbruch_store.schwelle_sigma()`,
    überlappungskorrigiert, bei mindestens **60 Handelstagen** mit Trades.
 2. **Mindestens 200 Trades.** Darunter trägt die Streuungsschätzung nicht.

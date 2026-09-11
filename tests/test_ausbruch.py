@@ -307,3 +307,76 @@ def test_schlusssperre_deckt_den_ganzen_bereich_ab():
     assert len(zu.trades) == 0, (
         "Mit Sperre 3 darf kurz vor Handelsschluss nicht gekauft werden."
     )
+
+
+# ------------------------------------------------- Die fuenf neuen Hebel
+def test_gewinner_werden_laenger_gehalten():
+    """`zeitausstieg_nur_bei_verlust`: Frist abgelaufen, Position im
+    Gewinn -> weiterhalten. Das ist die Fassung von "Gewinner laufen
+    lassen", die den Umschlag wirklich senkt."""
+    # Steigt durchgehend: bei Ablauf der Frist im Plus.
+    kurse = [100, 100, 100, 120, 122, 124, 126, 128, 130, 132, 134, 136]
+    puenktlich = lauf({"AAA": _reihe(kurse)},
+                      _cfg(halten_bars=2, sperrfrist_bars=999))
+    laenger = lauf({"AAA": _reihe(kurse)},
+                   _cfg(halten_bars=2, sperrfrist_bars=999,
+                        zeitausstieg_nur_bei_verlust=True))
+
+    assert puenktlich.trades.iloc[0]["gehalten_bars"] == 2
+    assert laenger.trades.iloc[0]["gehalten_bars"] > 2, (
+        "Eine Position im Gewinn muss ueber die Frist hinaus gehalten werden."
+    )
+
+
+def test_harte_grenze_beendet_auch_einen_gewinner():
+    """Ohne absolute Obergrenze koennte eine Position bis Jahresende
+    gehalten werden, solange sie einen Cent im Plus steht."""
+    kurse = [100, 100, 100] + [120 + i for i in range(20)]
+    erg = lauf({"AAA": _reihe(kurse)},
+               _cfg(halten_bars=2, halten_bars_hart=5, sperrfrist_bars=999,
+                    zeitausstieg_nur_bei_verlust=True))
+    t = erg.trades.iloc[0]
+    assert t["gehalten_bars"] == 5
+    assert t["grund"] == "zeit_hart"
+
+
+def test_verlierer_gehen_trotz_gewinner_regel_puenktlich():
+    """Die Gegenprobe: Die Regel darf NUR Gewinner verlaengern."""
+    kurse = [100, 100, 100, 120, 118, 116, 114, 112, 110]
+    erg = lauf({"AAA": _reihe(kurse)},
+               _cfg(halten_bars=2, sperrfrist_bars=999,
+                    zeitausstieg_nur_bei_verlust=True))
+    assert erg.trades.iloc[0]["gehalten_bars"] == 2
+    assert erg.trades.iloc[0]["grund"] == "zeit"
+
+
+def test_verzoegerter_einstieg_kauft_spaeter_und_teurer():
+    """`einstieg_verzoegerung_bars` verschiebt den Kauf nach hinten.
+
+    Wichtig: Eine Verzoegerung kann Lookahead nicht erzeugen, nur
+    vermeiden - der Kauf liegt in jedem Fall NACH dem Signalbar.
+    """
+    kurse = [100, 100, 100, 120, 125, 130, 135, 140, 140]
+    sofort = lauf({"AAA": _reihe(kurse)}, _cfg(halten_bars=1, sperrfrist_bars=999))
+    spaeter = lauf({"AAA": _reihe(kurse)},
+                   _cfg(halten_bars=1, sperrfrist_bars=999,
+                        einstieg_verzoegerung_bars=2))
+
+    e_sofort = sofort.trades.iloc[0]
+    e_spaet = spaeter.trades.iloc[0]
+    assert e_spaet["einstieg_ts"] > e_sofort["einstieg_ts"]
+    assert e_spaet["einstieg_kurs"] > e_sofort["einstieg_kurs"]
+
+
+def test_tageszeitfenster_begrenzt_die_einstiege():
+    """Meldungen kommen ueberwiegend vor Handelsbeginn - ob ein
+    Ausbruch am Vormittag anders laeuft als am Nachmittag, ist damit
+    pruefbar."""
+    kurse = [100, 100, 100, 120, 120, 120, 120, 120]
+    offen = lauf({"AAA": _reihe(kurse)},
+                 _cfg(tageszeit_von_bar=0, tageszeit_bis_bar=26))
+    # Fenster liegt komplett hinter dem Signal -> kein Einstieg.
+    zu = lauf({"AAA": _reihe(kurse)},
+              _cfg(tageszeit_von_bar=20, tageszeit_bis_bar=26))
+    assert len(offen.trades) >= 1
+    assert len(zu.trades) == 0

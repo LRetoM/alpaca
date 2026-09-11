@@ -6080,6 +6080,46 @@ Survivorship-Vorbehalt aus §4.3 gilt in voller Stärke. Dieser Eintrag
 hält fest, was gebaut und was vorab festgelegt wurde — nicht, was
 gefunden wurde.
 
+### Nachtrag: die automatische Suche und ihr erstes Ergebnis
+
+Auf Nutzerwunsch ergänzt (`ausbruch_suche.py`, `scripts/47_...`): ein
+Verfahren, das Kombinationen durchprobiert, sich die beste merkt und von
+dort weitersucht — Erkundung, Bergsteigen, Neustart im Wechsel, mit
+Live-Terminal. Suchraum: 17 Achsen, **6,3·10¹¹ Kombinationen**. Tempo
+~1 s je Versuch bei 150 Symbolen.
+
+**Das Gegenmittel ist eingebaut, nicht angeflanscht.** Das Jahr wird
+zeitlich in Lernfenster (70 %) und Prüffenster (30 %) geschnitten.
+Optimiert wird ausschließlich auf dem Lernfenster; das Prüffenster wird
+bei jedem neuen Besten *einmal* nachgerechnet und **nie zur Auswahl
+benutzt**. Maßgeblich ist der Abstand zwischen beiden.
+
+**Erster Probelauf (60 Symbole, 107 Versuche in 42 Sekunden):**
+
+| | Lernfenster | Prüffenster |
+|---|---:|---:|
+| t-Wert | **+2,17** | **−0,55** |
+| Rendite | +2,07 % | −0,88 % |
+| Trades | 57 | 19 |
+
+**Abstand +2,72 nach nur 107 Versuchen.** Das ist keine Enttäuschung,
+sondern der Nachweis, dass der Schutzmechanismus greift: Genau so sieht
+eine Konfiguration aus, die den Lernzeitraum beschreibt und sonst
+nichts. Ohne die Fenstertrennung stünde hier „t = 2,17 gefunden" — und
+das wäre die Illusion mit Nachkommastellen, vor der §B2 warnt.
+
+**Der Zähler zählt beides zusammen.** `n_versuche()` summiert Handläufe
+und alle Teilversuche automatischer Suchen. Eine Suche mit 3.000
+Durchläufen hebt die Schwelle auf `sqrt(2 ln 3000)` = **4,00** — auch
+für spätere Handläufe in der Werkstatt. Stand nach dem Probelauf: 108
+Versuche, Schwelle 3,06.
+
+**Eigener Fehler dabei:** Im ersten Entwurf stand `sqrt(2 ln 3000)` =
+3,58 im Docstring. Richtig sind 4,00 (3,58 wäre ln 600). Der Code
+rechnete korrekt, nur der erklärende Text war falsch — und genau solche
+abgeschriebenen Zahlen sind laut §G19 Fund 2 der Weg, auf dem eine Hürde
+unbemerkt sinkt.
+
 ---
 
 ## H. Betrieb — was sich bewährt hat
