@@ -6346,6 +6346,70 @@ Millionen Versuche trifft keine bewusste Entscheidung.
 
 ---
 
+## G61. Sieben t-Werte von −1,6 Millionen im Versuchsprotokoll (11.09.2026)
+
+**Der Fund.** Beim Nachsehen, ob die Suche wirklich auf guten
+Ergebnissen aufbaut, fiel ein mittlerer Lern-t-Wert von **−816,78** auf.
+Ein t-Wert in dieser Größenordnung ist keine Messung.
+
+Ursache: **7 von 10.912 Versuchen** mit 2 bis 5 Trades über 2 bis 3
+Handelstage. Dort teilt `statistik.gruppierter_test` durch eine
+Streuung nahe null:
+
+| t_lern | Trades | Handelstage |
+|---:|---:|---:|
+| −1.598.723 | 3 | 3 |
+| −1.096.322 | 5 | 3 |
+| −1.065.815 | 2 | 2 |
+
+**Die Suche selbst war nicht betroffen** — `score` ist bei diesen
+Zeilen `NULL`, sie fallen durch die Mindestzahl Trades und konnten nie
+gewinnen. Auch `scripts/52_ausbruch_auswertung.py` filtert sie heraus
+(`score.notna()`).
+
+### Warum es trotzdem behoben gehört
+
+**Die Randverteilung je Achse ist ein Mittelwert** — und ein einziger
+Wert von −1,6 Millionen kippt jeden Mittelwert. Wer eine schnelle
+Zwischenrechnung auf dem Rohprotokoll macht, bekommt Unsinn. Genau das
+ist beim Nachsehen passiert: −816,78 statt −0,1.
+
+Das ist dieselbe Klasse wie §G16 Fund 9 (Mittelwert statt Median bei der
+Kostenkontrolle, −92,0 bps statt +0,0) — ein einzelner kaputter Wert,
+der eine Kennzahl unbrauchbar macht, ohne dass etwas abstürzt.
+
+### Behoben, doppelt
+
+| Stelle | Riegel |
+|---|---|
+| `ausbruch._kennzahlen` | `t_wert` wird `NaN`, sobald `abs(t) >= 50` |
+| `ausbruch_versuche._z` | dasselbe beim Schreiben ins Protokoll |
+
+Doppelt, weil ein Protokoll, das auf die Sauberkeit seines Lieferanten
+vertraut, genau so lange sauber ist wie der Lieferant.
+
+Die Grenze von 50 ist großzügig: Der höchste je gemessene echte Wert
+lag bei 6,54, das 99,9-Perzentil bei 5,15. Ein Test
+(`test_grenze_laesst_echte_t_werte_durch`) sichert ab, dass die Grenze
+keine echten Funde frisst.
+
+Die 7 bestehenden Zeilen wurden auf `NULL` gesetzt.
+
+### Nebenbefund: die Suche klettert tatsächlich
+
+Dieselbe Abfrage beantwortete die Ausgangsfrage:
+
+| Phase | Versuche | Anteil |
+|---|---:|---:|
+| Bergsteigen | 10.960 | **98 %** |
+| Erkundung | 240 | 2 % |
+
+Nur die ersten 60 Versuche je Instanz sind Zufall. Danach wird
+durchgehend geklettert, und 40 % der Neustarts setzen beim gemeinsamen
+Bestwert an (§G59). Die Suche baut also auf, sie würfelt nicht.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

@@ -761,8 +761,19 @@ def _kennzahlen(erg: Ergebnis, cfg: AusbruchConfig) -> dict:
                 t["rendite_pct"], pd.Series(tage.values),
                 horizont=horizont, min_gruppen=20,
             )
-            k["t_wert"] = float(getattr(res, "t_ueberlappung", None)
-                                or getattr(res, "t", 0.0))
+            roh_t = float(getattr(res, "t_ueberlappung", None)
+                          or getattr(res, "t", 0.0))
+            # Bei zwei bis drei Handelstagen teilt der Test durch eine
+            # Streuung nahe null und liefert Werte wie -1.598.723
+            # (gemessen 11.09.2026, 7 von 10.912 Versuchen). Das ist
+            # kein t-Wert, sondern eine Division durch fast nichts.
+            #
+            # Die Suche selbst stoert das nicht - solche Laeufe fallen
+            # ohnehin durch die Mindestzahl Trades. Aber im Protokoll
+            # kippt ein einziger solcher Wert jeden Mittelwert, und die
+            # Randverteilung je Achse ist genau ein Mittelwert. Deshalb
+            # gar nicht erst hineinschreiben.
+            k["t_wert"] = roh_t if abs(roh_t) < 50.0 else float("nan")
             k["t_naiv"] = float(getattr(res, "t_naiv", 0.0))
             k["n_handelstage"] = int(getattr(res, "n_gruppen", 0))
             k["belastbar"] = bool(getattr(res, "belastbar", False))

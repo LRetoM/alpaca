@@ -140,3 +140,46 @@ def test_protokoll_ueberlebt_neuanlage():
     p2.merken(_versuch(nr=6))
     p2.leeren()
     assert p2.anzahl() == 6
+
+
+def test_unmoegliche_t_werte_werden_nicht_gespeichert():
+    """Regression zu BEFUNDE §G61 (11.09.2026).
+
+    Bei zwei bis drei Handelstagen teilt der gruppierte Test durch eine
+    Streuung nahe null. Gemessen: 7 von 10.912 Versuchen lieferten
+    Werte bis -1.598.723. Das ist kein t-Wert.
+
+    Die Suche stoert das nicht - solche Laeufe fallen durch die
+    Mindestzahl Trades. Aber ein einziger solcher Wert kippt jeden
+    Mittelwert, und die Randverteilung je Achse - der eigentliche
+    Ertrag dieses Protokolls - IST ein Mittelwert. Ein Mittel von
+    -816 statt -0,1 macht jede Achsenaussage wertlos.
+    """
+    p = av.Protokoll("t", bundel=1000)
+    v = _versuch(1)
+    v.kennzahlen["t_wert"] = -1_598_723.029
+    p.merken(v)
+    v2 = _versuch(2)
+    v2.kennzahlen["t_wert"] = 3.14          # normaler Wert bleibt
+    p.merken(v2)
+    p.leeren()
+
+    df = av.zusammenfuehren(["t"])
+    assert df["t_lern"].isna().sum() == 1
+    assert df["t_lern"].dropna().iloc[0] == pytest.approx(3.14)
+    assert abs(df["t_lern"].mean()) < 10, (
+        "Ein einziger entarteter Wert darf den Mittelwert nicht kippen."
+    )
+
+
+def test_grenze_laesst_echte_t_werte_durch():
+    """Die Grenze darf nicht so eng sein, dass sie echte Funde frisst.
+    Ein t von 6,5 ist bei 10.000 Versuchen erwartbar und muss bleiben."""
+    p = av.Protokoll("t", bundel=1000)
+    for i, t in enumerate([-8.0, -3.1, 0.0, 4.6, 6.5, 12.0], start=1):
+        v = _versuch(i)
+        v.kennzahlen["t_wert"] = t
+        p.merken(v)
+    p.leeren()
+    df = av.zusammenfuehren(["t"])
+    assert df["t_lern"].notna().all(), "Ein echter t-Wert wurde verworfen."

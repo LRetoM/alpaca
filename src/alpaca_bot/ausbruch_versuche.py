@@ -146,15 +146,30 @@ class Protokoll:
             return int(c.execute("SELECT COUNT(*) FROM versuche").fetchone()[0])
 
 
+# Groesster t-Wert, der noch eine Messung sein kann. Darueber liegt
+# eine Division durch eine Streuung nahe null - siehe `ausbruch.py`.
+# Doppelt abgesichert: Der Riegel steht schon in `_kennzahlen`, aber ein
+# Protokoll, das auf die Sauberkeit seines Lieferanten vertraut, ist
+# genau so lange sauber wie der Lieferant.
+T_GRENZE = 50.0
+
+
 def _z(x) -> float | None:
-    """NaN und Inf sind in SQLite wertlos - lieber ehrlich NULL."""
+    """NaN, Inf und unmoegliche t-Werte gehoeren als NULL in die Tabelle.
+
+    Ein einziger Wert von -1.598.723 kippt jeden Mittelwert - und die
+    Randverteilung je Achse, also der eigentliche Ertrag dieses
+    Protokolls, IST ein Mittelwert.
+    """
     if x is None:
         return None
     try:
         f = float(x)
     except (TypeError, ValueError):
         return None
-    return None if (f != f or f in (float("inf"), float("-inf"))) else f
+    if f != f or f in (float("inf"), float("-inf")):
+        return None
+    return None if abs(f) > T_GRENZE else f
 
 
 def zusammenfuehren(instanzen_: list[str] | None = None) -> pd.DataFrame:
