@@ -312,3 +312,25 @@ def test_ohne_cash_symbol_wie_vorher():
     b = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
                                         cash_symbol=""))
     assert a.equity_curve.equals(b.equity_curve)
+
+
+def test_huerde_folgt_der_cash_reihe():
+    """Mit Cash-Reihe wird 'besser als Cash' an ihrem echten Ertrag
+    gemessen. Eine stark steigende Cash-Reihe muss die Huerde heben und
+    schwache Assets aussortieren."""
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+    n = 500
+    idx = pd.bdate_range("2021-01-04", periods=n, tz="UTC")
+    # Assets steigen 3 % im Jahr - ueber der 2-%-Pauschale, unter 8 % Cash.
+    px = pd.DataFrame({f"A{i}": 100 * np.exp(np.linspace(0, 0.03 * n / 252, n))
+                       for i in range(4)}, index=idx)
+    cash = pd.Series(100 * np.exp(np.linspace(0, 0.08 * n / 252, n)), index=idx)
+    ret = px.pct_change()
+    bis = idx[-1]
+    cfg = trend.TrendConfig(strategie="dualmom", lookback_monate=6, vol_ziel=0.0)
+    ohne = trend.ziel_gewichte(px, ret, bis, cfg)
+    mit = trend.ziel_gewichte(px, ret, bis, cfg, cash_kurse=cash)
+    assert not ohne.empty, "gegen 2 % Pauschale qualifizieren die Assets"
+    assert mit.empty, "gegen 8 % echten Cash-Ertrag qualifiziert nichts"

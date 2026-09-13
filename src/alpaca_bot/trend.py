@@ -160,7 +160,8 @@ def _realized_vol(returns: pd.DataFrame, bis: pd.Timestamp,
 
 
 def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
-                  bis: pd.Timestamp, cfg: TrendConfig) -> pd.Series:
+                  bis: pd.Timestamp, cfg: TrendConfig,
+                  cash_kurse: pd.Series | None = None) -> pd.Series:
     """Zielgewichte zum Rebalance-Termin `bis`. Summe <= max_brutto, Rest
     ist implizit Cash. Nur Daten bis `bis`.
 
@@ -170,11 +171,12 @@ def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
     exakt das bisherige Verhalten.
     """
     if not cfg.lookbacks:
-        return _ziel_gewichte_einzel(prices, returns, bis, cfg)
+        return _ziel_gewichte_einzel(prices, returns, bis, cfg, cash_kurse)
     teile = []
     for lb in cfg.lookbacks:
         einzel = replace(cfg, lookback_monate=lb, lookbacks=())
-        teile.append(_ziel_gewichte_einzel(prices, returns, bis, einzel))
+        teile.append(_ziel_gewichte_einzel(prices, returns, bis, einzel,
+                                           cash_kurse))
     teile = [t for t in teile if not t.empty]
     if not teile:
         return pd.Series(dtype=float)
@@ -184,8 +186,16 @@ def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
 
 
 def _ziel_gewichte_einzel(prices: pd.DataFrame, returns: pd.DataFrame,
-                          bis: pd.Timestamp, cfg: TrendConfig) -> pd.Series:
-    """Zielgewichte fuer GENAU EINEN Lookback - der bisherige Kern."""
+                          bis: pd.Timestamp, cfg: TrendConfig,
+                          cash_kurse: pd.Series | None = None) -> pd.Series:
+    """Zielgewichte fuer GENAU EINEN Lookback - der bisherige Kern.
+
+    `cash_kurse`: Ist die Reihe da, wird die Momentum-Huerde aus IHREM
+    Ertrag ueber dasselbe Fenster gerechnet statt aus der Pauschale.
+    Das ist die Antonacci-Fassung ("absolute Momentum gegen T-Bills")
+    und konsistent zu `cash_symbol` (§G96): Wer Cash mit BIL verzinst,
+    muss auch "besser als Cash" an BIL messen.
+    """
     p = prices.loc[:bis]
     mindest = cfg.lookback_monate * TAGE_PRO_MONAT + 5
     verfuegbar = [a for a in p.columns if p[a].notna().sum() > mindest
@@ -197,6 +207,11 @@ def _ziel_gewichte_einzel(prices: pd.DataFrame, returns: pd.DataFrame,
     # "absolute Momentum > Cash": der Cash-Ertrag ueber dasselbe Fenster.
     fenster_jahre = (cfg.lookback_monate - cfg.skip_monate) / 12.0
     huerde = cfg.cash_rendite_pa * fenster_jahre
+    if cash_kurse is not None:
+        cm = _momentum(cash_kurse.to_frame("cash"), bis, cfg.lookback_monate,
+                       cfg.skip_monate)
+        if cm.notna().all() and np.isfinite(float(cm.iloc[0])):
+            huerde = float(cm.iloc[0])
 
     # --- immer investierte Strategien (kein Momentum-Filter) ---
     if cfg.strategie == "risk_parity":
@@ -343,8 +358,11 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
             raise ValueError(f"cash_symbol {cfg.cash_symbol!r} nicht in den "
                              f"Kursen - ohne Reihe keine Verzinsung.")
         cash_r = prices[cfg.cash_symbol].pct_change().fillna(0.0)
+        cash_kurse = prices[cfg.cash_symbol]
         prices = prices.drop(columns=[cfg.cash_symbol])
         returns = returns.drop(columns=[cfg.cash_symbol])
+    else:
+        cash_kurse = None
 
     termine = _rebalance_termine(prices.index, cfg.rebalance,
                                  cfg.rebalance_versatz_tage)
@@ -396,7 +414,8 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
         eq_hist.append((tag, equity))
 
         if tag in termine_set:
-            w_ziel = ziel_gewichte(prices, returns, tag, cfg)
+            w_ziel = ziel_gewichte(prices, returns, tag, cfg,
+                                   cash_kurse=cash_kurse)
             union = w_akt.index.union(w_ziel.index)
             wa = w_akt.reindex(union).fillna(0.0)
             wz = w_ziel.reindex(union).fillna(0.0)
