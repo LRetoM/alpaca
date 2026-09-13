@@ -8371,6 +8371,74 @@ die einzige, die nach der Rasterprüfung (§G87) übrig geblieben ist.
 
 ---
 
+## G96. Kombination hilft nicht — aber der Cash-Ertrag war falsch angenommen (13.09.2026)
+
+### Kombination Querschnitt + Trendbot: unkorreliert, aber nutzlos
+
+Die naheliegende Idee: zwei saubere Strategien auf verschiedenen
+Instrumenten mit verschiedenen Mechanismen — kombiniert steigt der
+Sharpe. Auf **Periodenebene** gemessen (58 gemeinsame Quartale, die
+einzig ehrliche Auflösung — eine Tagesreihe aus Tranchen zu bauen
+glättete die Schwankung weg und ergab Sharpe 6, ein Artefakt):
+
+| Depot | netto/Q | Sharpe | Treffer |
+|---|---:|---:|---:|
+| Querschnitt (Crash-Schutz) | 2,93 % | 0,50 | 57 % |
+| **Trendbot dualmom 10 %** | 2,61 % | **1,53** | **81 %** |
+| 50/50 | 2,77 % | 0,90 | 64 % |
+| Risikoparität (22 % Q / 78 % T) | 2,68 % | 1,42 | 74 % |
+
+Korrelation der Quartalsrenditen: **+0,025** — wirklich unabhängig. Und
+trotzdem hilft die Kombination nicht: Der Trendbot dominiert so klar,
+dass der Querschnitt ihn nur verwässert. Theoretisches Maximum bei
+ρ = 0 wäre √(1,53² + 0,50²) = 1,61 — ein Gewinn von 0,08, der in 58
+Perioden im Rauschen untergeht.
+
+**Folge:** Der Trendbot ist das Produkt. 81 % positive Quartale.
+
+### Der Cash-Ertrag: Pauschale 2 % gegen echten Geldmarkt
+
+Der Bot hält im Schnitt 40 % Cash. `cash_rendite_pa` unterstellte dafür
+pauschal 2 %. US-Geldmarktzinsen 2023–2025: 4 bis 5 %. `BIL` (0–3 Monate
+T-Bills) nachgeladen — 2020-07 bis 2026-09 im Schnitt +2,93 %/Jahr,
+**einschließlich** der Nullzinsphase 2020/21.
+
+`TrendConfig.cash_symbol`: Der Cash-Anteil wird mit der echten Reihe
+verzinst. Der Cash-ETF wird nie gehandelt und taucht in keiner Rangliste
+auf. 4 Tests, darunter der exakte Nachweis, dass die Equity in reinen
+Cash-Phasen der BIL-Reihe folgt.
+
+| dualmom, eigene Daten | CAGR | Sharpe | MaxDD | aus 1.000 € |
+|---|---:|---:|---:|---:|
+| 10 %, Pauschale 2 % | 9,74 % | 1,21 | −8,9 % | 1.635 |
+| **10 %, BIL** | **11,14 %** | **1,34** | −9,2 % | **1.748** |
+| 15 %, Pauschale 2 % | 12,99 % | 1,15 | −13,6 % | 1.907 |
+| **15 %, BIL** | **14,35 %** | **1,24** | −13,7 % | **2.033** |
+
+Je Jahr (10 %): 2022 −0,15 · **2023 +4,63** · 2024 +0,83 · 2025 +1,99 ·
+2026 +0,65 Prozentpunkte.
+
+**Warum das ein sauberer Fund ist, kein Schönrechnen:**
+
+1. Es korrigiert eine **Annahme**, die nachweislich falsch war — die
+   Strategie selbst ist unverändert.
+2. Der Mechanismus ist transparent: 40 % Cash × 3 pp mehr Zins ≈ 1,2 pp.
+3. BIL enthält die Nullzinsphase — es wurde kein günstiger Zeitraum
+   gewählt.
+4. Im Live-Betrieb trivial: Cash in BIL/SGOV parken ist Standard.
+
+**Der Vorbehalt, der dazugehört:** Das ist kein Alpha, sondern die
+richtige Verbuchung des risikofreien Zinses. In einer künftigen
+Nullzinsphase verschwindet der Vorteil wieder — dann ist BIL ≈ 0 und die
+Pauschale von 2 % wäre sogar zu hoch gewesen.
+
+**Nicht am laufenden Schatten geändert.** Für Phase 3 gehört
+`cash_symbol="BIL"` in die Konfiguration — als Korrektur, nicht als
+neuer Kandidat, denn es ändert nicht, *was* gehandelt wird, sondern nur,
+wie Cash verbucht wird.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

@@ -56,6 +56,20 @@ class TrendConfig:
     startkapital: float = 100_000.0
     rebalance: str = "monatlich"     # monatlich | woechentlich
 
+    cash_symbol: str = ""
+    """Kursreihe, die den Cash-Anteil verzinst, z. B. "BIL". "" = Pauschale.
+
+    **Warum das keine Kosmetik ist.** Der Bot haelt im Schnitt 40 % Cash.
+    `cash_rendite_pa` unterstellt dafuer pauschal 2 % - 2023 bis 2025
+    lagen US-Geldmarktzinsen bei 4 bis 5 %. Ein Geldmarkt-ETF (BIL: 0-3
+    Monate T-Bills) liefert den ECHTEN Ertrag aus derselben Datenquelle
+    wie alles andere, Tag fuer Tag, einschliesslich der Nullzinsphase
+    2020/21. Das ist eine Korrektur der Annahme, keine Strategieaenderung.
+
+    Der Cash-ETF wird selbst NIE gehandelt und taucht in keiner Rangliste
+    auf - er ist der Massstab fuer "nicht investiert", kein Kandidat.
+    Die Momentum-Huerde (`huerde`) bleibt vorerst bei der Pauschale."""
+
     lookbacks: tuple[int, ...] = ()
     """Ensemble ueber mehrere Lookbacks. Leer = nur `lookback_monate`.
 
@@ -321,6 +335,17 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
     start = _ts(start, prices.index[0])
     end = _ts(end, prices.index[-1])
 
+    # Cash-Reihe abtrennen: Sie verzinst den nicht investierten Anteil
+    # und darf weder in die Rangliste noch in die Benchmark.
+    cash_r: pd.Series | None = None
+    if cfg.cash_symbol:
+        if cfg.cash_symbol not in prices.columns:
+            raise ValueError(f"cash_symbol {cfg.cash_symbol!r} nicht in den "
+                             f"Kursen - ohne Reihe keine Verzinsung.")
+        cash_r = prices[cfg.cash_symbol].pct_change().fillna(0.0)
+        prices = prices.drop(columns=[cfg.cash_symbol])
+        returns = returns.drop(columns=[cfg.cash_symbol])
+
     termine = _rebalance_termine(prices.index, cfg.rebalance,
                                  cfg.rebalance_versatz_tage)
     # Vorlauf: so viel Historie, wie die Strategie WIRKLICH braucht.
@@ -363,7 +388,8 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
             r = returns.loc[tag]
             neu = (w_akt * (1.0 + r.reindex(w_akt.index).fillna(0.0))) if not w_akt.empty \
                 else pd.Series(dtype=float)
-            cash_w = max(0.0, 1.0 - float(w_akt.sum())) * (1.0 + cash_tag)
+            c_tag = float(cash_r.loc[tag]) if cash_r is not None else cash_tag
+            cash_w = max(0.0, 1.0 - float(w_akt.sum())) * (1.0 + c_tag)
             gesamt = float(neu.sum()) + cash_w
             equity *= gesamt
             w_akt = (neu / gesamt) if gesamt > 0 and not neu.empty else pd.Series(dtype=float)

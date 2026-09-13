@@ -261,3 +261,54 @@ def test_unbrauchbarer_lookback_im_ensemble_wird_abgelehnt():
     with pytest.raises(ValueError, match="lookbacks"):
         trend.TrendConfig(strategie="dualmom", skip_monate=1,
                           lookbacks=(1, 9)).pruefe()
+
+
+# --- Cash-Verzinsung ueber eine echte Kursreihe (13.09.2026) -------------
+
+def test_cash_symbol_taucht_nie_in_den_gewichten_auf():
+    """Der Massstab fuer 'nicht investiert' ist kein Kandidat."""
+    import numpy as np
+    from alpaca_bot import trend
+    px = _px(n=600, k=5)
+    px["CASH"] = 100 * np.exp(np.linspace(0, 0.10, 600))   # steigt stetig
+    r = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
+                                        cash_symbol="CASH"))
+    assert "CASH" not in r.weights.columns
+    assert not (r.weights.get("CASH", 0) != 0).any() if "CASH" in r.weights else True
+
+
+def test_cash_symbol_verzinst_den_cash_anteil():
+    """Alles in Cash (kein Asset qualifiziert): die Equity folgt exakt der
+    Cash-Reihe."""
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+    n = 500
+    idx = pd.bdate_range("2021-01-04", periods=n, tz="UTC")
+    fallend = 100 * np.exp(np.linspace(0, -0.5, n))       # nichts qualifiziert
+    px = pd.DataFrame({f"A{i}": fallend * (1 + i * 0.01) for i in range(4)}, index=idx)
+    px["CASH"] = 100 * np.exp(np.linspace(0, 0.08, n))
+    r = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
+                                        vol_ziel=0.0, cash_symbol="CASH",
+                                        kosten_bps=0.0, slippage_bps=0.0))
+    eq = r.equity_curve
+    cash = px["CASH"].reindex(eq.index)
+    erwartet = cash / cash.iloc[0] * eq.iloc[0]
+    assert np.allclose(eq.values, erwartet.values, rtol=1e-6)
+
+
+def test_fehlendes_cash_symbol_ist_ein_fehler():
+    import pytest
+    from alpaca_bot import trend
+    px = _px(n=400)
+    with pytest.raises(ValueError, match="cash_symbol"):
+        trend.run(px, trend.TrendConfig(strategie="dualmom", cash_symbol="GIBTESNICHT"))
+
+
+def test_ohne_cash_symbol_wie_vorher():
+    from alpaca_bot import trend
+    px = _px(n=500)
+    a = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6))
+    b = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
+                                        cash_symbol=""))
+    assert a.equity_curve.equals(b.equity_curve)
