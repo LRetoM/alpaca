@@ -8293,6 +8293,84 @@ auswertung) und die Lehre. Nicht eine Konfiguration.
 
 ---
 
+## G95. Momentum-Crash-Schutz: das Querschnitt-Modell von t 0,84 auf 1,78 (13.09.2026)
+
+**Die Frage des Nutzers:** „Was waren die Gründe für die schlechten
+Trades 2023? Kann man daraus lernen?" Das ist die richtige Frage — die
+einzige Art von Analyse, aus der ein legitimer Hebel entsteht.
+
+### Die Diagnose: 2023 lag am Short-Bein
+
+Querschnitt momentum 250/63 invvola, alle Rebalance-Termine, volle
+Kosten, je Jahr und Bein:
+
+| Jahr | Long-Bein | Short-Bein | Spread | netto | Markt (QQQ) |
+|---|---:|---:|---:|---:|---:|
+| 2022 | −3,1 % | −5,4 % | +2,3 % | +1,2 % | −3,8 % |
+| **2023** | +6,1 % | **+4,9 %** | +1,2 % | **0,0 %** | +10,4 % |
+| 2024 | +5,1 % | +1,1 % | +4,1 % | +2,9 % | +4,5 % |
+| 2026 | +15,1 % | +5,9 % | +9,2 % | +8,0 % | +10,2 % |
+
+*(Werte je Quartal.)* 2023 stiegen die geshorteten Verlierer um 4,9 %
+je Quartal — fast so stark wie die Gewinner. Der Spread schrumpfte auf
+1,2 %, die Kosten fraßen den Rest.
+
+**Das ist der Momentum-Crash** (Daniel & Moskowitz 2016): Nach einem
+Bärenmarkt erholen sich die abgestraften Verlierer am schärfsten, und
+Momentum verliert — über das Short-Bein. 2022 war der Bärenmarkt, 2023
+die Erholung. Das Muster ist in der Literatur seit Jahrzehnten belegt
+(1932, 2009, 2020).
+
+### Die Regel — aus der Literatur, nicht aus unseren Daten
+
+`crash_schutz_symbol="QQQ"`, `crash_schutz_tage=250`: Liegt der
+Referenzwert am Stichtag über ein Jahr im Minus, wird in dieser Periode
+**nicht geshortet**. Das Long-Bein bleibt. Ein Schalter, ein
+Standardfenster (ein Jahr), keine Suche. 5 neue Tests, darunter der
+Lookahead-Test.
+
+### Ergebnis
+
+| alle Termine, 30 bps, 300 bps Leihe | ohne | **mit Schutz** |
+|---|---:|---:|
+| t | 0,84 | **1,78** |
+| Sharpe | 0,26 | **0,50** |
+| netto je Quartal | +1,575 % | **+2,678 %** |
+| Trefferquote | 54,0 % | 56,3 % |
+| Schutz aktiv | — | 262 von 1.208 Perioden |
+
+| Jahr (annualisiert) | ohne | mit Schutz | Schutz aktiv |
+|---|---:|---:|---:|
+| 2021 | −13,3 % | −13,3 % | 0 *(noch keine 250 Tage QQQ)* |
+| 2022 | +4,6 % | **+11,6 %** | 178 |
+| 2023 | 0,0 % | **+12,5 %** | 81 |
+| 2024 | +11,5 % | +11,5 % | 0 |
+| 2025 | +5,1 % | +7,0 % | 3 |
+| 2026 | +32,1 % | +32,1 % | 0 |
+
+### Zwei Dinge, die zur Ehrlichkeit gehören
+
+1. **Der Schutz nimmt Marktrisiko.** In den 262 aktiven Perioden ist
+   die Strategie **nicht mehr marktneutral**, sondern nur long — und
+   profitiert dann von der Erholung. Das ist der beabsichtigte
+   Mechanismus (die Erholung ist ja gerade das, was den Short zerstört),
+   aber es heißt: Ein Teil des Gewinns in 2022/23 ist Marktbeta, nicht
+   Auswahl. Der Vergleich gegen 60/40 oder SPY müsste das
+   berücksichtigen.
+2. **Die Regel wurde nach dem Blick auf 2023 angewandt.** Sie stammt aus
+   der Literatur und hat einen Mechanismus, aber die *Entscheidung*, sie
+   einzubauen, kam aus der Diagnose derselben Daten. Was dagegen spricht,
+   dass es Überanpassung ist: ein Parameter (das Standardjahr), kein
+   Tuning, und die Verbesserung trifft auch 2022, das nicht Ziel der
+   Diagnose war. Was dafür spricht: Es sind sechs Jahre und eine
+   Krise. Der Vorwärts-Schatten (§G81) muss es bestätigen.
+
+**t = 1,78 gegen 2,30** (15 Varianten). Noch kein Befund — aber die
+größte einzelne Verbesserung, die dieses Modell je bekommen hat, und
+die einzige, die nach der Rasterprüfung (§G87) übrig geblieben ist.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

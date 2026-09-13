@@ -617,3 +617,76 @@ def test_gewichtung_nutzt_die_realisierte_vola():
     ohne = q.gewichte(kurse, syms, _cfg(gewichtung="inv_vola"))
     assert not np.allclose(mit.values, ohne.values)
     assert mit.sum() == pytest.approx(1.0)
+
+
+# --- 12. Momentum-Crash-Schutz -----------------------------------------
+
+def test_crash_schutz_setzt_short_bein_nach_marktrueckgang_aus():
+    """Referenz ueber den Rueckblick im Minus -> kein Short in der Periode."""
+    n_bars = 26 * 300
+    r = np.random.default_rng(13)
+    kurse = {f"S{i:03d}": 50.0 * np.exp(np.cumsum(r.normal((i-30)/30*0.0005, 0.01, n_bars)))
+             for i in range(60)}
+    # Referenz faellt durchgehend -> Schutz immer aktiv.
+    kurse["REF"] = 100.0 * np.exp(np.linspace(0, -0.5, n_bars))
+    kd = _kursdaten(kurse, n_bars)
+    cfg = _cfg(crash_schutz_symbol="REF", crash_schutz_tage=50)
+    p = q.lauf(kd, cfg).perioden
+    aktiv = p[p["schutz_aktiv"]]
+    assert len(aktiv) > 0
+    assert (aktiv["r_short"] == 0.0).all(), "ohne Short-Bein ist r_short null"
+
+
+def test_crash_schutz_bleibt_aus_bei_steigendem_markt():
+    n_bars = 26 * 300
+    r = np.random.default_rng(14)
+    kurse = {f"S{i:03d}": 50.0 * np.exp(np.cumsum(r.normal(0, 0.01, n_bars)))
+             for i in range(60)}
+    kurse["REF"] = 100.0 * np.exp(np.linspace(0, 0.5, n_bars))
+    kd = _kursdaten(kurse, n_bars)
+    p = q.lauf(kd, _cfg(crash_schutz_symbol="REF", crash_schutz_tage=50)).perioden
+    assert not p["schutz_aktiv"].any()
+
+
+def test_crash_schutz_ohne_short_zahlt_nur_ein_bein_und_keine_leihe():
+    """Wer nicht shortet, zahlt weder das zweite Bein noch Leihe."""
+    n_bars = 26 * 300
+    r = np.random.default_rng(15)
+    kurse = {f"S{i:03d}": 50.0 * np.exp(np.cumsum(r.normal(0, 0.01, n_bars)))
+             for i in range(60)}
+    kurse["REF"] = 100.0 * np.exp(np.linspace(0, -0.5, n_bars))
+    kd = _kursdaten(kurse, n_bars)
+    cfg = _cfg(crash_schutz_symbol="REF", crash_schutz_tage=50,
+               spanne_bps=30.0, leihe_bps_jahr=300.0)
+    p = q.lauf(kd, cfg).perioden
+    aktiv = p[p["schutz_aktiv"]]
+    # Kosten je aktiver Periode <= ein Bein (kein Leihanteil)
+    ein_bein = cfg.kosten_je_rundlauf_pct(50.0)
+    assert (aktiv["kosten_pct"] <= ein_bein + 1e-9).all()
+
+
+def test_crash_schutz_sieht_keine_zukunft():
+    """Die Referenzrendite darf nur Kurse bis zum Stichtag benutzen."""
+    n_bars = 26 * 300
+    r = np.random.default_rng(16)
+    kurse = {f"S{i:03d}": 50.0 * np.exp(np.cumsum(r.normal(0, 0.01, n_bars)))
+             for i in range(60)}
+    ref = np.full(n_bars, 100.0)
+    kurse["REF"] = ref.copy()
+    kd = _kursdaten(kurse, n_bars)
+    cfg = _cfg(crash_schutz_symbol="REF", crash_schutz_tage=50)
+    p1 = q.lauf(kd, cfg).perioden
+    # Referenz stuerzt erst NACH dem letzten Stichtag ab
+    o, h, l, c, v = kd.arrays["REF"]
+    c2 = np.array(c, dtype="float64"); c2[-30:] = 10.0
+    kd.arrays["REF"] = (o, h, l, c2, v)
+    p2 = q.lauf(kd, cfg).perioden
+    assert p1["schutz_aktiv"].equals(p2["schutz_aktiv"])
+
+
+def test_ohne_crash_schutz_alles_wie_vorher():
+    kd = _viele_symbole(n_symbole=60, n_bars=26 * 200)
+    a = q.lauf(kd, _cfg()).perioden
+    b = q.lauf(kd, _cfg(crash_schutz_symbol="")).perioden
+    assert a["netto_pct"].equals(b["netto_pct"])
+    assert not a["schutz_aktiv"].any()

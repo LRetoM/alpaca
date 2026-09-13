@@ -170,6 +170,24 @@ class QuerschnittConfig:
     Verfahren lieferte dann zweimal dieselbe Zeile, und die vermeintliche
     Verbesserung blieb unbelegt."""
 
+    crash_schutz_symbol: str = ""
+    """Referenzwert fuer den Momentum-Crash-Schutz, z. B. "QQQ". "" = aus.
+
+    **Die Regel und woher sie kommt.** Momentum verliert in
+    Markterholungen nach einem Baerenmarkt - und zwar ueber das
+    Short-Bein: Die abgestraften Verlierer erholen sich am schaerfsten
+    (Daniel & Moskowitz 2016, "Momentum Crashes"). Auf eigenen Daten
+    genau so gemessen: 2023 stieg das Short-Bein um 4,9 % je Quartal
+    und frass den Spread auf (§G95).
+
+    Die Regel: Liegt der Referenzwert am Stichtag ueber
+    `crash_schutz_tage` im Minus, wird in dieser Periode NICHT
+    geshortet - nur das Long-Bein bleibt. Eine Regel, ein Schalter,
+    vorab benannt. Keine Suche."""
+
+    crash_schutz_tage: int = 250
+    """Rueckblick des Crash-Schutzes in Handelstagen (250 = ein Jahr)."""
+
     marktneutral: bool = True
     """True = Long und Short in gleicher Groesse. False = nur Long.
 
@@ -577,6 +595,18 @@ def lauf(kd, cfg: QuerschnittConfig) -> Ergebnis:
         long_seite = sortiert.index[:k]
         short_seite = sortiert.index[-k:] if cfg.marktneutral else []
 
+        # --- 3b. Momentum-Crash-Schutz --------------------------------
+        # Nur Kurse BIS zum Stichtag: Rendite des Referenzwerts ueber
+        # `crash_schutz_tage`. Negativ = Erholungsgefahr = kein Short.
+        schutz_aktiv = False
+        if cfg.crash_schutz_symbol and len(short_seite):
+            ref = kurse[cfg.crash_schutz_symbol].iloc[:i + 1]
+            if len(ref) > cfg.crash_schutz_tage:
+                ref_r = ref.iloc[-1] / ref.iloc[-1 - cfg.crash_schutz_tage] - 1.0
+                if np.isfinite(ref_r) and ref_r < 0:
+                    short_seite = []
+                    schutz_aktiv = True
+
         # --- 4. Rendite der Halteperiode ------------------------------
         p0 = kurse.iloc[i]
         p1 = kurse.iloc[i + h]
@@ -631,11 +661,12 @@ def lauf(kd, cfg: QuerschnittConfig) -> Ergebnis:
             umschlag = float(np.mean(teile)) if teile else 1.0
         letzter_korb[tranche] = (neu_long, neu_short)
 
+        mit_short = cfg.marktneutral and len(short_seite) > 0
         kosten = (cfg.kosten_je_rundlauf_pct(korb_kurs)
-                  * (2.0 if cfg.marktneutral else 1.0)
+                  * (2.0 if mit_short else 1.0)
                   * umschlag
-                  + cfg.leihe_je_periode_pct())
-        brutto = r_long - r_short if cfg.marktneutral else r_long
+                  + (cfg.leihe_je_periode_pct() if mit_short else 0.0))
+        brutto = r_long - r_short if mit_short else r_long
         zeilen.append({
             "stichtag": bis,
             "ende": kurse.index[i + h],
@@ -647,6 +678,7 @@ def lauf(kd, cfg: QuerschnittConfig) -> Ergebnis:
             "n_rangfolge": int(len(werte)),
             "umschlag": umschlag,
             "kosten_pct": kosten,
+            "schutz_aktiv": schutz_aktiv,
         })
 
     perioden = pd.DataFrame(zeilen)
