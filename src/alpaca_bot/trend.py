@@ -37,6 +37,15 @@ UNIVERSEN: dict[str, list[str]] = {
     "core": ["SPY", "IEF", "GLD"],
     "equity": ["SPY", "EFA", "EEM"],
     "klassisch": ["SPY", "EFA", "EEM", "IEF", "GLD", "VNQ"],
+
+    # --- Lange Historie: Indexreihen statt ETFs -----------------------
+    # Der offene Anschluss 1 aus §G52: "ETFs reichen nur bis 2004-2008.
+    # Die staerkste Trendfolge-Evidenz liegt in den 1970er-2000er Jahren.
+    # Ein Lauf ueber 50+ Jahre waere der eigentliche Test."
+    #
+    # Ueber yfinance erreichbar: ab 1985 statt 2008 - 41 Jahre statt 18.
+    # Das verdoppelt die Wurzel aus der Zeit und damit den erreichbaren
+    # t-Wert (§G79).
 }
 
 

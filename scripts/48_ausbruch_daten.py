@@ -78,6 +78,10 @@ def main() -> int:
     p.add_argument("--symbole", type=int, default=None,
                    help="ohne --nasdaq: die N umsatzstaerksten aus dem "
                         "gemessenen Universum")
+    p.add_argument("--wie-vorrat", action="store_true",
+                   help="genau die Symbole nachladen, die in allen "
+                        "bereits vorhandenen Jahren liegen - beim "
+                        "Ergaenzen weiterer Jahre fast immer richtig")
     p.add_argument("--stand", action="store_true", help="nur nachsehen")
     args = p.parse_args()
 
@@ -99,7 +103,24 @@ def main() -> int:
         return 0
 
     jahre = _jahre(args.jahre)
-    if args.nasdaq:
+    if args.wie_vorrat:
+        # Die Schnittmenge der schon vorhandenen Jahre. Ein frischer
+        # Universums-Abzug waere hier der Fehler: Er enthaelt Symbole,
+        # die in den alten Jahren fehlen, und laesst alte weg - die
+        # gemeinsame Zeitachse wuerde dadurch kuerzer statt laenger.
+        vorhanden = [j for j in ausbruch_daten.jahre_vorhanden(args.raster)
+                     if j not in jahre]
+        # Vereinigung, nicht Schnittmenge: Ein Wert, der erst 2024 an die
+        # Boerse kam, soll auch fuer 2019 angefragt werden. Die Antwort
+        # ist dann leer und kostet nur einen Request - ihn wegzulassen
+        # kostet dagegen dauerhaft Universumsbreite.
+        syms = ausbruch_daten.symbole_vorhanden(
+            args.raster, vorhanden, modus="vereinigung")
+        quelle = f"alle Symbole der Jahre {vorhanden}"
+        if not syms:
+            print("Kein bestehender Vorrat - --wie-vorrat hat keine Basis.")
+            return 1
+    elif args.nasdaq:
         syms = universe.nasdaq_universum(nur_shortable=args.shortable)
         quelle = f"NASDAQ{' shortable' if args.shortable else ' vollstaendig'}"
     else:

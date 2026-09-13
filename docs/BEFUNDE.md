@@ -6535,6 +6535,1499 @@ Kann eine Kennzahl entarten?*
 
 ---
 
+## G63. NaN in der Stichprobe täuschte einen Zusammenhang vor (12.09.2026)
+
+**Fund.** `scripts/52_ausbruch_auswertung.py` behauptete „Deutlicher
+Zusammenhang — die Suche findet etwas, das über den Lernzeitraum hinaus
+trägt", obwohl die zugrunde liegende Korrelation `NaN` war. Ursache:
+7 von 4.346 Stichproben hatten `t_lern = NaN` (zu wenige Trades im
+Lernfenster für einen gültigen t-Wert). `np.corrcoef` gibt bei einem
+einzigen `NaN`-Wert `NaN` für die **gesamte** Korrelation zurück — und
+weil `NaN`-Vergleiche in Python immer `False` sind, fielen die
+nachgelagerten `if`-Zweige (`abs(r) < 2*se`, `r < 0.3` …) unbemerkt bis
+zur letzten, falsch positiven Textzeile durch.
+
+Im selben Lauf stand ein Versuch mit **1 Trade** im Lernfenster (Score
+`NaN`) als „bester Prüfwert" (8,29, über der Schwelle 4,10) oben in
+Abschnitt 2 und löste das Urteil „nächster Schritt: Gate" aus — obwohl
+1 Beobachtung weit unter der 30-Beobachtungen-Regel (§J.1) liegt.
+
+**Behoben.** Beide Stellen filtern jetzt zusätzlich auf `score.notna()`
+(= mindestens `min_trades` im Lernfenster, dieselbe Bedingung wie schon
+in Abschnitt 3). Die Korrelationsberechnung liegt jetzt in einer eigenen
+Funktion `korrelation_lern_pruef()`, die NaN-Zeilen vorher explizit
+entfernt und `NaN` zurückgibt statt eines zufälligen Zeichens, wenn zu
+wenig übrig bleibt. Regressionstest: `tests/test_ausbruch_auswertung.py`.
+
+Ohne die 7 NaN-Zeilen liegt die tatsächliche Korrelation bei **+0,375**
+— nominell ähnlich zur (falschen) alten Aussage, aber aus den richtigen
+Gründen und mit einer echten Zahl statt `NaN`. Kein Hinweis, dass die
+7 verworfenen Versuche selbst fehlerhaft sind — sie zeigen nur, dass
+die „Stichprobe"-Ziehung in `ausbruch_suche.py` bewusst auch
+Konfigurationen unterhalb `min_trades` zieht (unverzerrte Stichprobe
+über *alle* Versuche, nicht nur die brauchbaren). Die Auswertung muss
+das selbst herausfiltern, nicht die Suche.
+
+**Gleiche Form wie §G60–G62:** Werkzeug lief, stürzte nicht ab, lieferte
+eine plausible Textzeile — die etwas anderes bedeutete als gemeint.
+
+---
+
+## G64. Der „Randfavorit" ist die Elite-Konfiguration — 17 von 17 Achsen (12.09.2026)
+
+**Anlass.** Die Suche stagniert: bester Lernfenster-Score seit 18:37 Uhr
+des Vortages unverändert bei 7,649, bestes gültiges Prüf-t seit ~12 h bei
+3,59 (Schwelle 4,10). Die naheliegende Idee war, nicht den Bergsteig-
+Sieger zu nehmen, sondern je Achse den Wert mit dem höchsten **mittleren**
+Lern-t-Wert (Abschnitt 3 in Skript 52) — die robustere Hälfte der
+Auswertung — und daraus eine Konfiguration zusammenzusetzen.
+
+**Ergebnis: Das ergibt exakt dieselbe Konfiguration.** Alle 17 Achsen
+stimmen mit der Elite überein (die einzige scheinbare Abweichung war
+`10.0` gegen `10`, eine Formatierung).
+
+**Warum das so ist — und warum es wichtig ist.** Die Versuche stammen
+fast vollständig aus Bergsteig-Ketten:
+
+| Phase | Versuche |
+|---|---|
+| Bergsteigen | 438.934 |
+| Erkundung | 240 |
+| Neustart | 26 |
+
+Die Randmittelwerte je Achse sind damit **kein unabhängiger Beleg**,
+sondern zum großen Teil ein Echo desselben Hügels: Das Bergsteigen
+verbringt fast die ganze Rechenzeit in der Nachbarschaft des besten
+Punktes, 40 % der Neustarts setzen zusätzlich per `elite_anteil` genau
+dort an. Was wie „über hunderttausende Versuche gemittelt" aussieht, ist
+effektiv eine Stichprobe um eine einzige Konfiguration herum.
+
+**Folge für die Auswertung.** Abschnitt 3 in Skript 52 („welche
+Achsenwerte tragen") darf nicht als zweite, unabhängige Meinung gelesen
+werden, solange die Erkundungsphase so klein ist. Der Text dort ist
+richtig, die stillschweigende Erwartung war es nicht.
+
+**Folge für die Praxis.** Der Weg „robuste Achsenwerte zu einer neuen
+Konfiguration zusammenfassen" führt zu nichts Neuem — die Konfiguration
+ist bereits im Prüffenster gemessen (t = 0,21 bis 0,42, weit unter jeder
+Schwelle). Wer hier ein besseres Ergebnis sucht, braucht **mehr
+unabhängige Information** (längeres Prüffenster, mehr Jahre, echte
+Zufallserkundung), nicht eine weitere Umsortierung derselben Zahlen.
+
+---
+
+## G65. Das Gate ist jetzt ausführbar, nicht mehr Prosa (12.09.2026)
+
+`scripts/53_ausbruch_gate.py` rechnet die sechs Punkte aus
+`docs/AUSBRUCH.md` §6 aus, in zwei erzwungenen Schritten:
+
+1. `--anmelden` schreibt Konfiguration **und** alle Grenzwerte fest,
+   bevor eine Prüfzahl existiert (Zufallsschwelle, ≥ 60 Handelstage,
+   ≥ 200 Trades, 30 bps, Top-5 ≤ 50 %, vorab benannter Rückgang).
+2. `--pruefen` rechnet **einmal** und schreibt das Ergebnis
+   unveränderlich daneben. Eine zweite Prüfung derselben Anmeldung wird
+   abgelehnt; eine verworfene Anmeldung bleibt als Eintrag stehen.
+
+Maßgeblich ist die **strengere** der beiden Schwellen (Anmeldung vs.
+Prüfung) — nachträglich zu lockern ist der Fehler, den die Voranmeldung
+verhindert; nachträglich zu verschärfen ist nie zum eigenen Vorteil.
+
+**Die §G63-Lektion ist hier eingebaut:** Jede der sechs Prüfungen ist
+ausdrücklich NaN-fest. Ein `nicht_bestanden = t < schwelle` hätte bei
+`t = NaN` „bestanden" ergeben. Der Großteil der neunzehn Tests in
+`tests/test_ausbruch_gate.py` prüft genau diese Schließrichtung — ob
+das Gate in den gefährlichen Fällen **zumacht**, nicht ob es etwas
+durchlässt.
+
+Ein Fehler beim Schreiben der Tests gehört zum Befund: `_bewerten(k12={})`
+wurde vom eigenen Test-Helfer still durch gültige Kennzahlen ersetzt,
+weil ein leeres `dict` falsy ist und dort `k12 or _kennzahlen()` stand —
+derselbe Mechanismus wie in §G63, eine Ebene höher. Der Test prüfte
+etwas anderes, als er behauptete. Behoben durch `is None`; der dabei
+aufgedeckte Absturz (`int(float("nan"))` wirft `ValueError`) ist als
+`_ganz()` gefixt.
+
+---
+
+## G66. Erste Gate-Prüfung: 5 von 6 Punkten gefallen (12.09.2026)
+
+**Kandidat.** Anmeldung `7c6daa3f`, Quelle Randfavorit (= Elite, §G64).
+Prüffenster ab 05.08.2025, 1.844 Symbole, wirksame Schwelle 4,63.
+
+| § | Kriterium | Ist | Soll |
+|---|---|---|---|
+| 6.1 | t überlappungskorrigiert | **0,42** bei 39 Handelstagen | > 4,63 und ≥ 60 Tage |
+| 6.2 | genug Trades | **49** | ≥ 200 |
+| 6.3 | trägt bei 30 bps | **t = 0,19**, +1,25 % | > 4,63 |
+| 6.4 | beide Hälften | **1. Hälfte −1,356 %/Trade** (n=21), 2. Hälfte +1,796 % (n=28) | beide positiv |
+| 6.5 | nicht von fünf Symbolen getragen | **Top-5 tragen 129,9 %** | ≤ 50 % |
+| 6.6 | Rückgang | 3,4 % | ≤ 15 % ✓ |
+
+**Die zwei Zahlen, auf die es ankommt:**
+
+1. **Top-5 tragen 129,9 % des Gewinns.** Über hundert Prozent heißt:
+   Ohne diese fünf Symbole ist die Strategie im Minus. Die restlichen
+   Werte verlieren zusammen Geld. Das ist kein Effekt, das sind fünf
+   Glückstreffer.
+2. **Die erste Hälfte des Prüffensters ist negativ** (−1,356 % je
+   Trade). Der gesamte Ertrag stammt aus der zweiten Hälfte. Nach
+   Jahren getrennt: 2025 −2.300 $ (17 Trades), 2026 +4.442 $ (32 Trades).
+
+Die +2,14 % Rendite im Prüffenster sind also kein Ergebnis, sondern
+fünf Symbole in einem halben Jahr. **Genau dafür gibt es die
+Punkte 6.4 und 6.5** — eine Gesamtrendite allein hätte hier
+„funktioniert" gesagt.
+
+**Einordnung zur Frage „reichen 3,59 für einen Live-Bot?"** Der hier
+geprüfte Kandidat kommt im Prüffenster auf t = 0,42. Der Wert 3,59
+stammt aus einer Zufallsstichprobe unter 4.499 Prüfungen — also aus
+genau der Verteilung, gegen die die Schwelle 4,10 schützt. Nichts davon
+ist ein Befund.
+
+---
+
+## G67. Marktregime-Filter (QQQ) — kostet nichts, bringt nichts (12.09.2026)
+
+**Hypothese, vorab.** `docs/AUSBRUCH.md` §7: „Momentum funktioniert in
+steigenden Märkten fast immer und bricht in Wenden zusammen." Wenn das
+stimmt, muss ein Filter, der nur bei steigendem Referenzwert einsteigen
+lässt, die Rendite **je Trade** heben — nicht bloß die Zahl der Trades
+senken.
+
+**Gebaut.** `AusbruchConfig.regime_symbol` / `regime_sma_bars`,
+standardmäßig **aus** (die laufende Suche bleibt unberührt). QQQ liegt
+für alle vier Jahre im Vorrat, kostet also weder Download noch Geld.
+Messung: `scripts/54_ausbruch_regime.py`, **im Lernfenster** — das
+Prüffenster wurde dafür nicht angefasst.
+
+| Variante | t | Rendite | je Trade | Trades |
+|---|---:|---:|---:|---:|
+| ohne Filter | 7,65 | 15,75 % | 1,931 % | 76 |
+| SMA 26 (1 Tag) | 0,94 | 2,48 % | 0,472 % | 54 |
+| SMA 78 (3 Tage) | 4,53 | 10,04 % | 1,846 % | 52 |
+| SMA 130 (5 Tage) | 3,89 | 8,38 % | 1,450 % | 56 |
+
+**Ergebnis: kein Gewinn je Trade.** Die beste Variante (SMA 78) liegt
+mit −0,085 pp je Trade praktisch gleichauf und handelt dabei ein Drittel
+weniger. Der Filter erklärt nichts, er handelt nur weniger. SMA 26
+schadet deutlich (−1,46 pp).
+
+**Der Vorbehalt, der dieses Ergebnis abschwächt — und der dazugehört.**
+Verglichen wurde gegen die Elite-Konfiguration, und die wurde über
+439.000 Versuche **ohne** Filter ausgewählt. Sie sitzt damit auf einem
+Optimum des filterlosen Raums; fast jede nachträgliche Einschränkung
+muss dort schlechter aussehen. Sauber wäre, mit eingeschaltetem Filter
+**neu zu suchen**. Die richtige Aussage lautet deshalb: *Der Filter
+verbessert diese bereits optimierte Konfiguration nicht* — nicht: *Das
+Marktregime ist egal.*
+
+**Eingebauter Lookahead-Schutz.** Eingestiegen wird zum Open von Bar i,
+der Close von Bar i ist zu diesem Zeitpunkt Zukunft. Die Maske
+entscheidet deshalb ausschließlich mit dem Stand von Bar i−1.
+`tests/test_ausbruch_regime.py::test_filter_schaut_nicht_auf_den_eigenen_bar`
+konstruiert einen Kurs, der genau an einem Bar einbricht, und schlägt
+fehl, sobald der Filter diesen Bar selbst liest.
+
+---
+
+## G68. Score `t_robust` — fünf Glückstreffer können ihn nicht gewinnen (12.09.2026)
+
+**Das Problem, das er löst.** §G66 zeigte einen Kandidaten mit
+Top-5-Anteil 129,9 %: Ohne seine fünf besten Symbole war er im Minus.
+Der bisherige Score `t` konnte das nicht sehen — er kennt Renditen,
+nicht deren Herkunft. Eine Suche, die auf `t` optimiert, läuft deshalb
+**systematisch** in genau diese Falle: Unter hunderttausenden Versuchen
+gewinnt zuverlässig einer, bei dem fünf Symbole zufällig davonliefen.
+
+**Gebaut.** `_kennzahlen` liefert jetzt zwei neue Zahlen bei jedem Lauf:
+
+| Kennzahl | Bedeutung |
+|---|---|
+| `top5_anteil_pct` | Anteil der fünf größten Gewinnbringer am Gesamtgewinn (> 100 % = der Rest verliert) |
+| `t_ohne_top5` | gruppierter t-Wert, wenn es diese fünf Symbole nie gegeben hätte |
+
+Der Score `t_robust` wertet das **schlechtere** aus `t_wert` und
+`t_ohne_top5`. Bewusst nicht nur den Wert ohne sie: Steigt der t-Wert
+durch ihr Entfernen (möglich, wenn sie stark schwankten), wäre sonst
+ausgerechnet das belohnt. Nicht berechenbar (zu wenig Rest) ergibt
+`−inf` — zu schmal, um breit zu sein, ist selbst ein Befund.
+
+Nutzung: `scripts/50_ausbruch_dienst.py --score t_robust`. Die laufenden
+Instanzen benutzen weiter `t` und bleiben damit vergleichbar.
+
+**Beim Testen gelernt:** Die ersten Testdaten waren zu sauber und
+ergaben t = 65 — was korrekt in die Kappung gegen entartete Werte
+(§G61) lief und NaN lieferte. Ein Test auf unrealistischen Daten prüft
+die Kappung, nicht die Sache. Jetzt mit gesätem Rauschen.
+
+---
+
+## G69. Instanz d sucht nur noch zufällig — als Gegengift zu §G64 (12.09.2026)
+
+§G64 zeigte: 438.934 von 439.200 Versuchen sind Bergsteigen, deshalb
+sind die Achsen-Randmittelwerte ein Echo eines einzigen Hügels statt
+Evidenz. Instanz `d` läuft seit dem 12.09.2026 mit
+`--erkundung 999999999`, zieht also dauerhaft **Zufallspunkte** statt zu
+klettern.
+
+Kostet nichts außer einem Neustart, und erst damit wird Abschnitt 3 der
+Auswertung („welche Achsenwerte tragen") zu einer Aussage über den
+Suchraum statt über die Nachbarschaft der Elite. Die drei anderen
+Instanzen klettern unverändert weiter — der Vergleich bleibt erhalten.
+
+Auswerten lässt sich das später über die Spalte `phase`:
+Randmittelwerte nur aus `phase == "Erkundung"` sind unverzerrt.
+
+---
+
+## G70. Kursvorrat auf 2021–2026 erweitert — mit einem Vorbehalt (12.09.2026)
+
+**Geladen.** 2021 und 2022 für **genau die 1.844 Symbole**, die schon in
+2023–2026 vorliegen (`scripts/48_ausbruch_daten.py --wie-vorrat`). Ein
+frischer Universums-Abzug wäre hier der Fehler gewesen: Er enthielte
+Symbole, die in den alten Jahren fehlen, und ließe alte weg — die
+gemeinsame Zeitachse würde dadurch **kürzer** statt länger.
+
+**Warum überhaupt.** Das Gate ist mit vier Jahren *mathematisch
+unbestehbar*: §6.2 verlangt 200 Trades, das Prüffenster liefert 49.
+
+**Der Vorbehalt des Nutzers, und er ist berechtigt.** 2021 war ein
+extremer Aufschwung (Meme-Aktien, SPAC-Welle, Nullzins), 2022 ein
+harter Bärenmarkt. Eine Ausbruch-Strategie sieht in 2021 glänzend aus —
+aus Gründen, die so nicht wiederkommen. Wer auf 2021 **optimiert**,
+fittet eine verschwundene Marktphase.
+
+**Konsequenz für die Verwendung:** Die neuen Jahre gehören **nicht** ins
+Lernfenster, wo der Optimierer sie ausbeuten kann, sondern als
+getrennte, unabhängige Perioden in die Auswertung — je Jahr, je Regime.
+Ein Ergebnis, das 2021 **und** 2022 **und** 2023–2026 trägt, ist etwas
+wert. Eines, das nur 2021 trägt, ist eine Marktphase.
+
+Das ist zugleich das ehrliche Argument für die Erweiterung: Sie macht
+den Backtest nicht schöner, sondern prüfbar. Eine Strategie, die 2022
+nicht übersteht, ist mit echtem Geld nicht handelbar — und ohne 2022
+erfährt man das nie.
+
+---
+
+## G71. Je Jahr ausgewertet: die Strategie ist ein Verstärker des Marktes (12.09.2026)
+
+`scripts/55_ausbruch_perioden.py` bewertet **eine** Konfiguration in
+getrennten Jahren — nie zur Auswahl, nur zur Prüfung. Elite-Konfiguration
+über 2023–2026, Marktumfeld gemessen an QQQ:
+
+| Jahr | Markt (QQQ) | t | t ohne Top-5 | Top-5 | je Trade | Trades | Tage |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2023 | +53,2 % | 9,44 | — | 32 % | **+2,708 %** | 23 | 21 |
+| 2024 | +28,4 % | 2,30 | 1,18 | 59 % | +1,014 % | 34 | 30 |
+| 2025 | +21,8 % | −0,06 | 0,02 | — | **−0,024 %** | 42 | 34 |
+| 2026 | +15,7 % | 2,09 | 1,52 | 49 % | +1,398 % | 32 | 27 |
+
+**Drei Befunde, die der 70/30-Schnitt verdeckt hat:**
+
+1. **Die Rendite je Trade fällt mit der Marktstärke.** 2023 (+53 %
+   Markt) bringt 2,708 % je Trade, 2024 (+28 %) nur 1,014 %, 2025
+   (+22 %) nichts mehr. Das ist das Profil eines Marktverstärkers, nicht
+   das einer eigenständigen Kante. 2026 bricht das Muster leicht — bei
+   32 Trades ist das kein Widerspruch, sondern Rauschen.
+2. **Kein einzelnes Jahr erreicht 60 Handelstage** (21, 30, 34, 27).
+   Gate-Kriterium §6.1 ist damit innerhalb eines Jahres *strukturell*
+   unerreichbar, nicht nur zufällig knapp.
+3. **2025 ist flach bis negativ** — und zwar genau das Jahr, in dem das
+   Lernfenster endet (05.08.2025). Die Konfiguration versagt am Rand
+   ihres eigenen Lernzeitraums.
+
+**Und der wichtigste Satz steht in der Spalte „Markt":** Alle vier Jahre
+waren steigende Jahre (+15,7 % bis +53,2 %). Es gibt in diesem Vorrat
+**kein fallendes Jahr** — die Probe aufs Exempel fehlt vollständig.
+Genau deshalb wurden 2021/2022 nachgeladen (§G70).
+
+> **Befund 1 ist mit §G73 widerlegt.** Sobald 2021 und 2022 dazukommen,
+> verschwindet der Zusammenhang zwischen Marktstärke und Rendite je
+> Trade. Er war ein Artefakt daraus, nur vier steigende Jahre zu sehen.
+> Die Tabelle oben bleibt als Messung richtig, die Deutung war falsch.
+
+**Gebaut mit `Kursdaten.zeitraum(von, bis)`** — Schnitt als numpy-Sicht,
+nicht als Kopie: Sechs Jahre aus knapp einem Gigabyte dürfen nicht sechs
+Kopien erzeugen. `tests/test_ausbruch_perioden.py` prüft, dass
+angrenzende Jahre sich weder überlappen noch eine Lücke lassen — sonst
+tauchte derselbe Trade in zwei Jahren auf.
+
+---
+
+## G72. Elite-Datei war nicht score-fest — vor dem Schaden behoben (12.09.2026)
+
+**Gefunden beim Vorbereiten der `t_robust`-Instanz.** `ausbruch_elite.json`
+enthielt eine nackte Zahl ohne Angabe, mit welcher Score-Funktion sie
+entstand. Alle Instanzen lesen und schreiben dieselbe Datei.
+
+**Was passiert wäre:** Eine Instanz mit `--score t_robust` hätte ihre
+Werte gegen einen `t`-Bestwert verglichen. Da `t_robust` bauartbedingt
+nie über `t` liegt, hätte sie **nie** einen Bestwert eingetragen — und
+zugleich per `elite_anteil` immer wieder an einem Punkt angesetzt, der
+für ein anderes Ziel optimiert wurde. Sie hätte gearbeitet, Zahlen
+geliefert und nichts gemessen.
+
+Dieselbe Fehlerklasse wie die zwei Wochen falsche Flotten-Referenz
+(§G6): eine Referenz, die nicht zu dem passt, was sie referenziert.
+
+**Behoben:** `_elite_pfad(score_name)` gibt je Score-Funktion eine
+eigene Datei; `t` behält den bisherigen Namen, damit die laufenden
+Instanzen ihre Elite nicht verlieren. Der Score-Name steht ab jetzt
+zusätzlich *in* der Datei. Regressionstests in
+`tests/test_ausbruch_robust.py`.
+
+**Gefunden, bevor er Schaden anrichten konnte** — nicht durch einen Test,
+sondern durch die Frage „was teilen diese Prozesse eigentlich?" vor dem
+Start. Das ist die Lehre aus §G62 angewandt.
+
+---
+
+## G73. Sechs Jahre inklusive Bärenmarkt — 2022 ist positiv, und §G71 war falsch (12.09.2026)
+
+Elite-Konfiguration über 2021–2026, 1.725 Symbole (die Schnittmenge
+schrumpft von 1.844, weil spätere Börsengänge 2021 fehlen), 36.924 Bars:
+
+| Jahr | Markt (QQQ) | t | t ohne Top-5 | Top-5 | Rendite | je Trade | Trades | Tage |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2021 | +28,1 % | 3,84 | 3,73 | 55 % | +14,56 % | **+3,908 %** | 35 | 33 |
+| 2022 | **−32,9 %** | 1,38 | 1,25 | 58 % | +3,03 % | **+1,155 %** | 26 | 24 |
+| 2023 | +53,2 % | 8,48 | — | 30 % | +5,82 % | +2,698 % | 21 | 19 |
+| 2024 | +28,4 % | 1,97 | 1,00 | 78 % | +2,61 % | +0,840 % | 31 | 28 |
+| 2025 | +21,8 % | −0,49 | 0,66 | — | −1,36 % | −0,345 % | 38 | 32 |
+| 2026 | +15,7 % | 2,09 | 1,52 | 49 % | +4,55 % | +1,398 % | 32 | 27 |
+
+### Die Überraschung: 2022 trägt
+
+Im Jahr, in dem QQQ **−32,9 %** machte, lieferte die Strategie
+**+3,03 %** und +1,155 % je Trade. Das widerspricht der Vorannahme aus
+`AUSBRUCH.md` §7 („Momentum funktioniert in steigenden Märkten fast
+immer und bricht in Wenden zusammen") — und der Begründung, mit der
+2021/2022 überhaupt geladen wurden.
+
+**Warum das trotzdem kein Befund ist:** 26 Trades an 24 Handelstagen.
+Unter der 30-Beobachtungen-Regel (§J.1), weit unter Gate §6.1 (60 Tage),
+t = 1,38 gegen eine Schwelle von 4,63. Die Zahl ist ein Hinweis, kein
+Beleg. Und 58 % davon tragen fünf Symbole.
+
+### §G71 wird zurückgenommen
+
+§G71 deutete die vier Jahre 2023–2026 als „Verstärker des Marktes": je
+stärker der Markt, desto besser die Rendite je Trade. Mit sechs Jahren
+ist davon nichts übrig:
+
+| Markt | je Trade |
+|---:|---:|
+| −32,9 % | +1,155 % |
+| +15,7 % | +1,398 % |
+| +21,8 % | −0,345 % |
+| +28,1 % | +3,908 % |
+| +28,4 % | +0,840 % |
+| +53,2 % | +2,698 % |
+
+Kein Zusammenhang. Das Muster aus §G71 entstand daraus, dass alle vier
+betrachteten Jahre steigende Jahre waren — **eine Deutung, die nur
+solange hielt, wie die Gegenprobe fehlte.** Die Messung war richtig, die
+Geschichte darüber nicht.
+
+### Der Nutzer hatte recht — und das Gegenteil zeigt sich auch
+
+Die Sorge lautete: 2021 war ein extremer Aufschwung und wird die Daten
+verfälschen. Bestätigt — 2021 hat mit **+3,908 % je Trade** die beste
+Zahl aller sechs Jahre, deutlich über allem anderen. Wer darauf
+optimiert, fittet Meme-Aktien und Nullzins. Genau deshalb wird auf diesen
+Jahren **nicht** optimiert (§G70), sondern nur geprüft.
+
+### Der strukturelle Befund, der alles andere überlagert
+
+**183 Trades in sechs Jahren.** 35 + 26 + 21 + 31 + 38 + 32. Gate §6.2
+verlangt **200 Trades im Prüffenster allein.**
+
+Diese Konfiguration feuert rund 30-mal pro Jahr. Sie kann das Gate
+**nie** bestehen, egal wie viele Jahre nachgeladen werden — nicht wegen
+fehlender Kante, sondern wegen fehlender Stichprobe. Mehr Daten lösen
+das nicht; nur eine Konfiguration, die häufiger handelt, kann es lösen.
+
+**Und genau dorthin läuft `t_robust` von selbst.** Wer nicht von fünf
+Symbolen abhängen darf, braucht Breite — und Breite heißt mehr Trades.
+Nach rund einer Stunde Suche (Instanz `e`, 12.09.2026):
+
+| | `t`-Elite | `t_robust`-Elite |
+|---|---:|---:|
+| Score | 7,649 | 2,679 |
+| Trades im Lernfenster | **76** | **244** |
+| Top-5-Anteil | nicht erfasst | **32,6 %** |
+| t ohne Top-5 | nicht erfasst | 2,87 |
+
+Damit erfüllt der `t_robust`-Kandidat **zwei Gate-Kriterien, die die
+alte Elite strukturell nie erreichen konnte**: §6.2 (≥ 200 Trades) und
+§6.5 (Top-5 unter 50 %). Der robuste Score korrigiert nebenbei genau das
+Problem, das die Trade-Zahl aufgeworfen hat — nicht geplant, fällt so an.
+
+**Kein Befund, wohlgemerkt:** 2,679 liegt unter der Schwelle von 4,63,
+und gemessen ist das im Lernfenster. Es ist der erste Kandidat, der
+nicht von vornherein aussichtslos ist — mehr nicht.
+
+### Was `t_robust` anders wählt
+
+13 von 17 Achsen weichen von der `t`-Elite ab — es ist keine Variante,
+sondern eine andere Strategie:
+
+| Achse | `t`-Elite | `t_robust` | Wirkung |
+|---|---:|---:|---|
+| `anstieg_pct` | 20 | 15 | niedrigere Schwelle, mehr Signale |
+| `min_rel_volumen` | 10 | **0** | kein Volumenschub gefordert |
+| `sperrfrist_bars` | 78 | 4 | Wiedereinstieg schon nach 4 Bars |
+| `halten_bars` | 52 | 130 | 5 Tage statt 2 |
+| `max_positionen` | 10 | 3 | weniger gleichzeitig |
+| `verlust_pct` | 0 | **3** | echter Stop |
+| `trailing_pct` | 0 | **10** | nachziehender Stop |
+| `zeitausstieg_nur_bei_verlust` | False | **True** | Gewinner laufen lassen |
+| `gewinn_pct` | 3 | 8 | größeres Ziel |
+| `tageszeit_bis_bar` | 22 | 10 | nur Vormittag (10:00–12:00) |
+
+**`min_rel_volumen = 0` ist kein Rückfall in §G60.** Dort war das
+Problem, dass die Suche *Liquiditätsuntergrenzen* aushebelte und damit
+den Fehler im Kostenmodell ausbeutete. Die Untergrenze steht hier
+weiterhin: `min_dollar_volumen = 10 Mio.` und `min_preis = 20`. Ein
+Volumen*schub* nicht zu verlangen ist etwas anderes, als illiquide Werte
+zuzulassen.
+
+---
+
+## G74. Elite-Schlüssel braucht auch den Datenumfang (12.09.2026)
+
+Unmittelbare Fortsetzung von §G72, beim Vorbereiten einer Instanz über
+sechs statt vier Jahre gefunden.
+
+**Der Fehler, der entstanden wäre:** Instanz `e` sucht auf 2023–2026,
+Instanz `f` auf 2021–2026 — beide mit `--score t_robust`. Ein t-Wert aus
+sechs Jahren ist für dieselbe Konfiguration eine andere Zahl als einer
+aus vier. Bei gemeinsamer Elite hätten sie **Zeiträume verglichen statt
+Konfigurationen**, und wieder wäre der Prozess fehlerfrei
+weitergelaufen, ohne noch etwas zu messen.
+
+**Behoben:** Der Elite-Schlüssel ist jetzt (Score-Funktion, Datenumfang).
+`_elite_pfad("t_robust", "2021-2026")` und `_elite_pfad("t_robust",
+"2023-2026")` sind verschiedene Dateien. Die dauerhaft laufende
+Kombination (`t`, `2023-2026`, Konstante `ELITE_ALTBESTAND`) behält den
+ursprünglichen Dateinamen, damit ein Neustart der Flotte ihr die
+gesammelte Elite nicht wegnimmt.
+
+**Dreimal dieselbe Fehlerklasse an einem Tag** (§G6, §G72, §G74): eine
+Referenz, die nicht zu dem passt, was sie referenziert. Sie ist deshalb
+so gefährlich, weil kein Absturz und keine Fehlermeldung entsteht — der
+Prozess arbeitet weiter und misst nichts. Die Frage, die sie findet,
+lautet: **„Was genau teilen diese Prozesse, und ist es für alle
+dasselbe?"**
+
+---
+
+## G75. Instanz f: sechs Jahre plus robuster Score (12.09.2026, läuft)
+
+Die beiden wirksamsten Hebel zusammen, als eigene Instanz:
+
+| | Flotte a/b/c | d | e | **f** |
+|---|---|---|---|---|
+| Jahre | 2023–2026 | 2023–2026 | 2023–2026 | **2021–2026** |
+| Score | `t` | `t` | `t_robust` | **`t_robust`** |
+| Verfahren | Bergsteigen | Zufallserkundung | Bergsteigen | Bergsteigen |
+
+**Warum sechs Jahre auch das Prüffenster verbessern.** Der Schnitt liegt
+bei 70 % der Bars: aus 36.924 Bars werden rund 25.800 zum Lernen und
+11.100 zum Prüfen — also etwa **1,8 Jahre Prüffenster statt 13 Monate**.
+Das ist der einzige Weg, die 200 Trades aus Gate §6.2 überhaupt
+erreichbar zu machen.
+
+**Und der Einwand zu 2021 bleibt gültig** — mit einer Einschränkung: In
+einem Lernfenster aus vier Jahren ist 2021 ein Viertel, nicht das Ganze.
+Eine Konfiguration, die nur 2021 trägt, kommt über den ganzen Zeitraum
+nicht auf einen hohen t-Wert. Die Verdünnung macht Überanpassung an 2021
+*schwerer*, nicht leichter. Geprüft wird das trotzdem getrennt je Jahr
+(§G73), nicht unterstellt.
+
+---
+
+## G76. Die Zufallserkundung widerspricht dem Bergsteigen — bei 10 Achsenwerten (12.09.2026)
+
+Erste Ernte der Instanz `d` (§G69). Nach wenigen Stunden liegen 2.986
+verwertbare Zufallsversuche vor. `scripts/52_ausbruch_auswertung.py`
+stellt sie jetzt neben die Gesamtspalte. **36 von 84 Achsenwerten
+wechseln das Vorzeichen**; bei 10 davon liegt die Erkundungsseite mehr
+als 2 Standardfehler von null entfernt:
+
+| Achse | Wert | Bergsteigen | Erkundung | SE | n |
+|---|---:|---:|---:|---:|---:|
+| `min_dollar_volumen` | 50 Mio. | −0,277 | **+0,639** | 0,057 | 779 |
+| `gewinn_pct` | 3 | **+0,668** | **−0,501** | 0,099 | 428 |
+| `anstieg_pct` | 15 | −0,087 | +0,431 | 0,084 | 394 |
+| `gewinn_pct` | 15 | −0,187 | +0,390 | 0,099 | 410 |
+| `anstieg_pct` | 10 | −0,210 | +0,250 | 0,085 | 462 |
+| `min_rel_volumen` | 5 | −0,154 | +0,236 | 0,074 | 500 |
+| `einstieg_verzoegerung_bars` | 4 | −0,124 | +0,218 | 0,082 | 622 |
+| `verlust_pct` | 8 | −0,052 | +0,197 | 0,092 | 484 |
+| `zeitausstieg_nur_bei_verlust` | False | +0,036 | −0,187 | 0,063 | 1472 |
+| `zeitausstieg_nur_bei_verlust` | True | −0,042 | **+0,181** | 0,052 | 1514 |
+
+### Die zwei Umkehrungen, auf die es ankommt
+
+**1. `min_dollar_volumen = 50 Mio.` ist der beste Wert, nicht der
+schlechteste** (+0,639 gegen −0,277; das sind 11 Standardfehler). Die
+gepoolte Zahl sagte das Gegenteil. Bemerkenswert, weil hier der robuste
+Befund zugleich der **sicherere** ist: Je liquider die Werte, desto
+belastbarer die Kostenannahme von 12,2 bps (§G54) — und desto weiter weg
+von der Falle aus §G60.
+
+**2. `gewinn_pct = 3` ist die stärkste Aussage der gepoolten Auswertung
+(+0,668) — und in der Erkundung das Gegenteil (−0,501, 5 Standardfehler).**
+Genau dieser Wert steht in der `t`-Elite. Er ist damit sehr
+wahrscheinlich ein Artefakt davon, dass die Bergsteig-Ketten dort
+lagerten, kein Effekt. Die Erkundung bevorzugt `gewinn_pct = 15`.
+
+**3. Eine unabhängige Bestätigung:** Die Erkundung bevorzugt
+`zeitausstieg_nur_bei_verlust = True` — und `t_robust` hat unabhängig
+davon denselben Wert gewählt (§G73). Zwei verschiedene Verfahren, dieselbe
+Richtung.
+
+### Was das nicht ist
+
+In-sample-Zahlen aus dem Lernfenster, keine Prüfwerte. Bei 84 getesteten
+Achsenwerten wären rein zufällig rund 4 über 2 SE zu erwarten — die
+unteren Einträge der Tabelle sind deshalb nicht einzeln zu lesen. Die
+ersten drei (11 SE, 5 SE, 5 SE) liegen weit jenseits davon.
+
+### Die Lehre
+
+Vier Instanzen, die alle bergsteigen, erzeugen 439.000 Versuche und eine
+Statistik, die **in Teilen das Vorzeichen verdreht**. Eine einzige
+Instanz auf Zufallssuche liefert nach wenigen Stunden die Korrektur.
+
+> Rechenzeit ist nicht das Engpassgut. **Unabhängigkeit** ist es.
+
+---
+
+## G77. Die Fehlversuche als Verteilung gelesen: kein rechter Rand (12.09.2026)
+
+Statt weiter nach dem besten Treffer zu suchen, wurden **alle** 4.534
+unverzerrten Prüfungen als Verteilung ausgewertet. Wenn in dieser
+Strategiefamilie etwas steckt, muss die Verteilung der Prüf-t-Werte
+einen rechten Rand haben, den Zufall nicht erklärt.
+
+| Größe | gemessen | bei reinem Zufall |
+|---|---:|---:|
+| Mittelwert | **−0,193** | 0 |
+| Streuung | 1,197 | 1 |
+| Maximum | **3,59** | 4,10 |
+| Anteil positiv | **46,7 %** | 50 % |
+
+| Schwelle | gemessen | bei Zufall erwartet |
+|---|---:|---:|
+| t > 2 | 68 | 151,5 |
+| t > 3 | 6 | 17,3 |
+| t > 4 | **0** | 1,0 |
+
+### Was das heißt
+
+**Es gibt keinen rechten Rand.** Über jeder Schwelle liegen *weniger*
+Konfigurationen als reiner Zufall hervorbringen würde, und das gemessene
+Maximum (3,59) liegt **unter** der Zufallserwartung (4,10). Die Suche
+scheitert nicht daran, die Nadel zu finden — die Messung sagt, dass in
+diesem Heuhaufen keine ist.
+
+Der Mittelwert von −0,193 und die 46,7 % positiver Fälle sind die direkte
+Fassung derselben Aussage: Eine zufällig gezogene Konfiguration dieser
+Familie **verliert** im Prüffenster leicht Geld. Das ist genau das, was
+man nach Kosten erwartet, wenn keine Kante vorhanden ist.
+
+### Was es nicht heißt — zwei ehrliche Einschränkungen
+
+1. **Das Maximum unter der Zufallserwartung ist kein Beweis für eine
+   negative Kante.** Bergsteig-Nachbarn sind korreliert, die wirksame
+   Zahl unabhängiger Züge liegt unter 4.534 — und dann ist ein
+   niedrigeres Maximum zu erwarten. Belastbar sind Mittelwert und
+   Trefferanteil, nicht der Abstand 3,59 zu 4,10.
+2. **Gilt für das Durchsuchte, nicht für alles.** Gemessen wurde die
+   `t`-bewertete Familie auf 2023–2026, überwiegend in der Nachbarschaft
+   weniger Hügel. Die Zufallserkundung (§G69) und die robuste Suche über
+   sechs Jahre (§G75) ziehen aus anderen Regionen; deren Prüfungen
+   sammeln sich noch.
+
+### Einordnung
+
+Das ist das erste belastbare **Ergebnis** dieser Werkstatt — nur nicht
+das gewünschte. Ein „nein" mit 4.534 Beobachtungen ist mehr wert als ein
+„vielleicht" mit einem Glückstreffer, weil es verhindert, echtes Geld auf
+den Glückstreffer zu setzen (§G66: dort trugen fünf Symbole 129,9 %).
+
+**Offen bleibt genau eine Frage, und sie ist vorab formuliert:** Bringen
+`t_robust` und die sechs Jahre eine Verteilung mit rechtem Rand hervor?
+Dieselbe Auswertung, sobald genug Prüfungen der Instanzen `e` und `f`
+vorliegen. Fällt sie wie diese aus, ist die Ausbruch-Familie erledigt und
+der Trendbot bleibt der Träger fürs Jahresziel.
+
+---
+
+---
+
+## G78. Querschnitt-Familie gebaut und gemessen — 7 von 8 tot, 1 unbeweisbar (12.09.2026)
+
+**Neue Familie, weil die alte ausgemessen war.** `querschnitt.py` fragt
+nicht „steigt dieser Wert", sondern „welche von 1.725 sind gerade die
+stärksten" — Long die besten 10 %, Short die schwächsten, marktneutral,
+Haltedauer Wochen statt Tage. Das greift die drei bewiesenen Killer des
+Projekts gleichzeitig an:
+
+| Killer | bisher | hier |
+|---|---|---|
+| Kosten | 30 %+ Kostenlast im Jahr bei 2 Tagen Haltedauer | **1,5–4,4 %** bei 21–63 Tagen |
+| steigender Markt | alle Ergebnisse aus Bullenjahren (§G73) | Long = Short, Marktdrift fällt heraus |
+| Survivorship | trug §G53 fast vollständig | kürzt sich zwischen beiden Beinen weitgehend |
+
+**Bewusst keine Suche.** 8 vorab benannte Varianten (im Code, vor der
+ersten Zahl), jede einmal gerechnet. Zum Vergleich: Die Ausbruch-Suche
+hatte 470.000 Versuche und damit ein Zufallsmaximum von 5,11; hier sind
+es 2,04.
+
+### Ergebnis, 2021–2026, bei 30 bps Spanne
+
+| Variante | t | netto je Periode | Treffer | Sharpe | Perioden |
+|---|---:|---:|---:|---:|---:|
+| momentum 60/21 | −0,51 | −0,506 % | 57,8 % | −0,22 | 64 |
+| umkehr 60/21 | −0,95 | −0,934 % | 34,4 % | −0,41 | 64 |
+| tief_vola 60/21 | −0,45 | −0,651 % | 48,4 % | −0,19 | 64 |
+| momentum_je_vola 60/21 | −0,90 | −0,696 % | 51,6 % | −0,39 | 64 |
+| **momentum 120/63** | **1,08** | **+2,182 %** | 55,0 % | **0,48** | **20** |
+| umkehr 10/21 | −1,05 | −0,765 % | 40,9 % | −0,45 | 66 |
+| momentum 60/21 eng | −0,70 | −0,831 % | 53,1 % | −0,30 | 64 |
+| *nur Long (Vergleich)* | 0,19 | +0,205 % | 56,2 % | 0,08 | 64 |
+
+**Sieben von acht sind nach Kosten negativ.** Monatliches Momentum,
+Umkehr in zwei Varianten, Low-Vol, vola-normiertes Momentum, engere
+Auswahl — alle tot. Bemerkenswert: `momentum 60/21` hat brutto +0,214 %,
+netto −0,506 %. Die Kosten drehen das Vorzeichen, selbst bei
+monatlichem Umschlag.
+
+**Einer überlebt: Quartals-Momentum** (120 Tage Rückblick, 63 Tage
+halten). +2,18 % je Periode nach 30 bps ≈ **+8,9 % im Jahr**, Sharpe
+0,48, 55 % Treffer — und die Kostenlast beträgt nur 2,9 % im Jahr, weil
+viermal im Jahr umgeschlagen wird statt 126-mal.
+
+**Die Nur-Long-Gegenprobe funktioniert wie vorgesehen:** Gleiche
+Konfiguration, nur ohne Short-Seite, bringt +0,205 % statt −0,506 % je
+Periode. Die Differenz von **+0,712 pp je Monat** ist Marktdrift plus
+Survivorship — sichtbar gemacht statt mitgezählt.
+
+---
+
+## G79. Die eigene Schwelle ist unerreichbar geworden — die Ausbruch-Suche hat das Budget verbrannt (12.09.2026)
+
+**Die Rechnung, die das ganze Projekt betrifft.** Für eine Renditereihe
+gilt
+
+    t  =  Sharpe  ×  Wurzel(Jahre)
+
+Daraus folgt für die aktuelle projektweite Zufallsschwelle von **4,90**
+bei sechs Jahren Daten:
+
+    benötigter Sharpe  =  4,90 / Wurzel(6)  =  2,0
+
+**Ein Sharpe von 2,0 über sechs Jahre ist Spitzenklasse** — nichts, was
+eine 15-Minuten-Bar-Werkstatt auf einem Laptop plausibel findet. Die
+Schwelle schließt damit *alles* aus, was hier erreichbar wäre, auch eine
+echte Kante.
+
+**Wie es dazu kam:** `schwelle_sigma()` ist `sqrt(2 ln N)` über *alle*
+Versuche des Projekts. Die Ausbruch-Suche hat 470.000 davon beigetragen
+und die Schwelle von 4,10 auf 4,90 gehoben. Das war richtig gerechnet und
+in der Sache korrekt — aber es bedeutet: **Die Suche hat nicht nur nichts
+gefunden, sie hat auch den statistischen Spielraum für alles Weitere
+aufgebraucht.** Quartals-Momentum mit Sharpe 0,48 bräuchte rund 100 Jahre
+Daten, um diese Hürde zu nehmen.
+
+### Was daraus folgt — drei Wege, nur einer trägt
+
+1. **Schwelle senken: nein.** Sie ist die Rechnung, nicht die Meinung
+   (§B2). Wer sie nachträglich lockert, hat den Grund verstanden und
+   ignoriert.
+2. **Mehr Historie: begrenzt.** 20 Jahre statt 6 senken den nötigen
+   Sharpe auf 1,1 — noch immer hoch, und vor 2015 fehlen die
+   Intraday-Daten ohnehin.
+3. **Vorwärts messen: der einzige saubere Weg.** Ein Schattenlauf einer
+   **einzigen, vorab angemeldeten** Konfiguration ist *ein* Test, nicht
+   der 470.001-te. Für einen einzelnen vorangemeldeten Test ist die
+   Hürde rund 2,0, nicht 4,90 — und genau dafür gibt es
+   `fleet.anmelden` und die Regel „Live wird nur, was im Schatten
+   bestanden hat" (§J.3).
+
+**Der praktische Schluss:** Rückwärts ist in dieser Werkstatt nichts mehr
+zu beweisen. Kandidaten können nur noch *ausgeschlossen* werden — und
+genau das hat §G78 mit sieben von acht Varianten getan. Der eine
+Überlebende gehört in den Vorwärtsschatten, nicht in eine weitere
+Rückwärtsrechnung.
+
+**Nebenbefund zur Kostenfrage, endlich quantifiziert:** `momentum 60/21`
+hat brutto +0,214 % und netto −0,506 % je Monat. Die Spanne dreht das
+Vorzeichen selbst bei monatlichem Umschlag. Alles, was häufiger handelt
+als monatlich, braucht keine Messung mehr.
+
+---
+
+## G80. Eigener Fehler im neuen Modul: 15 % der Tagesschlusskurse waren NaN (12.09.2026)
+
+**Gefunden, weil eine Zahl nicht plausibel war.** Der erste
+Vorwärts-Korb meldete „129 handelbare Werte" — bei einem Universum von
+1.725. Das ist zu wenig für einen 1-Mio.-Dollar-Umsatzfilter, also
+nachgemessen statt weitergemacht.
+
+**Der Fehler.** `tageskurse()` nahm den Schlusskurs des **letzten Bars**
+eines Tages. Handelt ein Wert in genau dieser Viertelstunde nicht, ist
+der Bar NaN — und damit der ganze Tagesschlusskurs. Gemessen über
+2 Jahre und 2.004 Symbole:
+
+| | |
+|---|---:|
+| NaN-Anteil aller Tagesschlusskurse | **15,0 %** |
+| Symbole ohne ein einziges NaN | **1 von 2.004** |
+
+Ein `dropna()` im Signal wählte dadurch nicht die liquidesten Werte,
+sondern die, die zufällig in der letzten Viertelstunde von drei
+bestimmten Tagen gehandelt hatten. Das ist keine Auswahl, sondern
+Rauschen im Universum.
+
+**Behoben:** `ffill(limit=5)` auf die Tagesschlusskurse — der letzte
+bekannte Kurs ist der Kurs. Bewusst begrenzt: Ein Wert, der eine Woche
+nicht handelt, fällt heraus statt mit altem Kurs als lebendig zu gelten.
+Das Volumen wird **nicht** gefüllt (kein Handel = kein Umsatz, genau das
+soll der Liquiditätsfilter sehen). Regressionstests in
+`tests/test_querschnitt.py`.
+
+**Wirkung — und die Lehre daraus:**
+
+| | vorher | nachher |
+|---|---:|---:|
+| Handelbare Werte im Vorwärts-Korb | 129 | **314** |
+| §G78 `momentum 120/63`, t | 1,08 | 1,10 |
+| §G78 `momentum 120/63`, netto | +2,182 % | +2,174 % |
+
+Der Korb verdoppelte sich, die Rückwärts-Kennzahlen blieben praktisch
+gleich. **Beides war vorher nicht absehbar** — genau darum wurde
+nachgemessen und nicht geschätzt. Ein Defekt, der eine Kennzahl nicht
+verschiebt, ist trotzdem ein Defekt: Beim nächsten Signal, das mehr
+Stichtage anfasst, hätte er voll durchgeschlagen.
+
+Die vierte Frage aus dem Audit-Katalog von §G62 („Kann eine Kennzahl
+entarten?") hätte das gefunden. Sie wurde beim Bau nicht gestellt.
+
+---
+
+## G81. Quartals-Momentum vorwärts angemeldet (12.09.2026)
+
+**Warum nicht über `fleet.anmelden`.** Zwei Blocker, beide geprüft:
+`fleet.anmelden` baut zwingend auf `EngineConfig.for_reversal()` plus
+genau einer geänderten Achse — eine Querschnitt-Strategie ist kein
+anderer Parameter, sondern ein anderes Programm. Und **Short-Positionen
+gibt es im ganzen Projekt nicht** (`trading.py`, `engine.py`,
+`shadow.py` durchsucht). Die Strategie in die Flotte zu pressen wäre
+eine Scheinanmeldung gewesen.
+
+**Stattdessen:** `querschnitt_vorwaerts.py` — eine Datenbank, die an
+jedem Rebalance-Stichtag den gewählten Korb festschreibt: Symbol, Seite,
+Kurs, Zeitstempel. Ausgewertet wird erst Wochen später.
+
+> Der Korb existiert, bevor sein Ergebnis existiert.
+
+Das ist konstruktiv lookahead-frei — nicht weil ein Test es prüft,
+sondern weil die Zukunft beim Schreiben noch nicht stattgefunden hat.
+Ein geschriebener Korb kann nicht ersetzt werden
+(`test_korb_kann_nicht_ueberschrieben_werden`); wer ihn ändern könnte,
+könnte ihn nach dem Ergebnis ändern.
+
+**Angemeldet — vorab, wortwörtlich im Code:**
+
+| | |
+|---|---|
+| Kennung | `Q01_quartals_momentum` |
+| Konfiguration | Momentum 120 Tage Rückblick, 5 Tage Lücke, 63 Tage halten, beste/schlechteste 10 %, marktneutral, 30 bps |
+| Schwelle | **t > 2,0** — ein vorangemeldeter Test, nicht der 470.001-te (§G79) |
+| Perioden nötig | 20 |
+| Rückwärts-Erwartung | +2,174 % je Periode, Sharpe 0,49, t = 1,10 |
+| Abbruch wenn | nach 8 Perioden der Mittelwert unter null liegt |
+
+Erster Korb erfasst am Stichtag 11.09.2026: 31 long / 31 short aus 314
+handelbaren Werten.
+
+**Die ehrliche Zahl zur Dauer:** Bei Sharpe 0,49 braucht t = 2,0 rund
+**17 Jahre**. Dieses Protokoll wird die Strategie nicht beweisen. Es
+leistet zwei andere Dinge: Es hält fest, was vorab behauptet wurde — auch
+gegen die eigene nachträgliche Erzählung — und es fällt **sofort** auf,
+wenn die Strategie vorwärts deutlich schlechter läuft als rückwärts. Das
+ist der häufigste Fall, und ihn früh zu sehen ist der eigentliche Nutzen.
+
+**Eine erste Anmeldung wurde verworfen**, weil sie auf dem NaN-Fehler aus
+§G80 beruhte — nach
+`data/querschnitt_verworfen_nan_ffill/` verschoben, nicht gelöscht. Der
+Unterschied ist wichtig: Eine Voranmeldung darf wegen eines *Defekts*
+verworfen werden, nie wegen eines unerwünschten *Ergebnisses*.
+
+---
+
+## G82. Ein Test verbrauchte echtes API-Kontingent und wurde davon selbst rot (12.09.2026)
+
+**Der Vorfall.** Nach dem zehnten Suite-Lauf des Tages schlug
+`test_ratelimit_burst.py::test_grosser_burst_stuerzt_nicht_ab` fehl:
+„yfinance: Tageskontingent erschöpft (1691/1800)". Am Code war nichts
+falsch.
+
+**Die Ursache.** Der Test rief `lim.acquire(180)` gegen den **echten**
+RateLimiter. Die Fixture leerte nur den Minutenzähler im Speicher — der
+**Tageszähler** liegt in einer Datei (`ratelimit.STATE_FILE`) und wurde
+bei jedem Lauf um 186 erhöht. Zehn Suite-Läufe ≈ 1.697.
+
+**Zwei Schäden, und der zweite ist der schlimmere:**
+
+1. Der Test hing von der Zahl seiner eigenen vorherigen Läufe ab. Er
+   maß nicht die Sache, sondern die Testhistorie.
+2. Er verbrauchte Kontingent, **das dem Betrieb gehört**. `shadow.py`
+   benutzt yfinance; es waren nur noch 103 Requests frei. Der
+   Schattenbot hätte heute blockiert werden können — eine Lücke in einer
+   laufenden Messung, verursacht durch einen Test.
+
+**Behoben:** Die Fixture setzt `STATE_FILE` per `monkeypatch` auf eine
+Datei im `tmp_path`. Dazu ein Regressionstest, der genau diese Isolation
+prüft (`test_test_isolation_haelt_das_echte_kontingent_unberuehrt`):
+Der Zählerstand muss im Test bei null starten, egal wie oft die Suite
+heute lief. Nachgewiesen über drei aufeinanderfolgende Läufe; nach der
+vollen Suite steht der echte Zähler jetzt auf **0**.
+
+**Der Zähler wurde zurückgesetzt** (1.697 → 0). Das ist keine Kosmetik:
+Die Zahl verbuchte Requests, die **nie gestellt wurden** — alle ~1.697
+stammten aus Testläufen, echte yfinance-Nutzung war an diesem Tag
+praktisch null. Ein Zähler, der Falsches behauptet und dadurch einen
+Dienst blockiert, wird korrigiert.
+
+**Die Regel, die daraus folgt:**
+
+> **Kein Test darf gemeinsam genutzten Betriebszustand anfassen** — keine
+> Zähler, keine Quoten, keine Datenbanken des laufenden Systems. Ein Test,
+> der das tut, wird mit der Zeit unzuverlässig und nimmt dem Betrieb
+> Ressourcen weg. Beides fällt erst spät auf, und dann am falschen Ort.
+
+Verwandt mit §G72/§G74 (geteilter Zustand ohne passenden Schlüssel) —
+hier geteilt zwischen Test und Betrieb statt zwischen zwei Instanzen.
+
+---
+
+## G83. Mehr Auswertungen aus denselben Daten — und das beste Ergebnis des Projekts bisher (12.09.2026)
+
+**Was verbessert wurde, ohne neue Daten.**
+
+1. **Überlappende Tranchen** (`versatz_tage`). Bei 63 Tagen Haltedauer gab
+   es in sechs Jahren nur 20 Perioden. Mit drei Tranchen im
+   Monatsabstand sind es **59** — bei *identischem* Umschlag, weil jede
+   Tranche weiterhin nur alle 63 Tage umschichtet und nur ein Drittel des
+   Kapitals hält.
+2. **Die Überlappung wird dem t-Test gemeldet.** `horizont = 3` geht an
+   `gruppierter_test`, maßgeblich ist `t_ueberlappung`. Ohne diese Zeile
+   wäre die dreifache Beobachtungszahl ein dreifach überschätzter t-Wert
+   (§G12: Fehlalarmquote 39,5 % statt 5 %). Sichtbar am Ergebnis: t stieg
+   nur von 1,10 auf 1,28, nicht auf 1,9 — genau das soll die Korrektur
+   leisten.
+3. **Elf Varianten statt acht**, jahresweise aufgeschlüsselt.
+
+### Das Ergebnis: Quartals-Momentum, 30 bps, 2021–2026
+
+| Variante | t | netto/Periode | Treffer | Sharpe | Perioden |
+|---|---:|---:|---:|---:|---:|
+| **momentum 250/63** | **1,30** | **+2,946 %** | 59,6 % | 0,45 | 52 |
+| **momentum 120/63** | **1,28** | +2,571 % | 57,6 % | 0,42 | 59 |
+| momentum_je_vola 120/63 | 1,07 | +1,906 % | **64,4 %** | 0,36 | 59 |
+| tief_vola 120/63 | −0,35 | −1,304 % | 50,8 % | −0,13 | 59 |
+| alle Monatsvarianten | −0,4 bis −0,9 | negativ | — | negativ | 64 |
+
+**Das Muster ist wirtschaftlich kohärent, und das ist das Bemerkenswerte:**
+Momentum trägt, Umkehr nicht. Quartalsweise trägt, monatlich nicht (die
+Kosten). Low-Vol ist quartalsweise klar negativ — es ist also nicht
+„alles Langfristige sieht gut aus", sondern das Momentum-Signal speziell.
+
+### Je Jahr — `momentum 250/63`
+
+| Jahr | netto/Periode | ≈ Jahr | Treffer | Perioden |
+|---|---:|---:|---:|---:|
+| 2022 *(Bärenmarkt −32,9 %)* | +3,615 % | **+14,5 %** | **82 %** | 11 |
+| 2023 | −2,524 % | −10,1 % | 33 % | 12 |
+| 2024 | +4,844 % | +19,4 % | 67 % | 12 |
+| 2025 | +2,647 % | +10,6 % | 58 % | 12 |
+| 2026 *(unvollständig)* | +10,768 % | +43,1 % | 60 % | 5 |
+
+**Positiv in 4 von 5 Jahren — einschließlich des Bärenmarkts 2022, dort
+mit 82 % Trefferquote.** Das ist das erste Ergebnis dieses Projekts, das
+sich **nicht** durch Marktdrift (marktneutral) und nicht überwiegend
+durch Survivorship (kürzt sich zwischen den Beinen) erklären lässt.
+
+### Warum es trotzdem kein Befund ist — vier Gründe
+
+1. **t = 1,30.** Unter der projektweiten Schwelle 4,90 und auch unter dem
+   Zufallsmaximum der elf geprüften Varianten (2,19).
+2. **2026 ist unvollständig** (5 Perioden) und trägt die größte Zahl.
+   Ohne 2026: vier vollständige Jahre, drei davon positiv, im Schnitt
+   rund +8,6 %/Jahr. Deutlich schwächer als die Gesamttabelle suggeriert.
+3. **Leihkosten der Short-Seite fehlen** im Modell.
+4. **Survivorship ist reduziert, nicht beseitigt** (§4.3).
+
+### Ein Meldefehler in der eigenen Tabelle, gefunden und behoben
+
+Die erste Fassung der Jahresspalte summierte die Periodenrenditen. Bei
+überlappenden Tranchen ist das **dreifach zu hoch** — 2025 stand dort
+„+68,7 %" statt der ehrlichen +10,6 %. Drei Tranchen halten je ein
+Drittel; ihre Renditen addieren sich nicht. Jetzt `Mittel × 252 /
+Haltedauer`. Derselbe Fehlertyp wie §G80: Die Zahl war plausibel und
+falsch.
+
+---
+
+## G84. Leihkosten eingebaut, Universum vergrößert — ein Kandidat hält stand (12.09.2026)
+
+### Zwei Verbesserungen am Modell
+
+**1. Leihkosten der Short-Seite** (`leihe_bps_jahr`). Vorher stand nur
+ein Vorbehalt im Hinweistext — und **ein Vorbehalt im Fließtext ersetzt
+keine Zeile im Kostenmodell**: Er wird beim Lesen der Tabelle nicht
+mitgerechnet. Jetzt zeitabhängig abgezogen, nicht handelsabhängig: Wer
+länger hält, zahlt mehr Leihe. Das ist die Gegenkraft zu der Überlegung,
+die diese ganze Familie trägt — lange Haltedauer senkt die
+Spannenkosten, hebt aber die Leihkosten.
+
+**2. Universum als Vereinigung statt Schnittmenge**
+(`laden_kursdaten(alle_symbole=True)`). Die Schnittmenge baute einen
+stillen Zusatzfilter ein: *„muss seit dem ersten Jahr existieren"* — und
+schloss damit jeden späteren Börsengang aus.
+
+| | Symbole |
+|---|---:|
+| Schnittmenge 2021–2026 | 1.725 |
+| **Vereinigung** | **2.463** (+43 %) |
+
+Für Querschnitt-Auswertungen ist das richtig, weil je Stichtag ohnehin
+nur Werte mit ausreichender Historie und gültigem Kurs in die Rangfolge
+kommen. **Was es nicht behebt:** Der Vorrat enthält ausschließlich heute
+gelistete Symbole. Delistete Firmen fehlen vollständig. Die Vereinigung
+nimmt einen zusätzlichen Filter heraus — survivorship-frei sind die Daten
+damit nicht (§4.3).
+
+### Der härteste Lauf: 30 bps Spanne, 300 bps Leihe, 2.463 Symbole
+
+| Variante | t | netto/Periode | Treffer | Sharpe |
+|---|---:|---:|---:|---:|
+| **momentum 250/63** | **1,16** | **+2,638 %** | 59,6 % | 0,40 |
+| momentum 120/63 | 0,87 | +1,712 % | 57,6 % | 0,28 |
+| momentum_je_vola 120/63 | 0,67 | +1,212 % | 61,0 % | 0,23 |
+| alle übrigen | −0,6 bis −1,3 | negativ | — | negativ |
+| *nur Long (Vergleich)* | −0,09 | −0,100 % | 53,1 % | −0,04 |
+
+**Je Jahr, `momentum 250/63`:** 2022 **+11,5 %**, 2023 −13,3 %, 2024
++21,0 %, 2025 +12,7 %, 2026 +35,6 % *(unvollständig)* — **positiv in 4
+von 5 Jahren, inklusive Bärenmarkt**.
+
+### Was die harte Gegenrechnung zeigt
+
+Die Verschärfung von 50 auf 300 bps Leihe **trennt**: Die schwächeren
+Varianten brechen ein (`momentum 120/63` von t = 1,28 auf 0,87,
+`momentum_je_vola` von 1,07 auf 0,67), der Zwölfmonats-Kandidat hält
+(1,30 → 1,16). Selbst die Nur-Long-Variante ist unter diesen Annahmen
+negativ.
+
+Das ist die nützliche Eigenschaft einer strengen Annahme: Sie sortiert,
+statt alles gleichmäßig zu dämpfen.
+
+**Weiterhin kein Befund:** t = 1,16 gegen 4,90 projektweit und 2,19 für
+die elf geprüften Varianten. Und 2026 ist unvollständig und trägt die
+größte Jahreszahl.
+
+### Dritter Meldefehler derselben Art, gefunden und behoben
+
+Die Zeile „Differenz = Markt plus Survivorship" stimmte nicht mehr,
+sobald die Leihe im Modell steckte: Die marktneutrale Seite zahlt
+zusätzlich das zweite Bein **und** die Leihe. Die Differenz enthielt also
+drei Dinge, beschriftet waren zwei. Jetzt getrennt ausgewiesen.
+
+**Dreimal an einem Tag derselbe Fehlertyp** (§G80, §G83, hier): eine
+Zahl, die plausibel aussieht und etwas anderes beschreibt, als die
+Beschriftung sagt. Alle drei entstanden beim *Erweitern* eines
+funktionierenden Werkzeugs — die Rechnung wurde geändert, der Text daneben
+nicht.
+
+> **Regel daraus:** Wer eine Kostenzeile hinzufügt, muss jede Zeile
+> prüfen, die eine Differenz beschriftet.
+
+---
+
+## G85. Vollständiges Kostenmodell und zwei Sharpe-Hebel — t von 1,16 auf 1,47 (12.09.2026)
+
+**Anlass: drei Einwände des Nutzers, alle drei berechtigt.**
+
+### Einwand 1: „Gebühren und Tradingkosten für Alpaca fehlen"
+
+Stimmte teilweise. Alpaca nimmt tatsächlich **keine Kommission** auf
+US-Aktien — aber SEC Section 31 und die FINRA Trading Activity Fee
+fallen an, beide **nur auf Verkäufe**, und **beide Beine zahlen sie
+einmal je Rundlauf**: die Long-Seite beim Ausstieg, die Short-Seite beim
+Eröffnen.
+
+Jetzt aus `costs.FeeSchedule` übernommen — demselben geprüften Ort, den
+auch der Live-Bot benutzt. Eigene Zahlen wären eine zweite Wahrheit, die
+beim nächsten SEC-Satzwechsel veraltet. Ein Test prüft zusätzlich, dass
+die Sätze nicht älter als ein Jahr sind.
+
+Größenordnung: SEC 0,21 bps plus FINRA je nach Stückpreis (0,03 bps bei
+50 $, **0,33 bps bei 5 $** — die TAF hängt an der Stückzahl, nicht am
+Gegenwert). Klein gegen 30 bps Spanne, aber real.
+
+### Einwand 2: „Man kauft meist teurer ein als der aktuelle Kurs"
+
+War bereits modelliert, aber nur implizit. Jetzt explizit und geprüft:
+Gekauft wird zum Briefkurs plus Slippage (18 bps über der Mitte bei
+30 bps Spanne), verkauft zum Geldkurs minus Slippage. **Der angezeigte
+Kurs wird nie gehandelt.** Ein Rundlauf kostet die volle Spanne plus
+zweimal Slippage. `test_rundlauf_rechnet_kauf_ueber_und_verkauf_unter_dem_kurs`
+hält das fest.
+
+Weiterhin **nicht** modelliert und offen benannt: die Marktwirkung der
+eigenen Order.
+
+### Einwand 3: „Die letzten Prozente herauskitzeln"
+
+Zwei Hebel, beide Risikoverteilung statt Signalsuche — es wird keine
+Achse optimiert und keine zusätzliche Information benutzt:
+
+**a) Umschlag statt Pauschale (die Korrektur eines eigenen Fehlers).**
+Das Modell unterstellte bei jeder Umschichtung **100 % Umschlag**. Wer
+im Korb bleibt, wird aber nicht verkauft und nicht neu gekauft. Jetzt
+wird der Anteil *neuer* Positionen gezählt — je Tranche getrennt, denn
+bei überlappenden Tranchen liegt die nächste Umschichtung derselben
+Tranche drei Schritte später. Wer nur einen Korb merkt, vergleicht
+Tranche A mit Tranche B und misst einen Umschlag, den es nicht gibt.
+
+**b) Umgekehrte Vola-Gewichtung.** Bei Gleichgewichtung bestimmen die
+schwankungsstärksten Werte den größten Teil der Depotschwankung — ein
+Wert mit 80 % Vola trägt achtfaches Risiko gegenüber einem mit 10 %, bei
+gleichem Einsatz. Die erwartete Rendite je Wert ist davon unberührt.
+
+### Ergebnis: 2021–2026, 30 bps Spanne, 300 bps Leihe, alle Gebühren
+
+| Variante | t | netto/Periode | Treffer | Sharpe |
+|---|---:|---:|---:|---:|
+| **momentum 250/63 invvola** | **1,47** | **+3,022 %** | **65,4 %** | **0,52** |
+| momentum 250/63 breit+invvola | 1,33 | +1,964 % | 57,7 % | 0,46 |
+| momentum 250/63 | 1,28 | +2,914 % | 59,6 % | 0,45 |
+| momentum 250/63 breit | 1,25 | +2,016 % | 59,6 % | 0,43 |
+| momentum 120/63 | 0,91 | +1,745 % | 59,3 % | 0,29 |
+| alle Monatsvarianten | negativ | negativ | — | negativ |
+
+**Je Jahr, bester Kandidat:** 2022 **+10,8 %** (73 % Treffer), 2023
+−7,5 %, 2024 +23,3 %, 2025 +9,7 % (75 %), 2026 +40,9 % *(unvollständig)*
+— **4 von 5 Jahren positiv, inklusive Bärenmarkt.**
+
+**Fortschritt an diesem Kandidaten:** t 1,16 → **1,47**, Sharpe 0,40 →
+**0,52**, Trefferquote 59,6 % → **65,4 %**. Und breitere Körbe (20 %
+statt 10 %) helfen **nicht** — das ist die Gegenprobe, die zeigt, dass
+hier nicht einfach jede Änderung das Ergebnis hebt.
+
+### Weiterhin kein Befund — und ein Preis, den jede Variante kostet
+
+t = 1,47 gegen **2,30** (Zufallsmaximum bei inzwischen 14 Varianten) und
+4,90 projektweit. **Jede zusätzliche Variante hebt diese Schwelle**: Bei
+8 Varianten lag sie bei 2,04, bei 14 bei 2,30. Weitere Varianten
+auszuprobieren macht den Nachweis also schwerer, nicht leichter — genau
+das ist der Mechanismus, an dem die Ausbruch-Suche mit 470.000 Versuchen
+gescheitert ist (§G77, §G79).
+
+> **Ab hier gilt: keine weiteren Varianten mehr auf diesen Daten.** Was
+> jetzt zählt, sind unabhängige Daten — die Jahre 2015–2020 (im
+> Download) und die Vorwärtsmessung (§G81).
+
+### Zum Vergleich mit früheren t-Werten des Projekts
+
+Der Einwand „1,4 ist schlechter als bei anderen Bots" vergleicht
+verschiedene Dinge:
+
+| | t | woher |
+|---|---:|---|
+| Ausbruch-Elite | 7,65 | **Lernfenster**, bestes aus 470.000 Versuchen — im Prüffenster **0,42** |
+| Jahresbot (§G53) | 2,14 | überwiegend Survivorship, Schwelle war 2,90 |
+| **Querschnitt jetzt** | **1,47** | marktneutral, alle Kosten, 52 Perioden |
+
+Ein ausgewähltes Maximum und ein gemessener Wert sind nicht
+vergleichbar. 1,47 mit vollen Kosten ist mehr wert als 7,65 aus einer
+halben Million Versuche.
+
+---
+
+## G86. Die Datengrenze liegt am 27.07.2020 — mehr Historie gibt es nicht (12.09.2026)
+
+**Der Plan war falsch.** Vorgeschlagen und gestartet wurde ein Download
+der Jahre 2015–2020 (~10,7 h, 2.516 Symbole), um aus 52 Beobachtungen
+rund 150 zu machen. Nach 740 Symbolen stand im Protokoll durchgehend
+**„0 Bars"**.
+
+**Nachgemessen statt weiterlaufen lassen.** Einzelabfragen für AAPL,
+Monat für Monat:
+
+| Zeitraum | Bars |
+|---|---:|
+| 2015 bis 2020-06 | **0** |
+| 2020-07 | 105 *(ab 27.07.)* |
+| 2020-08 bis 2020-12 | 526 bis 663 je Monat |
+| ab 2021 | vollständig |
+
+**Das Alpaca-Abo dieses Projekts (IEX-Feed) liefert 15-Minuten-Bars erst
+ab dem 27. Juli 2020.** Alles davor existiert für uns nicht — der
+Download hätte zehn Stunden lang leere Antworten geholt.
+
+**Ein Zwischenfehler auf dem Weg dorthin, der fast zur falschen
+Schlussfolgerung geführt hätte:** Die erste Prüfung lief, *während* der
+Download die API mit 2.516 Symbolen belastete. Dort kam für 2020-06
+„0 Bars" heraus — später ohne Last für 2020-09 aber 609 Bars. Zwei
+widersprüchliche Messungen derselben Sache. Erst die dritte Messung, mit
+gestopptem Download und Pause zwischen den Abfragen, war eindeutig.
+
+> **Lehre:** Eine Messung, die parallel zu einem Dauerlauf auf dieselbe
+> Ressource zugreift, misst auch den Dauerlauf. Dieselbe Fehlerklasse wie
+> §G82 (Test verbrauchte Betriebskontingent), nur andersherum.
+
+### Was daraus folgt
+
+**Der Weg „mehr Historie" ist mit dem jetzigen Zugang geschlossen.**
+Nachladbar sind nur die fünf Monate August bis Dezember 2020 — und die
+enthalten **nicht** den Corona-Crash vom März 2020, also gerade nicht das
+Ereignis, das eine marktneutrale Strategie prüfen würde.
+
+Realistischer Zugewinn: Das 250-Tage-Signal kann rund fünf Monate früher
+beginnen, was etwa 7 bis 9 zusätzliche Beobachtungen bringt (52 → ~60).
+Das hebt t um rund 7 %, nicht um 70 %.
+
+**Die Optionen, ehrlich benannt:**
+
+1. **Bezahlter SIP-Feed bei Alpaca** (Algo Trader Plus) — Historie ab
+   2016. Das ist die einzige Möglichkeit, die Beobachtungszahl wirklich
+   zu vervielfachen. Kostet Geld, monatlich.
+2. **Tagesdaten statt Intraday** aus einer freien Quelle. Für eine
+   Strategie mit 63 Tagen Haltedauer sind Tagesschlusskurse völlig
+   ausreichend — die Intraday-Auflösung wird hier gar nicht gebraucht.
+   `yfinance` liegt im Projekt bereits vor (§G53 hat damit 2005–2026
+   gerechnet). **Das ist der naheliegende Weg und er kostet nichts.**
+3. **Vorwärts messen** (§G81) — sauber, aber langsam.
+
+Option 2 ist bisher übersehen worden: Die Querschnitt-Familie braucht
+keine 15-Minuten-Bars. Sie ist der nächste Schritt, nicht ein weiterer
+Download beim selben Anbieter.
+
+---
+
+## G87. Vorrat vollständig geprüft — und dabei den Kandidaten widerlegt (12.09.2026)
+
+### Der Bestand, verifiziert
+
+| Jahr | Symbole | erster Bar | letzter Bar |
+|---|---:|---|---|
+| 2020 | 1.828 | **27.07.2020** | 30.12.2020 |
+| 2021 | 1.731 | 04.01. | 30.12. |
+| 2022 | 1.782 | 03.01. | 30.12. |
+| 2023 | 1.882 | 03.01. | 29.12. |
+| 2024 | 1.958 | 02.01. | 30.12. |
+| 2025 | 2.433 | 02.01. | 30.12. |
+| 2026 | 2.112 | 02.01. | **11.09.2026** |
+
+1.026 MB, lückenlos, Schnittmenge 1.463 / Vereinigung 2.516 Symbole.
+
+**Ein Geisterordner gefunden und entfernt.** Der abgebrochene
+2015-Download hinterließ ein **leeres** `15Min_2016`. `jahre_vorhanden()`
+zählte es mit — die Schnittmenge über alle Jahre wäre damit **null**
+gewesen, und jedes Skript ohne ausdrückliche Jahresangabe hätte ins Leere
+gegriffen, ohne sichtbaren Grund. `jahre_vorhanden()` überspringt jetzt
+Ordner ohne Parquet-Datei; Regressionstests in
+`tests/test_ausbruch_daten_bestand.py`.
+
+### Die Prüfung hat den Kandidaten gekippt
+
+Mit den fünf Monaten aus 2020 fiel `momentum 250/63 invvola` von
+**t = 1,47 auf 0,71**. Fünf Monate zusätzliche Daten dürfen eine
+belastbare Kennzahl nicht halbieren — also nachgesehen, warum.
+
+**Der Grund war nicht 2020, sondern das Raster.** Dieselben Jahre hatten
+in beiden Läufen verschiedene Werte:
+
+| Jahr | Start Mitte 2022 | Start 08/2021 |
+|---|---:|---:|
+| 2023 | −1,89 % | **+0,98 %** |
+| 2024 | +5,82 % | **+2,70 %** |
+| 2025 | +2,43 % | **−0,05 %** |
+
+Die zusätzlichen Bars verschieben das Raster der Rebalance-Termine. Ob
+am 13. oder am 20. umgeschichtet wird, änderte 2023 von −1,9 % auf
++1,0 %.
+
+### Die Auflösung: über ALLE Termine mitteln
+
+| Versatz | Perioden | t | netto/Periode | Sharpe |
+|---|---:|---:|---:|---:|
+| 21 Tage (3 Tranchen) | 52 | **1,47** | 3,022 % | 0,52 |
+| 7 Tage | 156 | 0,96 | 1,877 % | 0,32 |
+| 3 Tage | 364 | 1,02 | 2,051 % | 0,33 |
+| **1 Tag (alle Termine)** | **1.090** | **0,98** | **1,994 %** | **0,32** |
+
+Die drei feinen Raster stimmen überein (t = 0,96 bis 1,02, Sharpe 0,32
+bis 0,33). **Nur das grobe 21-Tage-Raster sticht heraus** — und genau
+das war zufällig gewählt.
+
+> **Der ehrliche Wert ist t ≈ 0,98 bei Sharpe 0,32**, nicht 1,47. Die
+> Verbesserung von 1,16 auf 1,47 in §G85 war überwiegend ein
+> Glücksraster, kein besseres Ergebnis.
+
+**Warum drei Tranchen nicht reichten.** Sie sollten die Abhängigkeit vom
+Starttermin verringern — bei 63 Tagen Haltedauer decken drei Tranchen im
+Monatsabstand aber nur 3 von 63 möglichen Startterminen ab. Erst
+`versatz_tage=1` mittelt über alle und macht die Wahl des Termins
+bedeutungslos. Der Rechenaufwand dafür ist mit 11 Sekunden vernachlässigbar.
+
+### Folgen
+
+1. **`versatz_tage=1` ist ab jetzt der Maßstab** für jede Bewertung
+   dieser Familie. Gröbere Raster sind zulässig, um Rechenzeit zu
+   sparen, aber nie als Ergebnis.
+2. **Die Vorwärtsanmeldung (§G81) enthält eine zu optimistische
+   Erwartung** (+2,174 % je Periode, Sharpe 0,49). Richtig sind rund
+   +2,0 % und Sharpe 0,32. Die Anmeldung wird **nicht** geändert — eine
+   Voranmeldung nachträglich zu korrigieren hieße, sie wertlos zu machen.
+   Die Abweichung steht stattdessen hier.
+3. **Der Kandidat bleibt weit unter jeder Schwelle** (0,98 gegen 2,30 bei
+   14 Varianten). Bei Sharpe 0,32 bräuchte t = 2,30 rund **52 Jahre**
+   Daten.
+
+**Die Lehre, dritte Variante desselben Musters an diesem Tag:** Eine
+Zahl, die von einer beiläufig getroffenen Einstellung abhängt, ist keine
+Messung. Beim Ausbruch war es die Auswahl aus 470.000 Versuchen (§G77),
+bei der Achsen-Statistik das Bergsteigen (§G76), hier der
+Rebalance-Termin. **Jedes Mal sah das Ergebnis vorher besser aus.**
+
+---
+
+## G88. Der genauere Schätzer maß die falsche Größe (12.09.2026)
+
+**Die Idee.** Vola aus Tagesschlusskursen benutzt *eine* Beobachtung je
+Tag. Aus 26 Viertelstundenbars werden 25 Renditen je Tag — die
+„realisierte Volatilität" ist derselbe Schätzer mit einem Bruchteil des
+Schätzfehlers. Das ist der einzige Punkt, an dem der 15-Minuten-Vorrat
+einer Tagesdaten-Auswertung überlegen ist, und ein Test belegt die
+höhere Präzision auch (`test_realisierte_vola_ist_praeziser_als_tagesvola`).
+
+**Das Ergebnis — gegen die Erwartung.** Momentum 250/63, alle
+Rebalance-Termine, 2020–2026, volle Kosten:
+
+| Gewichtung | t | netto/Periode | Sharpe |
+|---|---:|---:|---:|
+| gleichgewichtet | 0,73 | 1,471 % | 0,22 |
+| **inv_vola aus Tagesschluss** | **0,86** | **1,620 %** | **0,27** |
+| inv_vola aus Intraday | 0,72 | 1,307 % | 0,22 |
+
+**Der präzisere Schätzer ist der schlechtere.** Und der Grund ist
+einsichtig, sobald man ihn ausspricht: Die Intraday-Schätzung schließt
+den Übernachtsprung **absichtlich** aus — mit der Begründung, er sei
+„ein eigener, andersartiger Beitrag". Aber das Depot hält über Nacht.
+**Übernachtrisiko ist echtes Risiko der Position.** Wer es aus der
+Risikoschätzung herausnimmt, gewichtet nach einer Größe, die das
+getragene Risiko nicht vollständig beschreibt.
+
+> **Lehre:** Präzision ist wertlos, wenn sie sich auf die falsche Größe
+> richtet. Die Frage ist nie „wie genau messe ich", sondern zuerst „messe
+> ich das, was zählt".
+
+**Zweiter Fehler, beim Messen selbst:** Der Intraday-Schätzer war zuerst
+fest verdrahtet — der Vergleich beider Verfahren lieferte deshalb
+zweimal dieselbe Zeile, und die vermeintliche Verbesserung wäre
+unbelegt in die Dokumentation gewandert. Erst der Schalter
+(`vola_quelle`) machte den Vergleich möglich. **Eine Verbesserung, die
+man nicht abschalten kann, kann man auch nicht messen.**
+
+---
+
+## G89. Konsolidierter Stand der Querschnitt-Familie (12.09.2026)
+
+Alles zusammengerechnet, mit jeder Korrektur des Tages — alle
+Rebalance-Termine (`versatz_tage=1`, 1.208 Perioden), 2020–2026, 2.467
+Symbole, 30 bps Spanne, 300 bps Leihe, SEC/FINRA, Umschlag statt
+Pauschale, marktneutral:
+
+| | Wert |
+|---|---:|
+| bester Kandidat | momentum 250/63, inv_vola aus Tagesschluss |
+| **t** | **0,86** |
+| Sharpe | 0,27 |
+| netto je Quartal | +1,62 % |
+| Trefferquote | 53,8 % |
+| nötige Schwelle | 2,30 (14 Varianten) bzw. 4,90 projektweit |
+
+### Wie die Zahl im Lauf des Tages geschrumpft ist
+
+| Stand | t | Ursache der Korrektur |
+|---|---:|---|
+| erste Messung | 1,16 | — |
+| nach „Verbesserungen" | **1,47** | Vola-Gewichtung, breitere Körbe |
+| alle Rebalance-Termine | 0,98 | §G87: das 21-Tage-Raster war Glück |
+| plus 2020, volle Kosten | **0,86** | §G88, diese Messung |
+
+**Jede einzelne Korrektur ging nach unten.** Das ist kein Zufall,
+sondern der Normalfall: Eine beiläufig getroffene Einstellung, die man
+nicht prüft, fällt im Mittel zugunsten des Ergebnisses aus — weil man
+sie sonst geändert hätte.
+
+### Was das für das Jahresziel heißt
+
+Der Kandidat ist **nicht** live-fähig und wird es mit diesen Daten auch
+nicht. Was von der Familie bleibt:
+
+* ein sauber gebautes, vollständig getestetes Messwerkzeug (46 Tests),
+* ein vollständiges Kostenmodell einschließlich Leihe und
+  Regulierungsgebühren,
+* eine laufende Vorwärtsmessung (§G81),
+* und die belegte Aussage, dass Momentum quartalsweise **schwach
+  positiv** ist, Umkehr und Low-Vol dagegen nicht.
+
+**Der Träger fürs Jahresziel bleibt laut `BETRIEBSPLAN` der Trendbot**
+(§G52: Sharpe 0,88, −16 % Drawdown, positiv 2008 und 2022) — und dessen
+offener Anschluss 1 („Test über 50+ Jahre") ist mit den Daten dieses
+Projekts nicht zu erledigen, weil der Vorrat erst 2020 beginnt.
+
+---
+
+## G90. Der Trendbot auf eigenen Daten — 3 von 4 Gate-Kriterien, Sharpe 1,35 (12.09.2026)
+
+**Anlass.** Der `BETRIEBSPLAN` nennt den Trendbot als Träger fürs
+Jahresziel. Gemessen war er bisher nur auf yfinance-Daten (§G52).
+`scripts/58_trend_eigendaten.py` fährt denselben Code auf dem **eigenen
+Alpaca-Vorrat**, aus 15-Minuten-Bars auf Tagesschlüsse verdichtet — eine
+Gegenprobe auf unabhängigen Daten.
+
+**Voraussetzung geprüft, nicht angenommen.** Sechs ETFs des
+`broad`-Universums fehlten im Vorrat (NASDAQ-Download, SPY & Co. sind
+NYSE Arca) — nachgeladen, 6 Symbole über 7 Jahre. Und die
+Dividendenfrage, bei Anleihen-ETFs entscheidend, direkt an der API
+nachgemessen (TLT, 04.01.2021):
+
+| Adjustment | erster Schluss |
+|---|---:|
+| RAW | 157,2750 |
+| **ALL** (der Vorrat) | **130,4800** |
+| DIVIDEND | 130,4800 |
+
+Der Vorrat ist total-return-bereinigt. Ohne diese Prüfung wären IEF und
+TLT künstlich schlecht ausgefallen und jede Allokation zwischen Aktien
+und Anleihen verzerrt gewesen.
+
+### Ergebnis: dualmom, 9 Monate, 10 % Vol-Ziel (2022-02 bis 2026-09)
+
+| | Strategie | SPY B&H | 60/40 |
+|---|---:|---:|---:|
+| CAGR | 11,32 % | 14,78 % | 8,59 % |
+| Vol p. a. | **8,2 %** | 17,1 % | 11,0 % |
+| **Sharpe** | **1,35** | 0,89 | 0,80 |
+| Max Drawdown | **−8,9 %** | −22,1 % | −17,2 % |
+| Calmar | **1,27** | 0,67 | 0,50 |
+
+Je Jahr gegen 60/40: 2022 **+9,0**, 2023 −7,2, 2024 −1,4, 2025 **+6,4**,
+2026 **+2,7** Prozentpunkte — 3 von 5 Jahren vorn.
+
+**Dieselbe Konfiguration gewinnt auf beiden Datensätzen.** dualmom,
+9 Monate, 10 % Vol-Ziel war auch auf yfinance (2008–2026) die beste.
+Zwei unabhängige Datensätze, dieselbe Wahl — das ist stärker als ein
+Sieger aus einem Datensatz.
+
+### Das Gate (`TRENDBOT` §5)
+
+| Kriterium | auf yfinance (§G52) | **auf eigenen Daten** |
+|---|---|---|
+| 1. schlägt 60/40 gesamt und ≥ 60 % Jahre | NEIN | **JA** (+62 % vs +45 %, 60 %) |
+| 2. Max-Drawdown < SPY B&H | JA | **JA** (−9 % vs −22 %) |
+| 3. Walk-Forward-Vorsprung stabil | NEIN (t = −1,34) | **NEIN** (t = 0,07, nur 3 Jahre) |
+| 4. überlebt doppelte Kosten | JA | **JA** (siehe unten) |
+
+**3 von 4** statt 2 von 4.
+
+**Kriterium 4 mit Abstand bestanden** — Umschlag nur 3,75× im Jahr:
+
+| Kosten je Seite | CAGR | Sharpe |
+|---|---:|---:|
+| 2+1 bps | 11,32 % | 1,35 |
+| 4+2 bps | 11,20 % | 1,34 |
+| 8+4 bps | 10,95 % | 1,31 |
+| **16+8 bps (achtfach)** | **10,45 %** | **1,26** |
+
+### Die zwei Vorbehalte, ohne die die Zahlen falsch gelesen werden
+
+1. **Das Fenster begünstigt die Strategie.** 2022–2026 enthält den
+   Anleihen-Crash, in dem 60/40 ungewöhnlich **schwach** war (2022:
+   −10,8 %). §G52 hatte das umgekehrte Problem: 2008–2026 ist von einem
+   historischen Anleihen-Bullenmarkt geprägt, dort war 60/40 ungewöhnlich
+   **stark**. **Kein Fenster ist neutral** — Kriterium 1 hängt stark
+   daran, und genau deshalb fällt es in den beiden Datensätzen
+   verschieden aus.
+2. **Nur 4,6 Jahre und 56 Rebalances.** Der Vorrat beginnt 27.07.2020,
+   die 9-Monats-Rückschau kostet weitere Monate. Ohne 2008 und ohne März
+   2020 fehlen genau die Krisen, in denen sich die defensive Eigenschaft
+   zeigen müsste.
+
+### Der Weg an Kriterium 3 vorbei — und warum er zulässig ist
+
+Der Walk-Forward prüft, ob die **Auswahl** des Lookbacks ins nächste Jahr
+trägt. Wer nicht auswählt, hat nichts zu übertragen. Ein **fest
+verdrahteter** Lookback von 9 Monaten, nie wieder optimiert, umgeht das
+Kriterium nicht durch einen Trick, sondern durch Verzicht auf den
+Freiheitsgrad, den es misst.
+
+Zulässig ist das, weil die 9 Monate **nicht** aus diesen Daten gewählt
+wurden: Sie waren schon auf yfinance (§G52, anderer Zeitraum, andere
+Quelle) die beste Wahl. Das ist eine Vorab-Festlegung mit externer
+Begründung, keine nachträgliche Anpassung (§B2).
+
+### Rasterprobe bestanden — der Unterschied zum Querschnitt (13.09.2026)
+
+Die §G87-Lektion angewandt: Ist Sharpe 1,35 ein Glücksraster? Sechs
+Varianten, zwei Rebalance-Raster × drei Lookbacks:
+
+| Rebalance | 6 Monate | 9 Monate | 12 Monate |
+|---|---:|---:|---:|
+| monatlich | 0,94 | **1,35** | 1,07 |
+| wöchentlich | 0,80 | 1,01 | 0,92 |
+
+**Alle sechs positiv, alle über SPY (0,89) und 60/40 (0,80).** Es gibt
+eine Rasterabhängigkeit — rund 0,3 Sharpe zwischen bester und
+robuster Schätzung, teils durch den 2,3-fachen Umschlag beim
+Wochenraster erklärt. Der ehrliche robuste Wert ist **Sharpe ≈ 1,0**,
+nicht 1,35.
+
+Genau hier trennt sich der Trendbot vom Querschnitt-Kandidaten: Der
+fiel unter derselben Prüfung von 1,47 auf 0,72 und unter beide
+Benchmarks (§G87). Der Trendbot verliert ein Viertel und **bleibt über
+beiden**. Das ist der Unterschied zwischen einem Effekt und einem
+Raster.
+
+**Der Schatten dafür läuft bereits.** `trend_schatten.py` +
+`scripts/45_trend_schatten.py`, LaunchAgent `de.local.alpacatrend`,
+Mo–Fr 22:20 nach US-Schluss, seit dem 04.09.2026 als bewusste
+Produktentscheidung des Nutzers (Phase 2, `TRENDBOT.md` §6a). Sechs
+Strategien im Vorwärtsrennen, `dualmom` 9/1/Top-3 als Primärkandidat —
+dieselbe Konfiguration, die hier auf unabhängigen Daten gewonnen hat.
+Letzter Lauf 11.09. fehlerfrei. Phase-3-Entscheidung im Dezember.
+
+**Vorschlag zur Entscheidung des Nutzers** — vorab zu treffen, nicht
+nachträglich zu begründen: ein Schattenbot mit **fixer** Konfiguration
+(dualmom, 9 Monate, 10 % Vol-Ziel, monatlich, `broad`), der nie
+nachoptimiert wird. Kriterium 3 entfällt damit konstruktiv, 1, 2 und 4
+sind bestanden. Das ist der erste Kandidat dieses Projekts, bei dem der
+Weg zum Live-Konto nicht an einer Messung scheitert, sondern nur noch an
+einer Entscheidung.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

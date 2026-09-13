@@ -33,6 +33,12 @@ Antworten auf Deutsch. Code-Kommentare und Docstrings auf Deutsch, in
 Quelltextdateien ohne Umlaute (`ae`, `oe`, `ue`, `ss`) — Markdown-Dateien
 dagegen mit korrekten Umlauten.
 
+## Antworten im Chat — kurz
+
+Stichpunkte, keine Fließtext-Herleitung — auch bei fachlichen/statistischen
+Befunden. Keine Codezitate im Chat. Nur Ergebnis, Zahl, Konsequenz,
+Entscheidung. Details gehören in `docs/BEFUNDE.md` bzw. `docs/UEBERGABE.md`.
+
 ## Statistik — die wichtigste Regel
 
 Vorhersagen und Trades desselben Handelstages sind **nicht unabhängig**.

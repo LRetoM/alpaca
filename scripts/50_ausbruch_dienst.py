@@ -156,12 +156,15 @@ def main() -> int:
     protokoll = ausbruch_versuche.Protokoll(args.instanz)
     print(f"[{time.strftime('%H:%M:%S')}] [{args.instanz}] Protokoll: "
           f"{protokoll.anzahl():,} Versuche bereits gespeichert", flush=True)
+    # Der Datenumfang gehoert in den Elite-Schluessel: Ein t-Wert aus
+    # sechs Jahren ist nicht derselbe wie einer aus vier (§G74).
+    basis = f"{jahre[0]}-{jahre[-1]}"
     suche = su.Suche(lern, pruef, score=args.score, min_trades=args.min_trades,
                      fest=fest, erkundung_n=args.erkundung, saat=args.saat,
                      grenze=grenze, instanz=args.instanz,
                      elite_anteil=args.elite_anteil,
                      pruef_stichprobe=args.pruef_stichprobe,
-                     protokoll=protokoll)
+                     protokoll=protokoll, basis=basis)
 
     # --- Checkpoint laden, falls vorhanden: FORTSETZEN statt neu ------
     z = su.Suche.laden_zustand(checkpoint_pfad)

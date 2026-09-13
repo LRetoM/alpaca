@@ -25,12 +25,40 @@ from alpaca_bot.ratelimit import QUOTAS, RateLimiter
 
 
 @pytest.fixture(autouse=True)
-def _leerer_zaehler():
-    """Der Minuten-/Sekundenzaehler von RateLimiter ist klassenweit geteilt.
-    Vor jedem Test leeren, sonst vergiften sich die Tests gegenseitig."""
+def _leerer_zaehler(tmp_path, monkeypatch):
+    """Minutenzaehler UND Tageszaehler isolieren.
+
+    Der Minuten-/Sekundenzaehler von RateLimiter ist klassenweit geteilt,
+    der TAGESzaehler liegt in einer Datei (`ratelimit.STATE_FILE`).
+
+    **Warum die Datei mit isoliert werden muss (12.09.2026).** Ohne das
+    bucht `test_grosser_burst_stuerzt_nicht_ab` bei jedem Lauf 180
+    Requests auf das ECHTE Tageskontingent. Nach mehrfachem Ausfuehren
+    der Suite an einem Tag war das yfinance-Kontingent bei 1.691 von
+    1.800 - und der Test wurde rot, obwohl am Code nichts falsch war.
+    Ein Test, der von der Zahl seiner eigenen vorherigen Laeufe abhaengt,
+    misst nicht die Sache, sondern die Testhistorie. Zugleich verbrauchte
+    er Kontingent, das dem Betrieb gehoert.
+    """
+    import alpaca_bot.ratelimit as rl
+    monkeypatch.setattr(rl, "STATE_FILE", tmp_path / "ratelimit_state.json")
     RateLimiter._counters.pop("yfinance", None)
     yield
     RateLimiter._counters.pop("yfinance", None)
+
+
+def test_test_isolation_haelt_das_echte_kontingent_unberuehrt(tmp_path):
+    """Regressionstest fuer den Vorfall vom 12.09.2026 selbst.
+
+    Prueft, dass die Fixture greift: Der Zaehlerstand in DIESEM Test
+    startet bei null, egal wie oft die Suite heute schon lief.
+    """
+    lim = RateLimiter("yfinance")
+    assert lim.used_today() == 0, (
+        "Der Tageszaehler ist nicht isoliert - die Tests verbrauchen "
+        "echtes Kontingent und werden voneinander abhaengig.")
+    lim.acquire(5)
+    assert lim.used_today() == 5
 
 
 def _mit_timeout(fn, sekunden=5.0):

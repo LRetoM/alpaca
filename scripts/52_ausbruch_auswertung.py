@@ -51,6 +51,28 @@ def _kopf(text: str) -> None:
     print("=" * 78)
 
 
+def korrelation_lern_pruef(t_lern: pd.Series,
+                            t_pruef: pd.Series) -> tuple[float, int]:
+    """Korrelation zwischen Lern- und Pruefwert, NaN-sicher.
+
+    `np.corrcoef` gibt bei einem einzigen NaN-Wert NaN fuer die GESAMTE
+    Korrelation zurueck - und weil NaN-Vergleiche in Python immer False
+    sind, fallen nachgelagerte Vergleiche (`r < 0.3` etc.) unbemerkt bis
+    zur letzten Textzeile durch, statt einen Fehler zu zeigen. Vorfall
+    vom 12.09.2026 (docs/BEFUNDE.md): sieben von 4.346 Stichproben hatten
+    NaN in `t_lern`, die Ausgabe behauptete trotzdem "Deutlicher
+    Zusammenhang".
+
+    Gibt (r, n) zurueck, n = Zahl der Zeilen NACH Entfernen von NaN.
+    r ist NaN, wenn weniger als 2 Zeilen uebrig bleiben.
+    """
+    paare = pd.DataFrame({"lern": t_lern, "pruef": t_pruef}).dropna()
+    if len(paare) < 2:
+        return float("nan"), len(paare)
+    r = float(np.corrcoef(paare["lern"], paare["pruef"])[0, 1])
+    return r, len(paare)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -91,7 +113,16 @@ def main() -> int:
 
     # ---------------------------------------------------------------
     _kopf("2. TRAEGT ETWAS INS PRUEFFENSTER? (die Entscheidungsfrage)")
-    mit_pruef = df[df["t_pruef"].notna()].copy()
+    # score.notna() = Lernfenster hatte mindestens min_trades Trades (siehe
+    # _bewerten in ausbruch_suche.py). Ohne diesen Filter kann ein Versuch
+    # mit z. B. 1 Trade im Lernfenster (t_lern = NaN) trotzdem als
+    # "bester Pruefwert" oben stehen und ein Urteil vortaeuschen - Vorfall
+    # vom 12.09.2026, docs/BEFUNDE.md.
+    ausgeschlossen = int((df["t_pruef"].notna() & df["score"].isna()).sum())
+    mit_pruef = df[df["t_pruef"].notna() & df["score"].notna()].copy()
+    if ausgeschlossen:
+        print(f"  ({ausgeschlossen:,} Pruefungen mit zu wenig Trades im "
+              f"Lernfenster ausgeschlossen - kein t_lern.)")
     if mit_pruef.empty:
         print("  Noch keine Pruefbewertung - zu frueh fuer ein Urteil.")
     else:
@@ -124,10 +155,27 @@ def main() -> int:
           f"{args.min_trades} Trades.")
     print(f"  Gelesen wird die Spalte 'Delta': mittlerer Lern-t-Wert dieses")
     print(f"  Achsenwerts minus Gesamtmittel. Positiv = traegt.")
+    # Die Randmittelwerte aus ALLEN Versuchen sind fast reines
+    # Bergsteigen und damit ein Echo eines einzigen Huegels (§G64).
+    # Daneben steht darum dieselbe Rechnung nur aus der Zufalls-
+    # Erkundung - erst die ist eine Aussage ueber den Suchraum.
+    erkundung = brauchbar[brauchbar["phase"] == "Erkundung"]
+    if len(erkundung) >= 300:
+        print(f"  Spalte 'Erkundung': dasselbe, aber NUR aus "
+              f"{len(erkundung):,} Zufallsversuchen")
+        print(f"  (unverzerrt - die Gesamtspalte ist fast reines "
+              f"Bergsteigen, §G64).")
+    else:
+        print(f"  Erkundungsversuche bisher: {len(erkundung):,} - fuer eine "
+              f"eigene Spalte zu wenig.")
+        erkundung = None
+
     if brauchbar.empty:
         print("  Zu wenige verwertbare Versuche.")
     else:
         mittel = brauchbar["t_lern"].mean()
+        e_mittel = (erkundung["t_lern"].mean() if erkundung is not None
+                    else float("nan"))
         for achse in achsen:
             g = brauchbar.groupby(achse)["t_lern"].agg(["mean", "size"])
             g = g[g["size"] >= 30]
@@ -135,23 +183,42 @@ def main() -> int:
                 continue
             g["delta"] = g["mean"] - mittel
             g = g.sort_values("delta", ascending=False)
+            e_delta: dict = {}
+            if erkundung is not None:
+                eg = erkundung.groupby(achse)["t_lern"].agg(["mean", "size"])
+                eg = eg[eg["size"] >= 20]
+                e_delta = {w: (r["mean"] - e_mittel, int(r["size"]))
+                           for w, r in eg.iterrows()}
             name = achse[2:]
             print(f"\n  {name}")
             for wert, r in g.iterrows():
                 balken = "#" * min(int(abs(r["delta"]) * 12), 28)
                 zeichen = "+" if r["delta"] >= 0 else "-"
+                zusatz = ""
+                if wert in e_delta:
+                    ed, en = e_delta[wert]
+                    # Ein abweichendes Vorzeichen ist der interessante
+                    # Fall: Dann behauptet das Bergsteigen etwas, was die
+                    # unverzerrte Stichprobe nicht bestaetigt.
+                    warn = "  !" if (ed >= 0) != (r["delta"] >= 0) else ""
+                    zusatz = f"   Erkundung {ed:>+6.3f} (n={en:>5}){warn}"
                 print(f"      {str(wert):>12}  {r['delta']:>+7.3f}  "
-                      f"n={int(r['size']):>7}  {zeichen}{balken}")
+                      f"n={int(r['size']):>7}  {zeichen}{balken}{zusatz}")
 
     # ---------------------------------------------------------------
     _kopf("ZUSAMMENHANG LERN- GEGEN PRUEFWERT (aus der Stichprobe)")
-    stich = df[(df["pruef_grund"] == "stichprobe") & df["t_pruef"].notna()]
+    # score.notna() schliesst dieselben Zu-wenig-Trades-Faelle aus wie oben.
+    # Ohne den Filter macht ein einziges NaN in t_lern die GESAMTE
+    # Korrelation zu NaN (np.corrcoef) - und weil NaN-Vergleiche in Python
+    # immer False sind, faellt der Text unbemerkt bis "Deutlicher
+    # Zusammenhang" durch. Vorfall vom 12.09.2026, docs/BEFUNDE.md.
+    stich = df[(df["pruef_grund"] == "stichprobe") & df["t_pruef"].notna()
+               & df["score"].notna()]
     if len(stich) < 30:
         print(f"  Erst {len(stich)} Stichproben - fuer eine Aussage zu wenig.")
         print("  (Sammelt sich mit der Laufzeit von selbst an.)")
     else:
-        r = float(np.corrcoef(stich["t_lern"], stich["t_pruef"])[0, 1])
-        n = len(stich)
+        r, n = korrelation_lern_pruef(stich["t_lern"], stich["t_pruef"])
         print(f"  {n:,} unverzerrte Stichproben.")
         print(f"  Korrelation Lern gegen Pruef: {r:+.3f}")
 

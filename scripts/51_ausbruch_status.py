@@ -135,10 +135,35 @@ def main() -> int:
     print(f"    Lernschwelle       : t > {lern_schwelle:.2f}")
     print(f"    Pruefschwelle      : t > {pruef_schwelle:.2f}   <- massgeblich")
 
-    e = su.elite_lesen()
-    if e:
-        print(f"    Gemeinsamer Bestwert: score {e.get('score', 0):.3f} "
-              f"von Instanz [{e.get('instanz')}]")
+    # Alle Elite-Staende, nicht nur der von `t`. Seit §G72/§G74 gibt es
+    # je Massstab UND Datenumfang eine eigene Bestenliste - eine einzige
+    # Zeile hier wuerde die Haelfte der Flotte verschweigen.
+    # Nach (Massstab, Datenumfang) entdoppeln: Eine Datei aus der Zeit
+    # vor §G74 traegt denselben Schluessel wie ihre umbenannte Fassung
+    # und wuerde sonst zweimal erscheinen. Der hoehere Score gewinnt.
+    staende: dict[tuple[str, str], dict] = {}
+    for pfad in sorted(su._elite_pfad().parent.glob("ausbruch_elite*.json")):
+        try:
+            e = json.loads(pfad.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        schluessel = (e.get("score_name") or "t", e.get("basis") or "2023-2026")
+        alt = staende.get(schluessel)
+        if alt is None or float(e.get("score", float("-inf"))) > float(
+                alt.get("score", float("-inf"))):
+            staende[schluessel] = e
+
+    for (name, basis), e in sorted(staende.items()):
+        k = e.get("kennzahlen") or {}
+        zusatz = ""
+        if k.get("n_trades"):
+            zusatz = f", {int(k['n_trades'])} Trades"
+        top5 = k.get("top5_anteil_pct")
+        if isinstance(top5, (int, float)) and top5 == top5 and top5 < 1e6:
+            zusatz += f", Top-5 {top5:.0f} %"
+        print(f"    Bester [{name} | {basis}]: score "
+              f"{float(e.get('score', 0)):.3f} von Instanz "
+              f"[{e.get('instanz')}]{zusatz}")
     if beste_gesamt:
         bp = beste_gesamt[0]
         urteil = ("UEBER der Schwelle" if bp >= pruef_schwelle

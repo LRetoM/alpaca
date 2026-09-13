@@ -181,6 +181,25 @@ class AusbruchConfig:
     Ausbrueche am Vormittag und am Nachmittag haben verschiedene
     Ursachen - Meldungen kommen ueberwiegend vor Handelsbeginn."""
 
+    # --- Marktregime ---------------------------------------------------
+    regime_symbol: str = ""
+    """Referenzwert fuer den Marktfilter, etwa "QQQ". "" = aus.
+
+    Der Vorbehalt aus docs/AUSBRUCH.md §7 im Klartext: "Momentum
+    funktioniert in steigenden Maerkten fast immer und bricht in Wenden
+    zusammen." Solange kein Filter das trennt, misst jede Zahl beides
+    zugleich - die Idee und die Marktphase.
+
+    Der Wert muss im geladenen Universum liegen. Er wird dann selbst
+    nicht mehr gehandelt: ein Massstab, auf den man zugleich wettet,
+    ist keiner."""
+
+    regime_sma_bars: int = 0
+    """Laenge des gleitenden Mittels in Bars. 0 = aus.
+
+    26 Bars = 1 Handelstag. Eingestiegen wird nur, wenn der
+    Referenzwert ueber seinem eigenen Mittel steht."""
+
     # --- Kosten --------------------------------------------------------
     spanne_bps: float = 12.2
     """Geld-Brief-Spanne in bps. 12,2 ist der gemessene Median des
@@ -250,6 +269,41 @@ class Ergebnis:
     hinweise: list[str] = field(default_factory=list)
     n_signale: int = 0
     n_signale_verworfen: dict = field(default_factory=dict)
+
+
+def regime_maske(kd: "Kursdaten", cfg: AusbruchConfig) -> np.ndarray | None:
+    """Wann steht der Referenzwert ueber seinem eigenen Mittel?
+
+    Gibt None zurueck, wenn kein Filter eingestellt ist - dann verhaelt
+    sich der Lauf exakt wie vorher.
+
+    **Der Bar-Versatz ist der ganze Punkt.** Eingestiegen wird zum OPEN
+    von Bar i. Der CLOSE von Bar i liegt zu diesem Zeitpunkt in der
+    Zukunft. Wer ihn zum Filtern benutzt, hat Lookahead - und zwar den
+    teuersten, den diese Strategie haben kann: Der Filter wuesste dann
+    an jedem einzelnen Einstieg, ob der Markt in genau dieser Viertel-
+    stunde steigt. Deshalb entscheidet ausschliesslich der Stand von
+    Bar i-1 (§4.1).
+
+    Solange das Mittel noch nicht voll ist, bleibt die Maske False:
+    lieber keine Einstiege als Einstiege auf halber Datenbasis.
+    """
+    if not cfg.regime_symbol or cfg.regime_sma_bars <= 0:
+        return None
+    eintrag = kd.arrays.get(cfg.regime_symbol)
+    if eintrag is None:
+        raise ValueError(
+            f"Regime-Symbol {cfg.regime_symbol!r} liegt nicht im Universum. "
+            f"Ohne Referenz waere der Filter still wirkungslos - und ein "
+            f"stiller Filter ist schlimmer als keiner."
+        )
+    reihe = pd.Series(eintrag[3].astype("float64")).ffill()
+    sma = reihe.rolling(cfg.regime_sma_bars,
+                        min_periods=cfg.regime_sma_bars).mean()
+    ueber = (reihe > sma).to_numpy()
+    maske = np.zeros(len(ueber), dtype=bool)
+    maske[1:] = ueber[:-1]       # Bar i wird mit dem Stand von i-1 beurteilt
+    return maske
 
 
 def _kauf_kurs(roh: float, cfg: AusbruchConfig) -> float:
@@ -393,6 +447,38 @@ class Kursdaten:
                              for s, t in self.arrays.items()},
             self.bar_im_tag[g:], self.letzter_des_tages[g:])
         return lern, pruef
+
+    def zeitraum(self, von=None, bis=None) -> "Kursdaten":
+        """Sicht auf einen Zeitabschnitt - fuer Auswertungen je Periode.
+
+        Wie `teilen` eine **Sicht, keine Kopie**: Es werden Slices
+        benutzt, keine booleschen Masken. Eine Maske wuerde in numpy
+        kopieren, und bei einem Jahr aus sechs waere das jedes Mal ein
+        halbes Gigabyte.
+
+        `von` ist einschliesslich, `bis` ausschliesslich - damit
+        aneinandergrenzende Zeitraeume sich nicht ueberlappen.
+        """
+        tz = getattr(self.achse, "tz", None)
+
+        def _grenze(wert, vorgabe: int) -> int:
+            if wert is None:
+                return vorgabe
+            ts = pd.Timestamp(wert)
+            if tz is not None and ts.tz is None:
+                ts = ts.tz_localize(tz)
+            elif tz is None and ts.tz is not None:
+                ts = ts.tz_convert(None)
+            return int(self.achse.searchsorted(ts, side="left"))
+
+        a = _grenze(von, 0)
+        b = _grenze(bis, self.n_bars)
+        if b <= a:
+            raise ValueError(f"Leerer Zeitraum: {von} bis {bis}.")
+        return Kursdaten(
+            self.achse[a:b],
+            {s: tuple(x[a:b] for x in t) for s, t in self.arrays.items()},
+            self.bar_im_tag[a:b], self.letzter_des_tages[a:b])
 
     @classmethod
     def aus_bars(cls, bars: dict[str, pd.DataFrame], *,
@@ -544,6 +630,8 @@ def lauf(
         raise ValueError(f"Zu wenige Bars ({n_bars}) fuer Fenster "
                          f"{cfg.fenster_bars}.")
 
+    regime_ok = regime_maske(kd, cfg)
+
     # --- 2. Signale je Symbol, vektorisiert ---------------------------
     signale: dict[int, list[tuple]] = {}
     n_signale = 0
@@ -683,6 +771,13 @@ def lauf(
             continue
         if not (cfg.tageszeit_von_bar <= bar_im_tag[i] <= cfg.tageszeit_bis_bar):
             continue
+        # Marktregime: steht der Referenzwert (Stand Bar i-1) unter
+        # seinem Mittel, wird gar nicht erst eingestiegen. Bestehende
+        # Positionen laufen weiter - ein Filter darf den Einstieg
+        # verhindern, nie einen Ausstieg erzwingen, den die Regeln
+        # sonst nicht vorsehen.
+        if regime_ok is not None and not regime_ok[i]:
+            continue
         # Der GANZE Bereich bis zum Schluss ist gesperrt, nicht nur der
         # eine Bar `i + schluss_sperre_bars`. Bei einem Wert von 3 waere
         # sonst Bar i+1 und i+2 erlaubt und nur i+3 gesperrt - also
@@ -700,6 +795,9 @@ def lauf(
             if neu >= cfg.max_neue_je_bar:
                 break
             if len(offen) >= cfg.max_positionen or sym in offen:
+                continue
+            # Der Massstab wird nicht selbst gehandelt.
+            if regime_ok is not None and sym == cfg.regime_symbol:
                 continue
             if gesperrt.get(sym, -1) > i:
                 continue
@@ -826,10 +924,69 @@ def _kennzahlen(erg: Ergebnis, cfg: AusbruchConfig) -> dict:
         except Exception as e:  # noqa: BLE001 - ein Test darf den Lauf nie kippen
             k["t_wert"] = float("nan")
             k["t_hinweis"] = f"{type(e).__name__}: {e}"
+
+        # --- Wie viel bleibt ohne die fuenf groessten Gewinnbringer? --
+        # Am 12.09.2026 fiel ein Kandidat im Gate mit einem Top-5-Anteil
+        # von 129,9 % durch: Ohne diese fuenf Symbole war die Strategie
+        # im Minus (§G66). Der gewoehnliche t-Wert sieht das nicht - er
+        # kennt nur Renditen, nicht deren Herkunft. Diese beiden Zahlen
+        # machen den Unterschied sichtbar, BEVOR eine Konfiguration
+        # gewinnt.
+        k.update(_streuung_ueber_symbole(t, horizont_tage=k.get(
+            "horizont_tage", 1)))
     else:
         k.update(trefferquote_pct=0.0, mittel_pct=0.0, median_pct=0.0,
-                 t_wert=float("nan"), n_handelstage=0, belastbar=False)
+                 t_wert=float("nan"), n_handelstage=0, belastbar=False,
+                 t_ohne_top5=float("nan"), top5_anteil_pct=float("nan"))
     return k
+
+
+def _streuung_ueber_symbole(t: pd.DataFrame, *, top: int = 5,
+                            horizont_tage: int = 1) -> dict:
+    """Traegt das Ergebnis breit - oder haengt es an wenigen Symbolen?
+
+    Zwei Zahlen:
+
+    * `top5_anteil_pct` - Anteil der fuenf groessten Gewinnbringer am
+      Gesamtgewinn. Ueber 100 % heisst: Ohne sie ist die Strategie im
+      Minus, der Rest verliert zusammen Geld.
+    * `t_ohne_top5` - der gruppierte t-Wert, wenn es diese fuenf Symbole
+      nie gegeben haette. Ein echter, breiter Effekt verliert dabei
+      wenig; fuenf Gluecksgriffe brechen ein.
+
+    Bei Gesamtverlust ist der Anteil nicht definiert - dann `inf`, damit
+    keine Auswertung ihn versehentlich als "breit getragen" liest.
+    """
+    from . import statistik
+
+    aus: dict = {"t_ohne_top5": float("nan"), "top5_anteil_pct": float("nan")}
+    if t.empty or "gewinn_usd" not in t.columns:
+        return aus
+
+    je_symbol = t.groupby("symbol")["gewinn_usd"].sum().sort_values(
+        ascending=False)
+    gesamt = float(je_symbol.sum())
+    spitze = je_symbol.head(top)
+    if np.isfinite(gesamt) and gesamt > 0:
+        aus["top5_anteil_pct"] = float(spitze.sum() / gesamt * 100.0)
+    else:
+        aus["top5_anteil_pct"] = float("inf")
+
+    rest = t[~t["symbol"].isin(set(spitze.index))]
+    if len(rest) < 10:
+        return aus          # zu wenig uebrig, um etwas auszusagen
+    try:
+        tage = pd.to_datetime(rest["einstieg_ts"]).dt.date
+        res = statistik.gruppierter_test(
+            rest["rendite_pct"], pd.Series(tage.values),
+            horizont=max(1, int(horizont_tage)), min_gruppen=20,
+        )
+        tu = getattr(res, "t_ueberlappung", float("nan"))
+        roh = float(tu) if tu == tu else float(getattr(res, "t", 0.0))
+        aus["t_ohne_top5"] = roh if abs(roh) < 50.0 else float("nan")
+    except Exception:  # noqa: BLE001 - eine Zusatzzahl darf nie den Lauf kippen
+        pass
+    return aus
 
 
 def _hinweise(erg: Ergebnis, cfg: AusbruchConfig, n_symbole: int) -> list[str]:

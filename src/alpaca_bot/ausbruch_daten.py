@@ -198,17 +198,65 @@ def laden(
     return out
 
 def jahre_vorhanden(raster: str = "15Min") -> list[int]:
-    """Welche Jahre liegen fuer dieses Raster auf der Platte?"""
+    """Welche Jahre liegen fuer dieses Raster auf der Platte?
+
+    **Leere Ordner zaehlen nicht (12.09.2026).** Ein abgebrochener
+    Download laesst den angelegten Jahresordner zurueck, bevor die erste
+    Datei darin liegt. Wuerde dieses Jahr mitgezaehlt, faende
+    `laden_kursdaten` beim Schnittmengen-Modus **null** Symbole - und
+    jedes Skript ohne ausdrueckliche Jahresangabe liefe ins Leere, ohne
+    dass der Grund sichtbar waere. Genau so ist ein leerer `15Min_2016`
+    entstanden.
+    """
     if not VORRAT.exists():
         return []
     aus = []
     for d in VORRAT.iterdir():
-        if d.is_dir() and d.name.startswith(f"{raster}_"):
-            try:
-                aus.append(int(d.name.rsplit("_", 1)[1]))
-            except ValueError:
-                continue
+        if not (d.is_dir() and d.name.startswith(f"{raster}_")):
+            continue
+        try:
+            jahr = int(d.name.rsplit("_", 1)[1])
+        except ValueError:
+            continue
+        if next(d.glob("*.parquet"), None) is None:
+            continue          # angelegt, aber nie gefuellt
+        aus.append(jahr)
     return sorted(aus)
+
+
+def symbole_vorhanden(raster: str = "15Min",
+                      jahre: Sequence[int] | None = None,
+                      *, modus: str = "schnitt") -> list[str]:
+    """Symbole, die in ALLEN genannten Jahren vorliegen.
+
+    Genau diese Schnittmenge benutzt `laden_kursdaten` - ein Symbol, das
+    nur die halbe Zeitachse abdeckt, faellt dort ohnehin heraus.
+
+    **Wofuer das gebraucht wird.** Beim Nachladen weiterer Jahre ist die
+    Frage nicht "welche Symbole gibt es", sondern "welche haben wir
+    schon". Wer einen frischen Universums-Abzug nachlaedt, verschiebt
+    die Schnittmenge: Neue Symbole fehlen in den alten Jahren, alte
+    fehlen im neuen Abzug - und uebrig bleibt weniger als vorher.
+
+    Args:
+        modus: "schnitt" = nur Symbole, die in ALLEN Jahren vorliegen
+            (was `laden_kursdaten` standardmaessig benutzt).
+            "vereinigung" = jedes Symbol, das in IRGENDEINEM Jahr
+            vorliegt. Fuers Nachladen aelterer Jahre ist die
+            Vereinigung richtig: Ein Wert, der 2024 an die Boerse kam,
+            soll auch fuer 2019 angefragt werden - die Antwort ist dann
+            eben leer, und das kostet nichts ausser einem Request.
+    """
+    jahre = list(jahre) if jahre else jahre_vorhanden(raster)
+    if not jahre:
+        return []
+    mengen = [{f.stem for f in _ordner(raster, j).glob("*.parquet")}
+              for j in jahre if _ordner(raster, j).exists()]
+    if not mengen:
+        return []
+    if modus == "vereinigung":
+        return sorted(set.union(*mengen))
+    return sorted(set.intersection(*mengen))
 
 
 def laden_kursdaten(
@@ -218,6 +266,7 @@ def laden_kursdaten(
     max_symbole: int | None = None,
     min_bars: int = 500,
     handelszeit_only: bool = True,
+    alle_symbole: bool = False,
     fortschritt: Callable[[float, str], None] | None = None,
 ):
     """Laedt den Vorrat direkt in ein `ausbruch.Kursdaten`-Objekt.
@@ -253,7 +302,28 @@ def laden_kursdaten(
     # stiller Survivorship-Filter in die andere Richtung.
     je_jahr = [{f.stem for f in _ordner(raster, j).glob("*.parquet")}
                for j in jahre]
-    gemeinsam = sorted(set.intersection(*je_jahr)) if je_jahr else []
+    if alle_symbole:
+        # VEREINIGUNG statt Schnittmenge. Fuer Querschnitt-Auswertungen
+        # richtig, fuer Einzelwert-Backtests nicht ohne Weiteres:
+        #
+        # * Richtig dort, weil je Stichtag ohnehin nur Werte mit
+        #   ausreichender Historie und gueltigem Kurs in die Rangfolge
+        #   kommen - fehlende Zeitraeume sind einfach NaN und fallen
+        #   heraus. Und weil die Schnittmenge einen zusaetzlichen Filter
+        #   einbaut: "muss seit dem ersten Jahr existieren". Der schliesst
+        #   jeden spaeteren Boersengang aus und verengt das Universum von
+        #   2.400 auf 1.725 (gemessen 12.09.2026, 2021-2026).
+        # * NICHT automatisch richtig fuer Kennzahlen, die eine
+        #   durchgehende Reihe brauchen (Equity-Kurve je Symbol,
+        #   Drawdown ueber den ganzen Zeitraum).
+        #
+        # **Was das NICHT behebt:** Der Vorrat enthaelt ausschliesslich
+        # heute gelistete Symbole - delistete Firmen fehlen vollstaendig.
+        # Die Vereinigung nimmt einen zusaetzlichen Filter heraus, sie
+        # macht die Daten nicht survivorship-frei (§4.3, §G53).
+        gemeinsam = sorted(set.union(*je_jahr)) if je_jahr else []
+    else:
+        gemeinsam = sorted(set.intersection(*je_jahr)) if je_jahr else []
     if max_symbole:
         gemeinsam = gemeinsam[:max_symbole]
     if not gemeinsam:

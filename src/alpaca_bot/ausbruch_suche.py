@@ -82,15 +82,44 @@ __all__ = ["RAUM", "SCORES", "Versuch", "Suche", "teilen",
            "elite_lesen", "elite_schreiben", "ELITE_DATEI"]
 
 
-def _elite_pfad() -> Path:
+#: Was die dauerhaft laufende Flotte benutzt. Diese eine Kombination
+#: behaelt den urspruenglichen Dateinamen, damit ein Neustart ihr die
+#: gesammelte Elite nicht wegnimmt.
+ELITE_ALTBESTAND = ("t", "2023-2026")
+
+
+def _elite_pfad(score_name: str = "t", basis: str = "") -> Path:
+    """Je Massstab UND Datenumfang eine eigene Datei.
+
+    **Zwei Dinge muessen uebereinstimmen, damit zwei Instanzen dieselbe
+    Elite benutzen duerfen (12.09.2026):**
+
+    1. *Dieselbe Score-Funktion.* `t_robust` liegt bauartbedingt nie
+       ueber `t`. In einer gemeinsamen Datei wuerde eine
+       t_robust-Instanz nie einen Bestwert eintragen und zugleich per
+       `elite_anteil` immer wieder an einem Punkt ansetzen, der fuer ein
+       anderes Ziel optimiert wurde.
+    2. *Dieselben Daten.* Ein t-Wert aus 2021-2026 und einer aus
+       2023-2026 sind verschiedene Zahlen fuer dieselbe Konfiguration.
+       Wer sie vergleicht, vergleicht Zeitraeume, nicht Konfigurationen.
+
+    Beides ist dieselbe Fehlerklasse wie die zwei Wochen falsche
+    Flotten-Referenz (§G6): eine Referenz, die nicht zu dem passt, was
+    sie referenziert. Der Prozess laeuft dabei fehlerfrei weiter - er
+    misst nur nichts mehr.
+    """
     from .config import DATA_DIR
-    return DATA_DIR / "ausbruch_elite.json"
+    if (score_name, basis) == ELITE_ALTBESTAND or (score_name == "t"
+                                                   and not basis):
+        return DATA_DIR / "ausbruch_elite.json"
+    teil = f"{score_name}_{basis}" if basis else score_name
+    return DATA_DIR / f"ausbruch_elite_{teil}.json"
 
 
 ELITE_DATEI = property(lambda self: _elite_pfad())
 
 
-def elite_lesen() -> dict | None:
+def elite_lesen(score_name: str = "t", basis: str = "") -> dict | None:
     """Der beste Fund ueber ALLE parallel laufenden Instanzen.
 
     Vier unabhaengige Suchen finden vier verschiedene Huegel - das ist
@@ -98,7 +127,7 @@ def elite_lesen() -> dict | None:
     herumsucht, waehrend a laengst t=3,1 gefunden hat, ist weiteres
     Herumirren verschenkte Rechenzeit.
     """
-    p = _elite_pfad()
+    p = _elite_pfad(score_name, basis)
     if not p.exists():
         return None
     try:
@@ -108,7 +137,8 @@ def elite_lesen() -> dict | None:
 
 
 def elite_schreiben(score: float, config: dict, instanz: str,
-                    kennzahlen: dict | None = None) -> bool:
+                    kennzahlen: dict | None = None,
+                    score_name: str = "t", basis: str = "") -> bool:
     """Traegt einen neuen gemeinsamen Bestwert ein - nur wenn er besser ist.
 
     Kein Dateisperren: Geschrieben wird ausschliesslich bei einem neuen
@@ -119,14 +149,15 @@ def elite_schreiben(score: float, config: dict, instanz: str,
     Schlimmstenfalls geht EIN Eintrag verloren - der naechste Bestwert
     holt ihn wieder ein.
     """
-    p = _elite_pfad()
-    vorhanden = elite_lesen()
+    p = _elite_pfad(score_name, basis)
+    vorhanden = elite_lesen(score_name, basis)
     if vorhanden and float(vorhanden.get("score", float("-inf"))) >= score:
         return False
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps({
         "score": float(score), "config": config, "instanz": instanz,
+        "score_name": score_name, "basis": basis,
         "kennzahlen": kennzahlen or {},
         "gesetzt_am": dt.datetime.now(dt.UTC).isoformat(),
     }, default=str, indent=2), encoding="utf-8")
@@ -208,8 +239,39 @@ def _score_profit(k: dict) -> float:
     return float(p)
 
 
+def _score_t_robust(k: dict) -> float:
+    """Der t-Wert, den auch fuenf Gluecksgriffe nicht retten.
+
+    **Warum es diesen Score gibt.** Am 12.09.2026 fiel der beste
+    Kandidat im Gate mit einem Top-5-Anteil von 129,9 % durch: Ohne
+    seine fuenf besten Symbole war er im Minus (§G66). Der gewoehnliche
+    t-Wert konnte das nicht sehen - er kennt Renditen, nicht deren
+    Herkunft. Eine Suche, die auf `t` optimiert, laeuft deshalb
+    systematisch in genau diese Falle: Unter hunderttausenden Versuchen
+    gewinnt zuverlaessig einer, bei dem fuenf Symbole zufaellig
+    davonliefen.
+
+    Gewertet wird das SCHLECHTERE aus beidem - mit und ohne die fuenf
+    groessten Gewinnbringer. Nicht nur der Wert ohne sie: Steigt der
+    t-Wert durch ihr Entfernen (moeglich, wenn sie stark schwankten),
+    waere sonst ausgerechnet das belohnt.
+
+    Ein breiter Effekt verliert dabei wenig. Genau das ist die Absicht.
+    """
+    t = k.get("t_wert")
+    ohne = k.get("t_ohne_top5")
+    if t is None or t != t:
+        return float("-inf")
+    if ohne is None or ohne != ohne:
+        # Nicht berechenbar (zu wenige Trades ausserhalb der Spitze).
+        # Das ist selbst ein Befund: zu schmal, um breit zu sein.
+        return float("-inf")
+    return float(min(float(t), float(ohne)))
+
+
 SCORES: dict[str, Callable[[dict], float]] = {
     "t": _score_t,
+    "t_robust": _score_t_robust,
     "rendite": _score_rendite,
     "calmar": _score_calmar,
     "profit_faktor": _score_profit,
@@ -350,11 +412,18 @@ class Suche:
         elite_anteil: float = 0.4,
         pruef_stichprobe: float = 0.01,
         protokoll=None,
+        basis: str = "",
     ) -> None:
         self.lern, self.pruef = lern, pruef
         self.grenze = grenze
         """Wo der Schnitt liegt - nur fuer Anzeige und Bericht."""
         self.score_name = score
+        self.basis = basis
+        """Welcher Datenumfang, z. B. "2021-2026".
+
+        Teil des Elite-Schluessels: Ein Score aus sechs Jahren ist nicht
+        derselbe wie einer aus vier, auch bei gleicher Konfiguration.
+        Siehe `_elite_pfad`."""
         self.score = SCORES[score]
         self.min_trades = min_trades
         self.raum = {k: v for k, v in (raum or RAUM).items()
@@ -482,7 +551,7 @@ class Suche:
         """
         if self.elite_anteil <= 0 or self.zufall.random() >= self.elite_anteil:
             return self._zufallspunkt()
-        e = elite_lesen()
+        e = elite_lesen(self.score_name, self.basis)
         if not e or not e.get("config"):
             return self._zufallspunkt()
         cfg = {k: e["config"].get(k, self.zufall.choice(v))
@@ -636,8 +705,11 @@ class Suche:
                 v.pruef_kennzahlen = pk
                 pruef_grund = "bester"
 
-                # Den Fund den anderen Instanzen zur Verfuegung stellen.
-                elite_schreiben(score, dict(cfg), self.instanz, k)
+                # Den Fund den anderen Instanzen zur Verfuegung stellen -
+                # aber nur denen, die denselben Massstab benutzen.
+                elite_schreiben(score, dict(cfg), self.instanz, k,
+                                score_name=self.score_name,
+                                basis=self.basis)
 
             elif (self.pruef_stichprobe > 0
                   and self.zufall.random() < self.pruef_stichprobe):
