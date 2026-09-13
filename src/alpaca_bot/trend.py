@@ -56,6 +56,28 @@ class TrendConfig:
     startkapital: float = 100_000.0
     rebalance: str = "monatlich"     # monatlich | woechentlich
 
+    lookbacks: tuple[int, ...] = ()
+    """Ensemble ueber mehrere Lookbacks. Leer = nur `lookback_monate`.
+
+    **Weniger Freiheitsgrade, nicht mehr.** Das Gate scheitert an
+    Kriterium 3: Die AUSWAHL des Lookbacks traegt nicht ins naechste Jahr
+    (t = -1,34 auf yfinance, 0,07 auf eigenen Daten). Wer die Zielgewichte
+    ueber 6, 9 und 12 Monate mittelt, waehlt nichts mehr aus - und hat
+    damit nichts, was nicht uebertragen koennte.
+
+    Das ist keine Neuerfindung: Mehrere Horizonte zu mitteln ist die
+    uebliche Fassung robuster Trendfolge (Antonacci, AQR). Der Preis ist
+    ein etwas traegeres Signal; der Gewinn ist, dass kein einzelner
+    Monat das Ergebnis dreht."""
+
+    rebalance_versatz_tage: int = 0
+    """Rebalance-Termine um so viele Handelstage nach hinten schieben.
+
+    Fuer Tranchen: drei Laeufe mit Versatz 0, 7 und 14 Tagen, deren
+    Renditen gemittelt werden, sind ein Depot aus drei Teildepots. Das
+    nimmt dem Ergebnis die Abhaengigkeit vom Monatsende (§G87: das
+    Raster allein aenderte 2023 von -1,9 % auf +1,0 %)."""
+
     def pruefe(self) -> None:
         if self.strategie not in ("tsmom", "dualmom", "ma_filter",
                                   "gem", "risk_parity"):
@@ -66,17 +88,38 @@ class TrendConfig:
             raise ValueError("lookback >= 1, skip >= 0")
         if self.skip_monate >= self.lookback_monate:
             raise ValueError("skip_monate muss kleiner als lookback_monate sein")
+        for lb in self.lookbacks:
+            if lb < 1 or self.skip_monate >= lb:
+                raise ValueError(f"lookbacks: {lb} unbrauchbar bei skip "
+                                 f"{self.skip_monate}")
+        if self.rebalance_versatz_tage < 0:
+            raise ValueError("rebalance_versatz_tage >= 0")
+
+    def max_lookback(self) -> int:
+        """Der laengste Horizont - bestimmt den Vorlauf."""
+        return max((*self.lookbacks, self.lookback_monate))
 
 
 # ---------------------------------------------------------------------------
-def _rebalance_termine(index: pd.DatetimeIndex, modus: str) -> pd.DatetimeIndex:
-    """Letzter Handelstag je Monat (bzw. je Woche)."""
+def _rebalance_termine(index: pd.DatetimeIndex, modus: str,
+                       versatz_tage: int = 0) -> pd.DatetimeIndex:
+    """Letzter Handelstag je Monat (bzw. je Woche), optional versetzt.
+
+    `versatz_tage` schiebt jeden Termin um so viele HANDELSTAGE nach
+    hinten - auf den naechsten vorhandenen Index-Eintrag, nie auf einen
+    Kalendertag ohne Handel.
+    """
     s = pd.Series(index, index=index)
     if modus == "woechentlich":
         grp = s.groupby([index.isocalendar().year, index.isocalendar().week])
     else:
         grp = s.groupby([index.year, index.month])
-    return pd.DatetimeIndex(sorted(grp.last().to_numpy()))
+    termine = pd.DatetimeIndex(sorted(grp.last().to_numpy()))
+    if versatz_tage <= 0:
+        return termine
+    pos = index.searchsorted(termine) + versatz_tage
+    pos = pos[pos < len(index)]
+    return pd.DatetimeIndex(sorted(set(index[pos])))
 
 
 def _momentum(prices: pd.DataFrame, bis: pd.Timestamp,
@@ -105,7 +148,30 @@ def _realized_vol(returns: pd.DataFrame, bis: pd.Timestamp,
 def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
                   bis: pd.Timestamp, cfg: TrendConfig) -> pd.Series:
     """Zielgewichte zum Rebalance-Termin `bis`. Summe <= max_brutto, Rest
-    ist implizit Cash. Nur Daten bis `bis`."""
+    ist implizit Cash. Nur Daten bis `bis`.
+
+    Mit `cfg.lookbacks` werden die Gewichte je Horizont gerechnet und
+    gemittelt - ein Asset, das nur bei einem von drei Horizonten
+    qualifiziert, bekommt ein Drittel seines Gewichts. Ohne `lookbacks`
+    exakt das bisherige Verhalten.
+    """
+    if not cfg.lookbacks:
+        return _ziel_gewichte_einzel(prices, returns, bis, cfg)
+    teile = []
+    for lb in cfg.lookbacks:
+        einzel = replace(cfg, lookback_monate=lb, lookbacks=())
+        teile.append(_ziel_gewichte_einzel(prices, returns, bis, einzel))
+    teile = [t for t in teile if not t.empty]
+    if not teile:
+        return pd.Series(dtype=float)
+    alle = sorted(set().union(*(t.index for t in teile)))
+    summe = sum(t.reindex(alle).fillna(0.0) for t in teile)
+    return summe / len(cfg.lookbacks)
+
+
+def _ziel_gewichte_einzel(prices: pd.DataFrame, returns: pd.DataFrame,
+                          bis: pd.Timestamp, cfg: TrendConfig) -> pd.Series:
+    """Zielgewichte fuer GENAU EINEN Lookback - der bisherige Kern."""
     p = prices.loc[:bis]
     mindest = cfg.lookback_monate * TAGE_PRO_MONAT + 5
     verfuegbar = [a for a in p.columns if p[a].notna().sum() > mindest
@@ -255,7 +321,8 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
     start = _ts(start, prices.index[0])
     end = _ts(end, prices.index[-1])
 
-    termine = _rebalance_termine(prices.index, cfg.rebalance)
+    termine = _rebalance_termine(prices.index, cfg.rebalance,
+                                 cfg.rebalance_versatz_tage)
     # Vorlauf: so viel Historie, wie die Strategie WIRKLICH braucht.
     #
     # Bis zum 13.09.2026 stand hier `lookback + ma_tage + 10` - fuer jede
@@ -267,7 +334,7 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
     #
     # Das Vol-Fenster gehoert dagegen fuer alle hinein, die Vol-Targeting
     # benutzen: Ohne gefuelltes Fenster ist die erste Skalierung Zufall.
-    warmup = cfg.lookback_monate * TAGE_PRO_MONAT + 10
+    warmup = cfg.max_lookback() * TAGE_PRO_MONAT + 10
     if cfg.strategie == "ma_filter":
         warmup += cfg.ma_tage
     if cfg.vol_ziel and cfg.vol_ziel > 0:

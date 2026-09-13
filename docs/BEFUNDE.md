@@ -8216,6 +8216,83 @@ Kennzahlen selbst bleiben klar: Sharpe 1,28 gegen 0,85 (SPY) und 0,75
 
 ---
 
+## G94. Ensemble und Tranchen: robuster, und deshalb niedriger (13.09.2026)
+
+**Die Aufgabe des Nutzers:** „Outside the box" weitere Verbesserungen
+finden. Angewandt wurde das Prinzip, das tatsächlich funktioniert hat —
+**weniger Freiheitsgrade, nicht mehr.** Die Konfigurationssuche hat mit
+1,1 Millionen Versuchen nichts gefunden (§G77, dreifach bestätigt:
+auch `t_robust`, auch sechs Jahre, jede Gruppe mit negativem
+Mittelwert). Der Trendbot wurde nie gesucht.
+
+**Gebaut** (`trend.py`, 7 neue Tests):
+
+1. `lookbacks=(6, 9, 12)` — Zielgewichte je Horizont gerechnet und
+   gemittelt. Damit wird kein Lookback mehr *ausgewählt*, und
+   Gate-Kriterium 3 („die Auswahl trägt nicht vorwärts") hat keinen
+   Gegenstand mehr.
+2. `rebalance_versatz_tage` — drei versetzte Läufe (0/7/14 Tage) als
+   Tranchen, gegen das Rasterglück aus §G87.
+
+Beides sind Standardfassungen robuster Trendfolge, keine Neuerfindung.
+
+### Ergebnis auf eigenen Daten, 10 % Vol-Ziel
+
+| Variante | CAGR | Sharpe | MaxDD |
+|---|---:|---:|---:|
+| dualmom 9, Monatsende *(bisher)* | 10,62 % | **1,28** | −8,9 % |
+| dualmom Ensemble 6/9/12 | 9,40 % | 1,14 | −9,8 % |
+| dualmom 9, 3 Tranchen | 8,74 % | 1,08 | −9,5 % |
+| dualmom Ensemble + 3 Tranchen | 8,42 % | 1,05 | −10,4 % |
+| gem 12 *(bisher)* | 15,92 % | 1,35 | −13,1 % |
+| gem Ensemble 6/9/12 | 12,07 % | 1,12 | −12,2 % |
+| gem Ensemble + 3 Tranchen | 12,18 % | 1,18 | −12,3 % |
+
+**Jede Robustheitsmaßnahme senkt die Zahl um 0,1 bis 0,25 Sharpe.**
+
+### Was das bedeutet — die wichtige Lesart
+
+Nicht: „Ensemble ist schlechter." Sondern: **1,28 war der beste
+Nachbar.** Die Einzelkonfiguration (9 Monate, Monatsende) liegt am
+Optimum ihrer Umgebung — und die Umgebung ist im Mittel um ~0,15
+schwächer. Wer vorwärts handelt, bekommt die Umgebung, nicht das
+Optimum. **Der ehrliche Erwartungswert dieser Familie ist Sharpe ≈ 1,1**,
+nicht 1,28.
+
+Das ist dieselbe Erkenntnis wie beim Querschnitt (§G87: 1,47 → 0,98),
+nur milder — und mit einem entscheidenden Unterschied: **Auch die
+ungeschönte Version schlägt beide Benchmarks** (1,05–1,18 gegen SPY
+0,85 und 60/40 0,75). Der Querschnitt fiel unter beide.
+
+### Konsequenzen
+
+* **Der laufende Schatten bleibt unverändert** (dualmom 9, Monatsende,
+  seit 04.09.). Ihn zu ändern wäre nachträglich.
+* Das Ensemble ist der ehrlichere Kandidat für Phase 3 — als **neuer**,
+  vorab angemeldeter Teilnehmer im Rennen, wenn der Nutzer das will.
+* **Die Suche nach „besseren Zahlen" hat hier eine Decke.** Jede
+  strukturelle Maßnahme senkt sie, weil sie Auswahlglück herausnimmt.
+  Der einzige Hebel, der die Rendite hebt, ist das Vol-Ziel (§G92) — und
+  das ist eine Risikoentscheidung, keine Verbesserung.
+
+### Stand der Ausbruch-Flotte, zum Abschluss
+
+6 Instanzen, 1.116.295 Versuche, 11.498 Prüfungen, bester Prüfwert
+0,59. Je Gruppe (unverzerrte Stichprobe):
+
+| Gruppe | Prüfungen | Mittel | Max | Zufallsmax | > 2 (Zufall) |
+|---|---:|---:|---:|---:|---:|
+| t, 2023–2026 (a–d) | 8.597 | −0,31 | 3,99 | 4,26 | 118 (198) |
+| t_robust, 2023–2026 (e) | 1.080 | −0,21 | 3,14 | 3,74 | 10 (25) |
+| t_robust, 2021–2026 (f) | 823 | −0,39 | 2,84 | 3,66 | 8 (19) |
+
+**Drei Suchverfahren, drei Datenumfänge, dasselbe Bild: kein rechter
+Rand.** Die Flotte hat ihr Urteil abgeliefert. Was aus ihr mitgenommen
+wird: die Werkzeuge (Gate, Perioden, Versuchsprotokoll, Verteilungs-
+auswertung) und die Lehre. Nicht eine Konfiguration.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

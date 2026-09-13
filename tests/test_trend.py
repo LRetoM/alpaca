@@ -167,3 +167,97 @@ def test_vorlauf_wartet_nicht_auf_unbenutzten_gleitenden_durchschnitt():
         f"{idx.get_loc(dm.equity_curve.index[0])} - wartet es auf ma_tage?")
     # ma_filter braucht die 200 Tage wirklich.
     assert ma.equity_curve.index[0] >= idx[200]
+
+
+# --- Ensemble ueber Lookbacks und Tranchen-Versatz (13.09.2026) ---------
+
+def _px(n=700, saat=2, k=6):
+    import numpy as np
+    import pandas as pd
+    r = np.random.default_rng(saat)
+    idx = pd.bdate_range("2020-07-27", periods=n, tz="UTC")
+    return pd.DataFrame(
+        {f"A{i}": 100 * np.exp(np.cumsum(r.normal(0.0003 * (i - 2), 0.01, n)))
+         for i in range(k)}, index=idx)
+
+
+def test_ohne_lookbacks_exakt_wie_vorher():
+    """Das Ensemble darf das Standardverhalten nicht anfassen."""
+    from alpaca_bot import trend
+    px = _px()
+    a = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=9))
+    b = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=9,
+                                        lookbacks=()))
+    assert a.equity_curve.equals(b.equity_curve)
+
+
+def test_ensemble_mittelt_die_gewichte():
+    """Ein Asset, das nur bei einem von drei Horizonten qualifiziert,
+    bekommt ein Drittel seines Gewichts - nicht alles, nicht nichts."""
+    import pandas as pd
+    from alpaca_bot import trend
+    px = _px()
+    ret = px.pct_change()
+    bis = px.index[-1]
+    cfg = trend.TrendConfig(strategie="dualmom", vol_ziel=0.0,
+                            lookbacks=(6, 9, 12))
+    ens = trend.ziel_gewichte(px, ret, bis, cfg)
+    einzel = [trend.ziel_gewichte(px, ret, bis, trend.TrendConfig(
+        strategie="dualmom", vol_ziel=0.0, lookback_monate=lb))
+        for lb in (6, 9, 12)]
+    alle = sorted(set().union(*(e.index for e in einzel)))
+    erwartet = sum(e.reindex(alle).fillna(0.0) for e in einzel) / 3
+    pd.testing.assert_series_equal(ens.reindex(alle).fillna(0.0), erwartet)
+
+
+def test_ensemble_sieht_keine_zukunft():
+    from alpaca_bot import trend
+    px = _px()
+    ret = px.pct_change()
+    bis = px.index[400]
+    cfg = trend.TrendConfig(strategie="dualmom", lookbacks=(6, 9, 12))
+    vorher = trend.ziel_gewichte(px, ret, bis, cfg)
+    px2 = px.copy(); px2.iloc[401:, 0] *= 3.0
+    nachher = trend.ziel_gewichte(px2, px2.pct_change(), bis, cfg)
+    assert vorher.equals(nachher)
+
+
+def test_vorlauf_richtet_sich_nach_dem_laengsten_lookback():
+    from alpaca_bot import trend
+    px = _px(n=700)
+    r = trend.run(px, trend.TrendConfig(strategie="dualmom", lookbacks=(6, 9, 12)))
+    # 12 Monate ~ 252 Tage: vor Tag 250 darf nichts starten.
+    assert r.equity_curve.index[0] >= px.index[250]
+
+
+def test_versatz_verschiebt_die_termine_auf_handelstage():
+    from alpaca_bot import trend
+    px = _px()
+    t0 = trend._rebalance_termine(px.index, "monatlich", 0)
+    t7 = trend._rebalance_termine(px.index, "monatlich", 7)
+    assert len(t7) >= len(t0) - 1
+    assert all(t in px.index for t in t7), "Termine muessen Handelstage sein"
+    # Jeder versetzte Termin liegt 7 Handelstage nach einem Monatsende.
+    pos0 = set(px.index.searchsorted(t0))
+    for t in t7:
+        assert (px.index.searchsorted(t) - 7) in pos0
+
+
+def test_tranchen_liefern_verschiedene_kurven():
+    """Drei versetzte Laeufe sind drei verschiedene Depots - sonst waere
+    das Mitteln sinnlos."""
+    from alpaca_bot import trend
+    px = _px()
+    kurven = [trend.run(px, trend.TrendConfig(
+        strategie="dualmom", lookback_monate=9, rebalance_versatz_tage=v))
+        .equity_curve for v in (0, 7, 14)]
+    assert not kurven[0].equals(kurven[1])
+    assert not kurven[1].equals(kurven[2])
+
+
+def test_unbrauchbarer_lookback_im_ensemble_wird_abgelehnt():
+    import pytest
+    from alpaca_bot import trend
+    with pytest.raises(ValueError, match="lookbacks"):
+        trend.TrendConfig(strategie="dualmom", skip_monate=1,
+                          lookbacks=(1, 9)).pruefe()
