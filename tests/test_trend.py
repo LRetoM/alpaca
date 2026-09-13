@@ -137,3 +137,33 @@ class TestEndeZuEnde:
         wf = trend.walk_forward(p, lookbacks=(6, 12))
         assert wf["n_jahre"] >= 3
         assert len(wf["zeilen"]) == wf["n_jahre"]
+
+
+def test_vorlauf_wartet_nicht_auf_unbenutzten_gleitenden_durchschnitt():
+    """Regressionstest fuer den Vorfall vom 13.09.2026 (BEFUNDE §G93).
+
+    `warmup` addierte `ma_tage` (200 Tage) fuer JEDE Strategie - obwohl
+    nur `ma_filter` einen gleitenden Durchschnitt berechnet. dualmom
+    wartete damit zehn Monate auf nichts, und der Backtest auf dem
+    eigenen Vorrat begann im Februar 2022 statt im Fruehjahr 2021.
+    """
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+
+    r = np.random.default_rng(1)
+    idx = pd.bdate_range("2020-07-27", periods=700, tz="UTC")
+    px = pd.DataFrame(
+        {s: 100 * np.exp(np.cumsum(r.normal(0.0003, 0.01, 700)))
+         for s in ("A", "B", "C", "D")}, index=idx)
+
+    dm = trend.run(px, trend.TrendConfig(strategie="dualmom",
+                                         lookback_monate=9, vol_ziel=0.10))
+    ma = trend.run(px, trend.TrendConfig(strategie="ma_filter",
+                                         ma_tage=200, vol_ziel=0.10))
+    # dualmom braucht 9 Monate (~189 Tage) plus Puffer - keine 400.
+    assert dm.equity_curve.index[0] < idx[260], (
+        f"dualmom startet erst an Tag "
+        f"{idx.get_loc(dm.equity_curve.index[0])} - wartet es auf ma_tage?")
+    # ma_filter braucht die 200 Tage wirklich.
+    assert ma.equity_curve.index[0] >= idx[200]

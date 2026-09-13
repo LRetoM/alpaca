@@ -37,15 +37,6 @@ UNIVERSEN: dict[str, list[str]] = {
     "core": ["SPY", "IEF", "GLD"],
     "equity": ["SPY", "EFA", "EEM"],
     "klassisch": ["SPY", "EFA", "EEM", "IEF", "GLD", "VNQ"],
-
-    # --- Lange Historie: Indexreihen statt ETFs -----------------------
-    # Der offene Anschluss 1 aus §G52: "ETFs reichen nur bis 2004-2008.
-    # Die staerkste Trendfolge-Evidenz liegt in den 1970er-2000er Jahren.
-    # Ein Lauf ueber 50+ Jahre waere der eigentliche Test."
-    #
-    # Ueber yfinance erreichbar: ab 1985 statt 2008 - 41 Jahre statt 18.
-    # Das verdoppelt die Wurzel aus der Zeit und damit den erreichbaren
-    # t-Wert (§G79).
 }
 
 
@@ -265,7 +256,22 @@ def run(prices: pd.DataFrame, cfg: TrendConfig | None = None, *,
     end = _ts(end, prices.index[-1])
 
     termine = _rebalance_termine(prices.index, cfg.rebalance)
-    warmup = cfg.lookback_monate * TAGE_PRO_MONAT + cfg.ma_tage + 10
+    # Vorlauf: so viel Historie, wie die Strategie WIRKLICH braucht.
+    #
+    # Bis zum 13.09.2026 stand hier `lookback + ma_tage + 10` - fuer jede
+    # Strategie, obwohl `ma_tage` (200 Tage) nur der ma_filter benutzt.
+    # dualmom wartete damit rund zehn Monate auf einen gleitenden
+    # Durchschnitt, den es nie berechnet, und der Backtest auf dem
+    # eigenen Vorrat begann im Februar 2022 statt im Fruehjahr 2021.
+    # Zehn Monate Daten lagen ungenutzt (BEFUNDE §G93).
+    #
+    # Das Vol-Fenster gehoert dagegen fuer alle hinein, die Vol-Targeting
+    # benutzen: Ohne gefuelltes Fenster ist die erste Skalierung Zufall.
+    warmup = cfg.lookback_monate * TAGE_PRO_MONAT + 10
+    if cfg.strategie == "ma_filter":
+        warmup += cfg.ma_tage
+    if cfg.vol_ziel and cfg.vol_ziel > 0:
+        warmup = max(warmup, cfg.vol_fenster_tage + 10)
     termine = pd.DatetimeIndex([
         t for t in termine
         if t >= start and t <= end

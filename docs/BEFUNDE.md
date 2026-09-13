@@ -8159,6 +8159,63 @@ Messung.
 
 ---
 
+## G93. Vorlauf-Fehler im Trendbot: zehn Monate Daten lagen ungenutzt (13.09.2026)
+
+**Gefunden durch die Frage des Nutzers** „wir haben doch Daten bis 2020,
+warum handelt der Bot erst ab Februar 2022?" Berechtigt: Die Daten
+beginnen 27.07.2020, die 9-Monats-Rückschau erlaubt einen Start im
+Frühjahr 2021.
+
+**Der Fehler.** `trend.run` berechnete den Vorlauf als
+`lookback + ma_tage + 10` — für **jede** Strategie, obwohl `ma_tage`
+(200 Tage) nur der `ma_filter` benutzt. dualmom wartete damit rund
+zehn Monate auf einen gleitenden Durchschnitt, den es nie berechnet.
+
+**Behoben:** `ma_tage` nur noch beim `ma_filter`; für Vol-Targeting
+wird das Vol-Fenster berücksichtigt. Regressionstest
+`test_vorlauf_wartet_nicht_auf_unbenutzten_gleitenden_durchschnitt`.
+
+**Der Schatten ist davon nicht betroffen.** Er hat 3.200 Tage Rückblick,
+der Vorlauf bindet dort nichts. Und die Strategie ist zustandslos — ein
+früherer Start ändert die Renditen späterer Perioden nicht.
+
+### Wirkung: mehr Daten, formal schlechteres Gate
+
+dualmom, 9 Monate, 10 % Vol-Ziel, eigene Daten:
+
+| | ab 02/2022 (vorher) | **ab 05/2021 (jetzt)** |
+|---|---:|---:|
+| Rebalances | 56 | **65** |
+| CAGR | 11,32 % | 10,70 % |
+| Sharpe | 1,35 | **1,28** |
+| MaxDD | −8,9 % | −8,9 % |
+| SPY B&H Sharpe / MaxDD | 0,89 / −22,1 % | 0,85 / **−24,5 %** |
+| 60/40 Sharpe / MaxDD | 0,80 / −17,2 % | 0,75 / −21,0 % |
+| schlägt 60/40 gesamt | +62 % vs +45 % | **+71 % vs +48 %** |
+| Jahre vorn | 3/5 (60 %) | **3/6 (50 %)** |
+| **Gate-Kriterium 1** | JA | **NEIN** |
+
+Je Jahr gegen 60/40: 2021 −1,8 · 2022 **+12,6** · 2023 −7,2 · 2024 −1,4
+· 2025 +6,4 · 2026 +2,7 Prozentpunkte. 2022 (SPY −18,6 %, Bot −3,8 %)
+ist das Jahr, für das die Familie gebaut wurde.
+
+**Zwei Dinge, die hier zusammenfallen:**
+
+1. Ein Fehlerfix, der Daten **hinzufügt**, hat das Ergebnis leicht
+   verschlechtert. Das ist die Signatur ehrlicher Arbeit — beim
+   Rosinenpicken passiert das Gegenteil (§G87: jede Korrektur ging
+   nach unten, jede beiläufige Wahl nach oben).
+2. Das Teilkriterium „≥ 60 % der Jahre" kippt bei sechs Jahren durch
+   **ein** Jahr (3/6 = 50 %, 4/6 = 67 %). Das ist eine Schwäche des
+   Kriteriums bei kurzer Historie — es wird trotzdem nicht nachträglich
+   gelockert (§B2). Festgehalten wird nur, dass es so grob auflöst.
+
+**Stand des Gates auf eigenen Daten: 2 von 4** — wie auf yfinance. Die
+Kennzahlen selbst bleiben klar: Sharpe 1,28 gegen 0,85 (SPY) und 0,75
+(60/40), Drawdown ein Drittel von SPY.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
