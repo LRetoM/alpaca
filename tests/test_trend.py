@@ -334,3 +334,54 @@ def test_huerde_folgt_der_cash_reihe():
     mit = trend.ziel_gewichte(px, ret, bis, cfg, cash_kurse=cash)
     assert not ohne.empty, "gegen 2 % Pauschale qualifizieren die Assets"
     assert mit.empty, "gegen 8 % echten Cash-Ertrag qualifiziert nichts"
+
+
+def test_depot_vol_ziel_nutzt_die_diversifikation():
+    """Bei unkorrelierten Assets ist die Depotvola kleiner als jede
+    Einzelvola - die Depot-Skalierung investiert deshalb MEHR als die
+    Asset-Skalierung, um dasselbe Ziel zu treffen."""
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+    r = np.random.default_rng(8)
+    n = 500
+    idx = pd.bdate_range("2021-01-04", periods=n, tz="UTC")
+    # Deutlich steigend, damit ALLE vier die Momentum-Huerde nehmen und
+    # der Korb mehr als ein Asset hat - sonst gibt es nichts zu
+    # diversifizieren, und die Depot-Skalierung greift korrekt nicht.
+    px = pd.DataFrame({f"A{i}": 100 * np.exp(np.cumsum(r.normal(0.002, 0.012, n)))
+                       for i in range(4)}, index=idx)
+    ret = px.pct_change(); bis = idx[-1]
+    for lauf in (trend.ziel_gewichte(px, ret, bis, trend.TrendConfig(
+            strategie="dualmom", lookback_monate=6, vol_ziel=0.0)),):
+        assert len(lauf) >= 2, "Testdaten muessen mehrere Assets qualifizieren"
+    asset = trend.ziel_gewichte(px, ret, bis, trend.TrendConfig(
+        strategie="dualmom", lookback_monate=6, vol_ziel=0.10, vol_ebene="asset",
+        max_brutto=5.0))
+    depot = trend.ziel_gewichte(px, ret, bis, trend.TrendConfig(
+        strategie="dualmom", lookback_monate=6, vol_ziel=0.10, vol_ebene="depot",
+        max_brutto=5.0))
+    assert depot.sum() > asset.sum() * 1.2
+
+
+def test_depot_vol_ziel_respektiert_den_deckel():
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+    r = np.random.default_rng(9)
+    n = 500
+    idx = pd.bdate_range("2021-01-04", periods=n, tz="UTC")
+    px = pd.DataFrame({f"A{i}": 100 * np.exp(np.cumsum(r.normal(0.0008, 0.005, n)))
+                       for i in range(4)}, index=idx)     # sehr ruhig -> will hebeln
+    w = trend.ziel_gewichte(px, px.pct_change(), idx[-1], trend.TrendConfig(
+        strategie="dualmom", lookback_monate=6, vol_ziel=0.10, vol_ebene="depot"))
+    assert w.sum() <= 1.0 + 1e-9
+
+
+def test_vol_ebene_asset_bleibt_wie_vorher():
+    from alpaca_bot import trend
+    px = _px(n=500)
+    a = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6))
+    b = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
+                                        vol_ebene="asset"))
+    assert a.equity_curve.equals(b.equity_curve)

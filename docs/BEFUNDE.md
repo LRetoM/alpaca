@@ -8439,6 +8439,85 @@ wie Cash verbucht wird.
 
 ---
 
+## G97. Drei weitere Annahmen geprüft: eine korrekt, eine neutral, eine abgelehnt (13.09.2026)
+
+Nach dem Cash-Fund (§G96) dieselbe Methode weiter: **Annahmen prüfen,
+nicht Parameter suchen.** Drei Kandidaten.
+
+### 1. Ausführungszeitpunkt — korrekt, nichts zu tun
+
+Geprüft, ob der Bot zum Schluss entscheidet und zum selben Schluss
+handelt (das wäre zu optimistisch). Ist nicht so: Entscheidung zum
+Schluss von Tag t, die neuen Gewichte verdienen ab Tag t+1. Standard,
+kein Lookahead.
+
+### 2. Momentum-Hürde an die Cash-Reihe gekoppelt — neutral
+
+„Investiert wird nur, wenn ein Asset Cash geschlagen hat" verglich mit
+pauschal 2 %, während Cash seit §G96 mit BIL verzinst wird. Das war
+inkonsistent. Jetzt misst die Hürde am echten BIL-Ertrag über dasselbe
+Fenster (Antonacci-Fassung).
+
+| dualmom 10 %, BIL | CAGR | Sharpe | MaxDD |
+|---|---:|---:|---:|
+| Hürde pauschal 2 % | 11,14 % | 1,34 | −9,2 % |
+| **Hürde = BIL-Ertrag** | 11,17 % | 1,34 | −10,0 % |
+
+Praktisch unverändert. **So soll eine Konsistenzkorrektur aussehen:
+keine Zauberei, nur Richtigkeit.** Behalten, weil es die logisch
+richtige Fassung ist.
+
+### 3. Vol-Ziel auf Depot- statt Asset-Ebene — abgelehnt
+
+**Die Beobachtung:** Der Bot liefert **8,1 % realisierte Vol bei 10 %
+Ziel**, obwohl der 100-%-Deckel in keinem der 65 Rebalances greift.
+Grund: Das Ziel wird je Asset angewandt; drei nicht perfekt korrelierte
+Assets ergeben ein Depot unter dem Ziel. Vier Fünftel des Risikobudgets
+werden genutzt.
+
+**Die Idee:** Die Summe so skalieren, dass das *Depot* das Ziel trifft
+(über die Kovarianz im Vol-Fenster) — die übliche Fassung bei
+Moskowitz/Ooi/Pedersen. Als Schalter `vol_ebene="depot"` gebaut, 3 Tests.
+
+| dualmom 9 M, BIL | CAGR | Sharpe | MaxDD | real. Vol | investiert |
+|---|---:|---:|---:|---:|---:|
+| Ziel 10 %, **je Asset** *(bisher)* | 11,17 % | **1,34** | −10,0 % | 8,2 % | 60 % |
+| Ziel 10 %, je Depot | 13,08 % | 1,22 | −12,2 % | 10,7 % | 77 % |
+| Ziel 15 %, je Asset | 14,33 % | 1,24 | −14,8 % | 11,5 % | 84 % |
+| Ziel 15 %, je Depot | 14,22 % | 1,14 | −16,8 % | 12,5 % | 91 % |
+
+**Das Ziel wird getroffen — aber der Sharpe fällt** (1,34 → 1,22). Die
+Depot-Skalierung erhöht die Investition genau dann, wenn die
+Korrelationen im 60-Tage-Fenster gerade niedrig *erscheinen* — und die
+sind in ruhigen Phasen systematisch unterschätzt. Das „ungenutzte
+Risikobudget" war ein Schutz.
+
+Und der Vergleich entlarvt es: Wer 13 % CAGR will, bekommt sie mit
+`vol_ziel=15 %` beim Asset-Verfahren **günstiger** (14,3 % bei Sharpe
+1,24) als mit 10 % beim Depot-Verfahren (13,1 % bei 1,22). **Bleibt beim
+Asset-Verfahren.** Der Schalter bleibt im Code — abgelehnt, nicht
+vergessen.
+
+### Bilanz des Tages an Verbesserungen
+
+| Maßnahme | Ergebnis | Status |
+|---|---|---|
+| Vorlauf-Fehler (§G93) | +10 Monate Daten | ✅ behoben |
+| **Cash via BIL (§G96)** | **+1,4 pp/Jahr, Sharpe +0,13** | ✅ **der Fund** |
+| Hürde an BIL | neutral | ✅ Konsistenz |
+| Crash-Schutz Querschnitt (§G95) | t 0,84 → 1,78 | ✅ für das zweite Modell |
+| Ensemble / Tranchen (§G94) | robuster, Sharpe −0,15 | ➖ ehrlicher Erwartungswert |
+| Depot-Vol-Ziel | trifft Ziel, Sharpe −0,12 | ❌ abgelehnt |
+| Kombination beider Modelle (§G96) | Korrelation 0,03, kein Gewinn | ❌ abgelehnt |
+
+**Was sich bestätigt hat:** Die Prozente kamen aus der Korrektur einer
+*falschen Annahme* (Cash zu 2 %). Jede *strukturelle* Änderung an der
+Strategie selbst hat die Zahl gesenkt oder nichts gebracht. Die Strategie
+ist, wo sie ist. Was bleibt, ist die Risikoentscheidung (Vol-Ziel) und
+der Vorwärtstest.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |

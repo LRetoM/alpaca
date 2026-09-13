@@ -56,6 +56,23 @@ class TrendConfig:
     startkapital: float = 100_000.0
     rebalance: str = "monatlich"     # monatlich | woechentlich
 
+    vol_ebene: str = "asset"
+    """Worauf sich `vol_ziel` bezieht: "asset" oder "depot".
+
+    * `"asset"` (bisher): jede Position einzeln auf das Ziel skaliert.
+      Drei Assets, die nicht perfekt korrelieren, ergeben dann ein Depot
+      UNTER dem Ziel - gemessen 8,1 % realisiert bei 10 % Ziel (§G97).
+      Das Risikobudget wird zu vier Fuenfteln genutzt.
+    * `"depot"`: die relativen Gewichte bleiben (inverse Vola), aber die
+      Summe wird so skaliert, dass das DEPOT das Ziel trifft - ueber die
+      Kovarianz der gehaltenen Assets im Vol-Fenster. Das ist die
+      uebliche Fassung (Moskowitz/Ooi/Pedersen skalieren die Strategie,
+      nicht die Position).
+
+    Keine neue Information, kein neuer Parameter: Das Ziel bleibt 10 %.
+    Es wird nur dort angewandt, wo es hingehoert. Der Deckel
+    `max_brutto` bleibt - ohne Margin wird nie ueber 100 % investiert."""
+
     cash_symbol: str = ""
     """Kursreihe, die den Cash-Anteil verzinst, z. B. "BIL". "" = Pauschale.
 
@@ -271,6 +288,12 @@ def _ziel_gewichte_einzel(prices: pd.DataFrame, returns: pd.DataFrame,
         vol = _realized_vol(returns[an], bis, cfg.vol_fenster_tage)
         skal = (cfg.vol_ziel / vol.replace(0.0, np.nan)).clip(upper=3.0).fillna(1.0)
         w = w * skal
+        if cfg.vol_ebene == "depot" and len(an) > 1:
+            # Depotvola aus der Kovarianz - nur Daten bis `bis`.
+            cov = returns[an].loc[:bis].tail(cfg.vol_fenster_tage).cov() * TRADING_DAYS
+            pv = float(np.sqrt(max(w.values @ cov.values @ w.values, 0.0)))
+            if pv > 0:
+                w = w * min(cfg.vol_ziel / pv, 3.0)
 
     if w.sum() > cfg.max_brutto:
         w = w * cfg.max_brutto / w.sum()
