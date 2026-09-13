@@ -6,8 +6,10 @@ cd ~/Documents/alpaca
 # Auswerten, wann immer du willst (auch während es läuft):
 .venv/bin/python scripts/52_ausbruch_auswertung.py
 
-# Stoppen (nur wenn du willst):
-for i in a b c d; do launchctl bootout gui/$(id -u)/de.local.alpacaausbruch.$i; done
+# Die Ausbruch-Flotte ist seit 13.09.2026 GESTOPPT (§G98): 1,1 Mio. Versuche,
+# kein Befund. Plists liegen in ~/Library/LaunchAgents/deaktiviert/.
+# Der Trendbot-Schatten laeuft weiter (Mo-Fr 22:20):
+.venv/bin/python scripts/45_trend_schatten.py --bericht
 
 # Projektanweisungen
 

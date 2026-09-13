@@ -53,8 +53,10 @@ def main() -> int:
         print(trend_schatten.bericht())
         return 0
 
-    syms = trend.UNIVERSEN["broad"]
-    print(f"[1/2] Lade {len(syms)} ETFs von Alpaca (Total Return) ...")
+    # Plus BIL: verzinst den Cash-Anteil aller Kandidaten (§G96). Kein
+    # Handelskandidat - `trend.run` nimmt ihn aus der Rangliste heraus.
+    syms = trend.UNIVERSEN["broad"] + [trend_schatten._CASH]
+    print(f"[1/2] Lade {len(syms)} ETFs von Alpaca (Total Return, inkl. Cash-ETF) ...")
     prices = _preise(syms)
     if prices.empty or prices.shape[1] < 3:
         print("  Zu wenig Daten - Schatten nicht aktualisiert.")

@@ -385,3 +385,19 @@ def test_vol_ebene_asset_bleibt_wie_vorher():
     b = trend.run(px, trend.TrendConfig(strategie="dualmom", lookback_monate=6,
                                         vol_ebene="asset"))
     assert a.equity_curve.equals(b.equity_curve)
+
+
+def test_ziel_gewichte_nimmt_cash_symbol_selbst_aus_der_rangliste():
+    """Regressionstest 13.09.2026: Ein direkter Aufrufer (der Schatten)
+    uebergab die Kurse MIT Cash-ETF, und 'BIL49' stand in der Allokation
+    von tsmom. Das waere die Kaufliste des Live-Bots gewesen."""
+    import numpy as np
+    import pandas as pd
+    from alpaca_bot import trend
+    px = _px(n=500, k=4)
+    px["BIL"] = 100 * np.exp(np.linspace(0, 0.5, 500))   # steigt kraeftig - wuerde tsmom qualifizieren
+    for strat in ("tsmom", "dualmom", "ma_filter", "gem", "risk_parity"):
+        w = trend.ziel_gewichte(px, px.pct_change(), px.index[-1],
+                                trend.TrendConfig(strategie=strat, lookback_monate=6,
+                                                  cash_symbol="BIL"))
+        assert "BIL" not in w.index, strat

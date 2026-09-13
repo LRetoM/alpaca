@@ -187,6 +187,16 @@ def ziel_gewichte(prices: pd.DataFrame, returns: pd.DataFrame,
     qualifiziert, bekommt ein Drittel seines Gewichts. Ohne `lookbacks`
     exakt das bisherige Verhalten.
     """
+    # Der Cash-ETF ist NIE ein Kandidat - egal, wer hier aufruft. `run()`
+    # trennt ihn vorher ab; ein direkter Aufrufer (der Schatten fuer die
+    # heutigen Zielgewichte) tat das nicht, und am 13.09.2026 stand "BIL49"
+    # in der Allokation von tsmom und ma_filter. Das waere die Kaufliste
+    # des Live-Bots gewesen. Deshalb hier, an der Quelle.
+    if cfg.cash_symbol and cfg.cash_symbol in prices.columns:
+        if cash_kurse is None:
+            cash_kurse = prices[cfg.cash_symbol]
+        prices = prices.drop(columns=[cfg.cash_symbol])
+        returns = returns.drop(columns=[cfg.cash_symbol], errors="ignore")
     if not cfg.lookbacks:
         return _ziel_gewichte_einzel(prices, returns, bis, cfg, cash_kurse)
     teile = []

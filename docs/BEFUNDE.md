@@ -8518,6 +8518,121 @@ der Vorwärtstest.
 
 ---
 
+## G98. Umsetzung 13.09.2026: Schatten umgebaut, Flotte gestoppt, Einzahlungsprojektion
+
+**Anlass.** Nutzerauftrag vom 13.09.2026: alle Erkenntnisse des
+Wochenendes umsetzen, den Schatten auf den besten Stand bringen, die
+Konfigurationssuche beenden, und ausrechnen, was ein Sparplan mit dem
+Bot bringt. Der Nutzer hat die Wahl des Vol-Ziels und der Strategie
+ausdrücklich delegiert („du sagst, was langfristig die Gewinnschwelle
+anhebt").
+
+### 1. Trendbot-Schatten (`trend_schatten.py`) — vier Änderungen
+
+**a) Cash über BIL für alle acht Kandidaten** (§G96). Einheitlich, also
+bevorzugt es keinen. Fehlt BIL an einem Tag, fällt der Lauf **sichtbar**
+auf die Pauschale zurück (`cash_quelle` im Snapshot), nicht still.
+
+**b) Zwei neue Kandidaten:** `dualmom_15` (dualmom, 9 M, **15 %**
+Vol-Ziel) und `gem_15` (gem, 12 M, 15 %). `dualmom_15` ist der neue
+**Primärkandidat** — Nutzerentscheidung als Risikopräferenz: 14,4 %
+statt 11,1 % im Jahr bei −14,8 % statt −10 % Rückgang, praktisch gleicher
+Sharpe (§G92). Die sechs Altkandidaten laufen unverändert weiter.
+
+**c) Startdatum je Strategie.** Vorher galt ein globales Startdatum
+(04.09.). Ein heute hinzugefügter Kandidat hätte beim zweiten Lauf
+rückwirkend den 04.09. bekommen — neun Tage, die für ihn nicht vorwärts
+waren. Jetzt `start_datum:<name>` in `meta`; Altkandidaten behalten den
+04.09., Nachzügler bekommen den Tag ihres ersten Laufs (11.09.2026, der
+letzte Kurstag). Der Bericht zeigt „(ab …)" für sie.
+
+**d) Nulllinie aus der Kurve, nicht aus der Datenbank.** Bei einer
+Änderung der Verbuchung (BIL) stand in der DB der alte Stand am Start,
+oben der neue — ein Renditesprung, der kein Marktereignis war. Da die
+Strategie zustandslos ist, ist Stand heute / Stand am Start *aus
+derselben Rechnung* die einzige stimmige Rendite.
+
+### Zwei Fehler, die erst der echte Lauf zeigte
+
+Die Tests waren grün; der Lauf gegen Alpaca zeigte:
+
+1. **„BIL49 SPY14 …" in der Allokation von tsmom und ma_filter.**
+   `run()` nimmt den Cash-ETF aus der Rangliste — aber der Schatten ruft
+   für die *heutigen Zielgewichte* `ziel_gewichte` direkt auf, und das
+   kannte die Ausnahme nicht. **Das wäre die Kaufliste des Live-Bots
+   gewesen.** Behoben an der Quelle: `ziel_gewichte` trennt den Cash-ETF
+   jetzt selbst ab, egal wer aufruft. Regressionstest über alle fünf
+   Strategien.
+2. **`dualmom_15` mit 0,17 % am ersten Tag statt 0,00 %.** Ein
+   Zeitzonen-Off-by-one: `asof(Mitternacht 11.09.)` griff den Stand vom
+   10.09., weil die Bars mit Uhrzeit im Index liegen. Behoben: letzter
+   Stand *am Kalendertag* des Starts.
+
+> Beide Fehler hätte kein Test auf synthetischen Daten gefunden. Sie
+> zeigten sich erst in der Ausgabe eines echten Laufs — und nur, weil
+> jemand die Allokationszeile gelesen hat. Das ist §G62 („jede
+> Zwischengröße prüfen, ob sie bedeutet, was ihr Name sagt") noch einmal.
+
+Stand nach dem korrigierten Lauf: 8 Kandidaten, keine BIL-Position,
+Nachzügler bei 0,00 %, Altkandidaten mit BIL-Verbuchung neu gerechnet
+(gem +1,81 %, dualmom +0,15 % seit 04.09.).
+
+### 2. Ausbruch-Flotte gestoppt
+
+Sechs Instanzen (`de.local.alpacaausbruch.a–f`) per `launchctl bootout`
+beendet, Plists nach `~/Library/LaunchAgents/deaktiviert/` verschoben —
+sonst lüden `RunAtLoad`/`KeepAlive` sie beim nächsten Login wieder.
+Endstand: **1.116.295 Versuche, 11.498 Prüfungen, bester Prüfwert 0,59**,
+drei Verfahren mit negativem Mittelwert (§G94). Die Werkzeuge bleiben
+(Gate, Perioden, Versuchsprotokoll), die Daten liegen in
+`ausbruch_versuche_*.sqlite`. Weiterlaufen: Trendbot-Schatten,
+Umkehr-Bot (Termin 10.10., nicht anfassen), EDGAR, Spannen.
+
+### 3. „1.000 € Start, 250 € je Monat — was habe ich nach 5 Jahren?"
+
+Der Bot handelt erst ab Juni 2021 (9-Monats-Rückschau ab Datenbeginn
+27.07.2020). Die Historie 2021-06 bis 2026-09 = 5,3 Jahre, einmal
+durchlaufen, Einzahlung am ersten Handelstag jedes Monats, immer voll
+investiert:
+
+| Kandidat | CAGR | eingezahlt | Endstand | Gewinn | IRR p.a. | MaxDD |
+|---|---:|---:|---:|---:|---:|---:|
+| dualmom (10 %) | 11,2 % | 16.750 | 24.609 | 7.859 | 14,0 % | −5,9 % |
+| **dualmom_15** | **14,3 %** | 16.750 | **27.368** | **10.618** | 17,9 % | −8,9 % |
+| gem (10 %) | 16,5 % | 16.000 | 26.334 | 10.334 | 19,1 % | −9,8 % |
+| gem_15 | 20,7 % | 16.000 | 29.917 | 13.917 | 24,2 % | −14,8 % |
+
+**Der IRR liegt über dem CAGR** — die guten Jahre 2024–26 lagen am Ende,
+als das meiste Geld eingezahlt war. Das ist Glück des Zeitpunkts. Für
+eine Vorausrechnung ist der **CAGR** die ehrliche Zahl.
+
+Vorausrechnung `dualmom_15` mit **14,3 % p.a.**, 250 €/Monat, 1.000 € Start:
+
+| Jahre | eingezahlt | Endstand | Gewinn |
+|---|---:|---:|---:|
+| 1 | 4.000 | **4.335** | 335 |
+| 3 | 10.000 | **12.504** | 2.504 |
+| 5 | 16.000 | **23.175** | 7.175 |
+| 10 | 31.000 | **66.437** | 35.437 |
+| 15 | 46.000 | **150.835** | 104.835 |
+| 20 | 61.000 | **315.486** | 254.486 |
+
+**Vorbehalte, ohne die diese Tabelle falsch gelesen wird:** Backtest,
+5,3 Jahre ohne 2008 und ohne März 2020, USD ohne Wechselkurs, keine
+Steuern. Eine Rendite von 14 % über 20 Jahre hat kein Momentum-Ansatz
+in der Literatur durchgehalten — die 20-Jahres-Zeile ist Arithmetik,
+kein Versprechen. Die 5-Jahres-Zeile ist der Bereich, den die Daten
+tragen.
+
+### 4. Nicht angefasst, bewusst
+
+* Das Querschnitt-Vorwärtsprotokoll (§G81) läuft unverändert weiter —
+  eine Voranmeldung wird nicht nachträglich um den Crash-Schutz
+  ergänzt. Wer ihn vorwärts messen will, meldet eine zweite Kennung an.
+* Der Umkehr-Bot (Termin 10.10.) und der Live-Bot.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
