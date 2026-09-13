@@ -8098,6 +8098,67 @@ Steuern, kein Wechselkurs. Die echte Antwort gibt der Vorwärts-Schatten.
 
 ---
 
+## G92. Schatten-Konsistenz geprüft, Vol-Ziel als Regler (13.09.2026)
+
+### Live/Schatten-Konsistenz des Trendbots — bestanden
+
+Die Fehlerklasse, die CLAUDE.md ausdrücklich nennt. Drei Prüfungen:
+
+1. **Gleicher Code.** `trend_schatten._lauf_einer` ruft `trend.run`
+   direkt auf — dieselbe Funktion wie der Backtest. Konsistenz durch
+   Konstruktion, nicht durch Nachrechnen.
+2. **Gleiche Bereinigung.** Der Schatten holt Tagesbars mit
+   `Adjustment.ALL`, der Vorrat ebenso (§G90).
+3. **Gleiche Kurse.** Der Schatten nutzt offizielle Tagesbars, der
+   Backtest verdichtet 15-Minuten-Bars. Verglichen über 273 Tage:
+
+| ETF | mittlere Abweichung | max. Abweichung | Korrelation Tagesrenditen |
+|---|---:|---:|---:|
+| SPY | 0,003 % | 0,54 % | 0,9975 |
+| TLT | 0,004 % | 0,59 % | 0,9937 |
+| GLD | 0,006 % | 1,24 % | 0,9980 |
+
+Beide Wege messen dasselbe. Die Einzeltage mit 0,5–1,2 % Abweichung sind
+offizieller Schluss gegen letzter 15-Minuten-Bar — bei monatlichem
+Rebalancing ohne Belang.
+
+### Das Vol-Ziel ist ein Regler, keine Grenze
+
+„SPY hätte 240 € mehr gebracht" (§G91) beruht auf dem 10-%-Vol-Ziel,
+das den Bot 41 % in Cash hält. Das ist eine **Risikopräferenz**, keine
+Suchachse — deshalb hier als Bandbreite, nicht als Optimum:
+
+| dualmom, Vol-Ziel | aus 1.000 € | CAGR | Sharpe | MaxDD | Cash |
+|---|---:|---:|---:|---:|---:|
+| 5 % | 1.336 | 6,6 % | 1,59 | −4,1 % | 71 % |
+| **10 %** *(im Schatten)* | 1.621 | 11,3 % | 1,35 | −8,9 % | 41 % |
+| **15 %** | **1.874** | **15,0 %** | 1,28 | −13,6 % | 19 % |
+| 20 % | 1.885 | 15,1 % | 1,18 | −17,3 % | 11 % |
+| aus | 1.875 | 15,0 % | 1,05 | −20,3 % | 5 % |
+
+| gem, Vol-Ziel | aus 1.000 € | CAGR | Sharpe | MaxDD |
+|---|---:|---:|---:|---:|
+| 10 % | 1.805 | 14,9 % | 1,34 | −13,1 % |
+| 15 % | 2.069 | 18,7 % | 1,23 | −19,3 % |
+| aus | 1.867 | 15,8 % | 0,82 | −34,7 % |
+
+**Bei 15 % erreicht dualmom SPYs Rendite (1.874 gegen 1.861 €) mit
+40 % weniger Rückgang** (−13,6 gegen −22,1 %) und Sharpe 1,28 gegen 0,89.
+
+**Warum das kein Glückstreffer ist:** Sharpe fällt **monoton** mit dem
+Vol-Ziel (1,59 → 1,35 → 1,28 → 1,18 → 1,05). Das ist der erwartete
+Tausch von Ruhe gegen Rendite, kein Ausreißer an einer Stelle. Über 20 %
+hinaus bringt der Regler nichts mehr — der Bot ist dann ohnehin fast
+voll investiert.
+
+**Nicht am laufenden Schatten geändert.** Der läuft mit 10 % seit dem
+04.09. als vorab getroffene Entscheidung. Ein anderes Vol-Ziel wäre ein
+**neuer** Kandidat mit eigenem Startdatum im Rennen — oder eine
+Entscheidung für Phase 3. Beides ist Sache des Nutzers, nicht dieser
+Messung.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
