@@ -8028,6 +8028,76 @@ einer Entscheidung.
 
 ---
 
+## G91. Universum-Robustheit, alle sechs Rennkandidaten, und „aus 1.000 € wurden" (13.09.2026)
+
+### Leave-one-out: kein einzelner ETF trägt das Ergebnis
+
+Die Sorge: DBC (Rohstoffe) machte +19 %/Jahr in genau diesem Fenster —
+der Inflationsschub 2021/22. Hängt Sharpe 1,35 daran?
+
+| ohne | CAGR | Sharpe | MaxDD |
+|---|---:|---:|---:|
+| (alle 8) | 11,32 % | 1,35 | −8,9 % |
+| GLD | 9,56 % | **1,06** | −9,6 % |
+| DBC | 9,48 % | 1,15 | −9,4 % |
+| SPY | 9,79 % | 1,20 | −8,9 % |
+| EFA / EEM / IEF / TLT | 11,3–11,8 % | 1,35–1,41 | −8,8 bis −8,9 % |
+| VNQ | 12,16 % | **1,42** | −8,5 % |
+
+**Schlechtester Fall 1,06 — über beiden Benchmarks.** Drawdown in allen
+acht Fällen zwischen −8,5 und −9,6 %. Damit ist der Trendbot robust
+gegen **Lookback, Raster, Kosten und Universum** — vier unabhängige
+Proben, alle bestanden. Der Querschnitt-Kandidat fiel schon bei der
+zweiten (§G87).
+
+### Alle sechs Kandidaten des Vorwärtsrennens, rückwärts auf eigenen Daten
+
+Das Rennen (`trend_schatten.py`, seit 04.09.) hatte für drei der sechs
+Strategien keinen Backtest auf eigenen Daten. Jetzt schon:
+
+| Kandidat | CAGR | Sharpe | MaxDD | Umschlag | Cash |
+|---|---:|---:|---:|---:|---:|
+| **dualmom** (Primär) | 11,32 % | **1,35** | **−8,9 %** | 3,8× | 41 % |
+| **gem** | **14,91 %** | 1,34 | −13,1 % | 4,4× | 41 % |
+| risk_parity_defensiv | 5,40 % | 0,97 | −8,5 % | 0,7× | 40 % |
+| tsmom | 6,39 % | 0,83 | −12,3 % | 3,6× | 30 % |
+| risk_parity | 7,49 % | 0,82 | −14,4 % | 1,2× | 0 % |
+| ma_filter | 5,07 % | 0,74 | −10,1 % | 4,3× | 30 % |
+
+**Für die Dezember-Entscheidung:** dualmom und gem liegen beim Sharpe
+gleichauf (1,35 / 1,34). gem holt 3,6 Prozentpunkte mehr Rendite im
+Jahr und zahlt dafür mit −13,1 statt −8,9 % Rückgang. Das ist eine
+Risikopräferenz, keine Messfrage — vorab zu entscheiden, nicht nach dem
+Rennen.
+
+### „Hätte ich 2020 1.000 € eingezahlt — was hätte ich heute?"
+
+Der Bot braucht 9 Monate Historie vor der ersten Entscheidung; die
+Daten beginnen 27.07.2020, also handelt er frühestens ab
+**28.02.2022**. 4,5 Jahre bis 11.09.2026:
+
+| Aus 1.000 € wurden | Endstand | schlimmster Rückgang |
+|---|---:|---:|
+| SPY Buy-&-Hold | 1.861 € | −22,1 % |
+| gem | 1.805 € | −13,1 % |
+| **dualmom** | **1.621 €** | **−8,9 %** |
+| 60/40 | 1.442 € | −17,2 % |
+| risk_parity_defensiv | 1.250 € | −8,5 % |
+
+Je Jahr dualmom: 2022 −1,8 % · 2023 +9,6 % · 2024 +13,1 % · 2025 +21,8 %
+· 2026 +9,4 % (bis September).
+
+**Die ehrliche Lesart:** SPY einfach zu halten hätte 240 € mehr
+gebracht. In einem starken Bullenmarkt gewinnt Buy-&-Hold auf Rendite;
+der Bot gewinnt auf Ruhe — 2022 verlor SPY 11 %, der Bot 1,8 %. Genau
+das Profil aus §G52: *risikoärmer, nicht renditestärker.* Ob das den
+Verzicht wert ist, ist eine Produktentscheidung.
+
+Backtest in USD, angenommene Kosten (2+1 bps, robust bis 8×), keine
+Steuern, kein Wechselkurs. Die echte Antwort gibt der Vorwärts-Schatten.
+
+---
+
 ## H. Betrieb — was sich bewährt hat
 
 | Erkenntnis | Detail |
