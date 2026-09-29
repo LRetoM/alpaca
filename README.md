@@ -11,6 +11,7 @@ dass ein System sich selbst betrügt.
 | **[CLAUDE.md](CLAUDE.md)** | **Projekt-Brief: Ziel, Regeln, Stand, Arbeitsweise — zuerst lesen** |
 | **[docs/masterplan-2027.md](docs/masterplan-2027.md)** | **Der Plan bis Januar 2027: Befunde, Hypothesen, Messungen, Bauplan, erwartete Zahlen** |
 | **[docs/bot-start-2027.md](docs/bot-start-2027.md)** | **Betriebsanleitung: Strategie „ranking“ vom Trockenlauf bis zum Live-Schalter** |
+| **[docs/jahresliste-2027.md](docs/jahresliste-2027.md)** | **Jahresrenditen aller Bots in % nach gemessenen Kosten: Aktien-Bot, Hybrid, Trendbot, Mix, SPY (`scripts/60_jahresliste.py`)** |
 | **[docs/zusammenfuehrung-develop.md](docs/zusammenfuehrung-develop.md)** | **Abgleich der zwei Arbeitsstränge (develop bis 13.09. + Labor 29.09.): Konflikte, Widersprüche, Bestätigungen, Arbeitsliste** |
 | **[docs/lehren-2027.md](docs/lehren-2027.md)** · [docs/befunde-2027.md](docs/befunde-2027.md) | **Gedächtnis des Labors: Fehlschlag → Ursache → Regel; automatisches Befundregister (265+ Läufe)** |
 | [docs/BEFUNDE.md](docs/BEFUNDE.md) · [docs/UEBERGABE.md](docs/UEBERGABE.md) · [docs/BETRIEBSPLAN.md](docs/BETRIEBSPLAN.md) | Gedächtnis des Betriebs (develop): gemessene Tatsachen G1–G98, Übergabe, laufende Messungen, Entscheidungstermin 10.10.2026 |

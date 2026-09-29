@@ -58,7 +58,7 @@ aber nicht direkt vergleichen.
 | Survivorship | G53: Jahres-Aktienauswahl 22,8 % CAGR, „fast ganz Survivorship“ (89 % des Universums fehlen); Literatur 4–8 %/J mit PIT-Universum | S&P-Panel (heutige Mitglieder) 22–31 %, qlib (mit Delistings) 7 % | **bestätigt** | S&P-Zahlen bleiben Obergrenzen; Erwartung aus qlib |
 | Kurzfrist-Umkehr | Vorsprung +0,11 %/Trade < Breakeven; „Faktorraum aus Kurs und Volumen vermutlich ausgeschöpft“ (§C) | 5-Tage-Umkehr echt (t 3,8), aber kostenfressend; Top-20 verliert | **bestätigt** | keine Umkehr-Strategie |
 | Momentum quartalsweise | G89: marktneutral t 0,86, „schwach positiv“ | Long-only Handmix + Tor: SPY − 3 bis SPY + 1 | **bestätigt** (ähnliche Größenordnung) | Momentum trägt den Drawdown-Schutz, nicht die Rendite |
-| Kosten | G51/G54: gemessene Spanne **12,2 bps** (NBBO), kippt die Umkehr-Strategie von +1,95 % auf −2,84 % | Labor-Portfolios 20 bps Rundlauf, Engine-Replays 5 + 5 bps je Seite | **relativiert** | Rundlauf real ≈ 22 bps. Labor-Standard 20 bps stimmt. **Engine-Replays waren ≈ 7 bps/Rundlauf zu billig ≈ −0,7 Punkte/Jahr** — mit `--spread-bps 12.2` neu rechnen (§4) |
+| Kosten | G51/G54: gemessene Spanne **12,2 bps** (NBBO), kippt die Umkehr-Strategie von +1,95 % auf −2,84 % | Labor-Portfolios 20 bps Rundlauf, Engine-Replays 5 + 5 bps je Seite | **relativiert** | Rundlauf real ≈ 22 bps. Labor-Standard 20 bps stimmt. Engine-Replays (5 + 5 bps) waren ≈ 7 bps/Rundlauf zu billig; **nachgerechnet mit 12,2 + 5 bps: nur −0,3 bis −0,6 CAGR-Punkte** (Hybrid ohne Stop 15,5 → 15,2 %, Handmix 8,0 → 7,4 %), siehe `jahresliste-2027.md` |
 | ML gegen Handmix | G15: GBM schlägt den Score nicht (1.186 Symbole, t 0,71); „auf kleinen Universen sieht es besser aus — Mechaniktest, nie Bewertung“ | qlib (8.000 Symbole): ML +3,4 / +5 / +3,6 Punkte ohne Tor; S&P (600 Symbole): ±0; mit Tor −2,4 | **offen, nicht widersprüchlich** | Heutiges ML-Ergebnis gilt nach develops Standard als **nicht bestanden** (t deflationiert 1,2–2,0 < 3,55). Bleibt „kandidat“ — Projektcache entscheidet |
 | Tauschregel / Rangverlust | G28: Tauschregel verkauft zu 80 % Gewinner | HYP-21: Rangverlust-Ausstieg nicht die Engine-Lücke; Schwelle 0,20 besser als 0,50 | **verwandt, bestätigt** | Ausstiegsregeln, die auf gefallene Kurse reagieren, verdächtig halten |
 | Regime-Tor | G67: QQQ-Filter „kostet nichts, bringt nichts“ (Umkehr-Bot) | Tor halbiert Drawdown des Momentum-Rankings | **strategieabhängig** | Tor nur für Trendstrategien einsetzen |
@@ -116,8 +116,7 @@ beide behoben, ohne die Tests aufzuweichen:**
 
 ## 4. Offene Arbeitsliste (in dieser Reihenfolge)
 
-1. **Engine-Replays mit gemessenen Kosten** neu rechnen: `31_ … --spread-bps 12.2 --slippage-bps 5`
-   für die Standardkonfiguration (qlib + S&P). Erwartung: −0,5 bis −1 Punkt.
+1. ~~Engine-Replays mit gemessenen Kosten~~ — erledigt 2026-09-29 (`jahresliste-2027.md`): −0,3 bis −0,6 Punkte.
 2. **Gruppierter Test** (`statistik.gruppierter_test(werte, tage, horizont=H)`)
    auf die Kandidaten ML h21/h42 und Hybrid anwenden; Ergebnis in
    `BEFUNDE.md` (G99 ff.) und Register.

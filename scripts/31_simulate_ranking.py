@@ -169,7 +169,8 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     tag = (f"simulate_ranking_{args.panel}_{args.variante}_stop{args.stop_atr:g}"
            f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}_c{args.cooldown}_{args.sizing}"
-           + (("_hybrid" if args.hybrid else "_ml") if args.ml_pred else "") + (f"_v{args.verlaengern:g}" if args.verlaengern is not None else "") + (f"_n{args.max_new}" if args.max_new else "") + (f"_m{args.stop_modell:g}" if args.stop_modell is not None else ""))
+           + (("_hybrid" if args.hybrid else "_ml") if args.ml_pred else "") + (f"_v{args.verlaengern:g}" if args.verlaengern is not None else "") + (f"_n{args.max_new}" if args.max_new else "") + (f"_m{args.stop_modell:g}" if args.stop_modell is not None else "")
+           + (f"_s{args.spread_bps:g}" if abs(args.spread_bps - 5.0) > 1e-9 else ""))
     res.trades.to_csv(OUT_DIR / f"{tag}.csv", index=False)
     eq.rename("kapital").to_csv(OUT_DIR / f"{tag}_kapital.csv")
     print(f"  gespeichert: {OUT_DIR / tag}.csv (+ _kapital.csv)")
@@ -186,7 +187,7 @@ def main() -> int:
                       parameter={"regime": "kein" if args.ohne_regime else "trend_ok", "haltedauer": f"{args.min_hold}-{args.max_hold}",
                                  "kosten_bps": args.spread_bps * 2 + args.slippage_bps * 2, "top_n": args.positions,
                                  "stop_atr": args.stop_atr, "symbole": len(symbole), "min_rank": args.min_rank,
-                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new, "gewichte": args.variante, "stop_modell": args.stop_modell},
+                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new, "gewichte": args.variante, "stop_modell": args.stop_modell, "spread_bps": args.spread_bps, "slippage_bps": args.slippage_bps},
                       kennzahlen=kz, urteil=urteil,
                       lehre=lehre + f"; Ausstiege {res.trades['exit_reason'].value_counts().to_dict() if not res.trades.empty else {}}",
                       hypothese="HYP-2027-20" if args.stop_atr >= 5 else None)

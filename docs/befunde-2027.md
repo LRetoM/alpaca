@@ -1,11 +1,11 @@
 # Befundregister 2027 — jeder Lauf, jedes Urteil
 
-> Automatisch erzeugt aus `results/labor/befunde.jsonl` am 2026-09-29 14:49 UTC. **265 Befunde, 105 unterschiedliche Varianten → Zufallsschwelle 3.55 Sigma.** Ein t-Wert darunter ist kein Fund.
+> Automatisch erzeugt aus `results/labor/befunde.jsonl` am 2026-09-29 15:47 UTC. **277 Befunde, 112 unterschiedliche Varianten → Zufallsschwelle 3.57 Sigma.** Ein t-Wert darunter ist kein Fund.
 
 Nichts hier wird gelöscht. Verworfene Zeilen sind die wertvollsten: Sie sagen,
 was nicht noch einmal probiert werden muss.
 
-## BESTANDEN (10)
+## BESTANDEN (14)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -19,8 +19,12 @@ was nicht noch einmal probiert werden muss.
 | 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 13.0% | 9.3% |  | 0.80 | -35.3% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'zeitausstieg': 750, 'rangverlust': 713} |
 | 22 | qlib | ranking_v2 | 2006-2020 | trend_ok | 42 | 10 | 7.7% | 9.4% | 8.7% | 0.47 | -39.7% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum |
 | 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 20 | 13.3% | 14.7% |  | 0.85 | -23.8% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 1742, 'zeitausstieg': 813, 'rangverlust': 241, 'gewinnziel_erreicht': 2} |
+| 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 34 | 13.0% | 14.7% |  | 0.83 | -23.5% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 1770, 'zeitausstieg': 810, 'rangverlust': 238, 'gewinnziel_erreicht': 2} |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 34 | 10.1% | 9.3% |  | 0.65 | -35.5% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 632, 'rangverlust': 560, 'zeitausstieg': 558} |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 34 | 10.0% | 9.3% |  | 0.66 | -33.6% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 765, 'zeitausstieg': 540, 'rangverlust': 500} |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 34 | 12.6% | 9.3% |  | 0.77 | -34.6% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'zeitausstieg': 753, 'rangverlust': 713} |
 
-## KANDIDAT (72)
+## KANDIDAT (79)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -96,6 +100,13 @@ was nicht noch einmal probiert werden muss.
 | 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 6.7% | 9.3% |  | 0.55 | -23.8% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 623, 'rangverlust': 441, 'zeitausstieg': 418} |
 | 33 | qlib_momentum | autopsie | 2007-2020 | nan | nan |  |  |  |  |  |  | Ausstieg 'stop_intraday' traegt 42% der Trades bei Oe -8.5% (Treffer 0%, Oe 18 Tage); 'zeitausstieg' dagegen Oe +14.1%. Pruefen: verkauft diese Regel NACH dem Verlust statt vor ihm (verspaeteter Stop)?. / Rendite steigt mit der Haltedauer (<=10: -8.5% -> 43-63: +10.6%): die fruehen Ausstiege sind die Verlierer - die Kostenkurve aus 24_ zeigt sich auch im Engine-Pfad. / Score-Quartil wirkt (+1.36% oben minus unten): engere Rangschwelle testen. / Verlustjahre nach Einstiegsjahr: 2015 (-0.9%, n=129), 2018 (-1.4%, n=164) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 74%, Median 84%, Tage unter 50 %: 27% - Cash-Bremse ist ein Hebel. / Konzentration: die besten 5 % der Trades liefern 40% des Bruttogewinns, die 10 besten Symbole 73% des Netto-PnL; ohne die 10 besten Trades waere der Netto-PnL 87,879 $ statt 161,651 $ - breit verteilt. / Einstiegsmonat: bester 6 (+5.2%), schlechtester 3 (-0.7%) - nur Notiz: 14 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
 | 33 | sp500_close_momentum | autopsie | 2017-2026 | nan | nan |  |  |  |  |  |  | Ausstieg 'stop_intraday' traegt 62% der Trades bei Oe -6.6% (Treffer 0%, Oe 15 Tage); 'gewinnziel_erreicht' dagegen Oe +151.3%. Pruefen: verkauft diese Regel NACH dem Verlust statt vor ihm (verspaeteter Stop)?. / Rendite steigt mit der Haltedauer (<=10: -6.1% -> 43-63: +15.3%): die fruehen Ausstiege sind die Verlierer - die Kostenkurve aus 24_ zeigt sich auch im Engine-Pfad. / Score-Quartil wirkt (+1.73% oben minus unten): engere Rangschwelle testen. / Verlustjahre nach Einstiegsjahr: 2018 (-0.2%, n=292), 2022 (-1.7%, n=105) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 81%, Median 88%, Tage unter 50 %: 18% - Cash-Bremse ist kein Haupthebel. / Konzentration: die besten 5 % der Trades liefern 63% des Bruttogewinns, die 10 besten Symbole 60% des Netto-PnL; ohne die 10 besten Trades waere der Netto-PnL 144,371 $ statt 254,334 $ - rechtsschief: jede Regel, die Sieger zwingt (Zeitausstieg, Sperre, Gewinnziel), kostet den rechten Rand. / Einstiegsmonat: bester 4 (+8.4%), schlechtester 2 (-2.4%) - nur Notiz: 10 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 34 | 6.1% | 9.3% |  | 0.51 | -24.9% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 622, 'rangverlust': 440, 'zeitausstieg': 418} |
+| 60 | qlib | Trendbot dualmom_15 (Vola-Ziel 15 %) | 2009-2020 | je Bot | nan | 12 | 4.8% | 14.2% |  | 0.46 | -22.1% | knapp: CAGR<SPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
+| 60 | qlib | Trendbot dualmom (Vola-Ziel 10 %) | 2009-2020 | je Bot | nan | 12 | 4.4% | 14.2% |  | 0.54 | -15.8% | knapp: CAGR<SPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
+| 60 | qlib | Aktien-Bot Momentum (Handmix, Stop 3, Tor) | 2009-2020 | je Bot | nan | 12 | 7.4% | 14.2% |  | 0.57 | -24.9% | knapp: CAGR<SPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
+| 60 | qlib | Aktien-Bot Hybrid (Stop 3) | 2009-2020 | je Bot | nan | 12 | 12.4% | 14.2% |  | 0.74 | -33.6% | knapp: DD>0,8xSPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
+| 60 | qlib | Aktien-Bot Hybrid (Stop nur im Trend) | 2009-2020 | je Bot | nan | 12 | 12.4% | 14.2% |  | 0.73 | -35.5% | knapp: DD>0,8xSPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
+| 60 | qlib | Aktien-Bot Hybrid (ohne Stop) | 2009-2020 | je Bot | nan | 12 | 15.2% | 14.2% |  | 0.85 | -34.6% | knapp: DD>0,8xSPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
 
 ## ZU_DUENN (1)
 
@@ -103,7 +114,7 @@ was nicht noch einmal probiert werden muss.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 33 | sp500_close | autopsie | 2017-2026 | nan | nan |  |  |  |  |  |  | Score-Quartil innerhalb der Kaufmenge ohne Wirkung (oben minus unten +0.93%): keine Konzentration auf die Top 10, die Rangschwelle reicht. / Verlustjahre nach Einstiegsjahr: 2022 (-2.2%, n=200), 2025 (-0.2%, n=250) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 77%, Median 86%, Tage unter 50 %: 11% - Cash-Bremse ist kein Haupthebel. / Einstiegsmonat: bester 10 (+4.7%), schlechtester 2 (-3.3%) - nur Notiz: 10 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
 
-## VERWORFEN (181)
+## VERWORFEN (182)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -288,6 +299,7 @@ was nicht noch einmal probiert werden muss.
 | 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 10 | 5.5% | 9.4% | 8.7% | 0.38 | -36.3% | CAGR<SPY, Auswahl<Universum |
 | 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 20 | 5.1% | 9.4% | 8.7% | 0.36 | -36.7% | CAGR<SPY, Auswahl<Universum |
 | 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 40 | 4.2% | 9.4% | 8.7% | 0.31 | -37.6% | CAGR<SPY, Auswahl<Universum |
+| 60 | qlib | MIX 50/50: Trendbot 15 % + Hybrid (Stop nur im Trend) | 2009-2020 | je Bot | nan | 12 | 8.8% | 14.2% |  | 0.69 | -28.5% | CAGR<SPY, DD>0,8xSPY; Engine-Replay/Trendbot-Lauf mit gemessenen Kosten, Jahresliste |
 
 ## WIDERLEGT (1)
 
