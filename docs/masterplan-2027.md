@@ -752,11 +752,22 @@ Engine ihre Kohorten selbst (50 Plätze / 3 je Tag ≈ 17 Kohorten). Preis:
 Nach einer Regime-Sperre dauert die Wiederbefüllung 10–17 Handelstage
 (die Referenz braucht 42). Replays mit Deckel 3 und 5 laufen:
 
-| Tagesdeckel (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | MaxDD | Deutung |
-|---|---|---|---|
-| Stop 3 ATR, Deckel 3 | _läuft_ | | Kandidat Live-Standard |
-| Stop 3 ATR, Deckel 5 | _läuft_ | | |
-| ohne Stop, Deckel 3 | _läuft_ | | Vergleich zur Referenz 12,9 % |
+| Tagesdeckel (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | Sharpe | MaxDD | Deutung |
+|---|---|---|---|---|
+| Stop 3 ATR, ohne Deckel (Rangverlust 0,50) | 6,7 % | 0,57 | −18,5 % | alter Standard |
+| **Stop 3 ATR, Deckel 3** | **7,5 %** | 0,61 | −21,2 % | **neuer Standard** `for_ranking` |
+| Stop 3 ATR, Deckel 5 | 6,7 % | 0,56 | −23,4 % | Ziehungsrauschen |
+| ohne Stop, ohne Deckel | 8,5 % | 0,68 | −20,5 % | |
+| ohne Stop, Deckel 3 | **9,3 %** | 0,71 | −21,4 % | +0,8; Referenz 12,9 % bleibt 3,6 entfernt |
+
+Der Deckel bringt je Ziehung +0,8 Punkte, und die Lücke zur Referenz
+(3,6 Punkte bei 2,9 Streuung) ist mit **einer** Ziehung nicht von Null zu
+unterscheiden. Wer es genau wissen will, mittelt den Engine-Replay über
+zehn Startversätze — das kostet zwei Stunden Rechenzeit und steht in §10
+als bewusst verschoben. Für die Voreinstellung reicht der Befund: Stop 3
+ATR, Rangverlust < 0,20, Deckel 3 (`EngineConfig.for_ranking`, 2026-09-29),
+und die Erwartung an den Engine-Pfad ist die Referenz **minus 0 bis 4
+Punkte**, je nach Ziehung — nicht ein fester Abschlag.
 
 Für die Engine-Voreinstellung heißt das heute: **Stop bleibt bei 3 ATR**
 (Drawdown-Halbierer, CAGR-neutral), Rangverlust-Schwelle 0,20 nach dem
@@ -815,6 +826,13 @@ verträgt. Damit ist der **Projektcache (2018–2026, 2.168 Symbole MIT
 Volumen) das entscheidende dritte Panel** — Stufe 1 in
 `docs/bot-start-2027.md` bekommt `23_ --panel projekt` als Pflichtlauf mit
 Bestehensregel „ML ≥ Handmix + 2 Punkte auf demselben Universum“.
+
+**qlib, Horizont 42 Tage (eigenes Training, ohne Tor):** ML 16,6 % gegen
+momentum 13,0 %, ranking_v2 11,6 %, ranking/kombi2 10,4 % (SPY 14,5 %,
+Univ.EW 13,9 %); OOS-IC +0,034, Umschlag 9,4/Jahr, MaxDD −40,9 %. **ML
+minus bester Handmix +3,6 Punkte** — dasselbe Bild wie auf 21 Tagen (+5),
+mit halbem Umschlag. Bester Einzelfaktor auf denselben Tagen:
+`abstand_52w_tief` (+0,037) — noch ein Hinweis auf den Erholungs-Charakter.
 
 **qlib MIT Regime-Tor (trend_ok), gleiche Vorhersagen, gleiches
 Universum:** ML 7,8 % gegen momentum 10,2 %, ranking_v2 8,5 %, ranking
@@ -1262,6 +1280,10 @@ einer Bestehensregel, die VOR dem Projektcache-Lauf festgelegt ist.
   gut aussieht und nichts bedeutet.
 - **Keine Parameteroptimierung.** Gewichte bleiben rund, Haltedauern sind
   21/42/63, Stops 2/3 ATR. Was mit runden Zahlen nicht trägt, trägt nicht.
+- **Keine Mittelung des Engine-Replays über Startversätze (noch nicht).** Zehn
+  Läufe × 11 Minuten je Panel; die Kohorten-Lotterie (§6.9) ist verstanden,
+  der Deckel gebaut. Auf dem Projektcache in Stufe 1 mit drei Startversätzen
+  (`31_ --start`) rechnen, nicht mit einem.
 - **Kein Hebel im Multi-Wochen-Buch.** Der ORB-Test darf intraday hebeln,
   hält aber nichts über Nacht.
 - **Keine Sekunden-Strategien**, keine Level-2-Daten, kein Market Making.

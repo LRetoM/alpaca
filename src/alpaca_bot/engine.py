@@ -411,6 +411,11 @@ class EngineConfig:
         Erwarteter Umschlag ~12-18 Rundlaeufe je Jahr und Position, also
         ~2-4 % Kosten p.a. bei 20 bps - der ganze Unterschied zum Umkehr-Bot
         (100 Rundlaeufe, 10-20 % Kosten).
+
+        Stand 2026-09-29 (masterplan §6.9, lehren §1): Rangverlust erst unter dem
+        20. Perzentil, hoechstens 3 neue Positionen je Tag (Staffelung), Stop 3 ATR,
+        keine Verlaengerung, 1/Vola-Sizing. Score-Quelle 'mix' als Rueckfall; 'ml'
+        und 'hybrid' (HYP-25) nach Stufe 1 auf dem Projektcache.
         """
         defaults = dict(
             strategy="ranking",
@@ -418,8 +423,8 @@ class EngineConfig:
             min_hold_days=21,
             max_hold_days=63,
             min_rank_pct=0.90,
-            exit_rank_pct=0.50,
-            stop_atr=3.0,
+            exit_rank_pct=0.20,     # 2026-09-29: 0,50 -> 0,20 (S&P +1 Punkt, qlib +1,7; MaxDD -31 -> -20 %)
+            stop_atr=3.0,           # bleibt: halbiert den Drawdown, kostet keine CAGR (HYP-20 widerlegt)
             target_atr=99.0,        # kein Gewinnziel
             trail_after_atr=99.0,   # kein Trailing - der Rang entscheidet
             min_score=float("-inf"),
@@ -429,6 +434,7 @@ class EngineConfig:
             deploy_to_target=True,
             allow_topup=False,
             reenter_cooldown_days=5,
+            max_new_per_day=3,      # gestaffelte Kohorten gegen die Kohorten-Lotterie (masterplan §6.9)
         )
         defaults.update(overrides)
         return cls(**defaults)
@@ -624,7 +630,9 @@ class Engine:
         modell_phase = cfg.score_quelle == "ml" or (cfg.score_quelle == "hybrid" and not markt_ok)
         self.__dict__["_modell_phase"] = modell_phase
         if modell_phase:
-            ml = pd.to_numeric(tab.get("ml_score"), errors="coerce")
+            # Fehlt die Spalte ganz (kein Modell geladen), gibt es keine Kandidaten.
+            roh = tab["ml_score"] if "ml_score" in tab.columns else pd.Series(np.nan, index=tab.index)
+            ml = pd.to_numeric(roh, errors="coerce")
             tab["ml_score"] = ml
             zul = zul & ml.notna()
         kand = tab[zul]

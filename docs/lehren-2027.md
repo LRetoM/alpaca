@@ -268,7 +268,10 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
   von selbst staffeln — in Simulation und Live gleich.
 - Verankert: `EngineConfig.max_new_per_day`, 31_ `--max-new`, Selbsttest;
   Masterplan §6.9 (Tabelle der Startversätze).
-- Status: Replays mit Deckel 3/5 laufen; Bestehen: CAGR ≥ Referenz − 2.
+- Status: gemessen — Deckel 3: +0,8 Punkte (S&P, mit und ohne Stop), Deckel 5:
+  Rauschen. Lücke zur Referenz (3,6) mit einer Ziehung nicht von Null zu
+  unterscheiden. **Standard: Deckel 3**; Mittelung über Startversätze auf dem
+  Projektcache (Masterplan §10).
 - Lehre über die Lehre: Drei plausible Täter (Stop, Rangverlust, Sieger-
   Rauswurf) wurden nacheinander mit isolierenden Läufen entlastet, bevor
   das Experiment gefunden war, das den wahren Mechanismus zeigt (die
@@ -308,7 +311,9 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 - Verankert: Autopsie-Kennzahl `konz_*` im Register; `EngineConfig.renew_rank_pct`
   (Verlängerung), 31_ `--verlaengern`; Sperre 0 gemessen: ohne Wirkung
   (die Sperre greift nie, weil der Platz am Verkaufstag selbst neu besetzt wird).
-- Status: Verlängerungs-Replays laufen (0,9 / 0,8 / mit Stop 3).
+- Status: **gemessen, hilft nicht** — S&P 6,6 / 7,9 / 8,0 % (Basis 8,5 %), qlib
+  mit Stop 3 und Verlängerung 6,5 % (Basis 6,4 %). Schalter bleibt für Replays,
+  ist nicht Standard. Der wirkliche Mechanismus war die Kohorten-Lotterie (§2.15).
 
 ### 2.14 Das Vola-Ziel braucht das richtige Niveau
 - Messung S&P `ranking_preis` trend_ok: ohne 12,9 % / −30,8 %; Ziel 0,15:
@@ -329,7 +334,7 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 | Längere Haltedauer | Netto-CAGR steigt monoton H 2 → 42 | Kosten je Tag sinken, Signal hält | erledigt |
 | Regime-Tor SPY > SMA200 | MaxDD halbiert (−55 % → −24 %) | Momentum-Crashs passieren unter der 200er | erledigt |
 | Vola-Ziel | MaxDD −52,9 % → −30,7 % bei gleicher CAGR | Exposure sinkt, wenn Vola steigt — vor dem Crash, nicht danach | HYP-22 |
-| **ML-Prognose (LightGBM auf dem Faktorzoo)** | 23_: Top-50 h21 **15,7 %** gegen SPY 14,3 % / Univ.EW 13,2 % / Handmix 9–10 % (qlib 2009–2020). 29_: jede Fassung mit ML-Score über SPY, dyn_ic 22,3 %. S&P: fest_h21 29,2 % gegen Handmix 23,2 % | Nichtlineare Kombination; Stärke im oberen Rand, nicht im IC (0,030 = bester Einzelfaktor); Wichtigkeit vol_schub_6m_neg > vola_niedrig > mom_12_1_vola | **kandidat — die Stellschraube**; Bestätigung S&P/Regime/H läuft (Kette ML); Architektur v2 in Masterplan §7.2 |
+| **ML-Prognose (LightGBM auf dem Faktorzoo)** | 23_ qlib 2009–2020 ohne Tor: h21 **15,7 %** (+5 gegen Handmix), h42 **16,6 %** (+3,6); mit Tor h21 7,8 % (−2,4). 29_: dyn_ic 22,3 %. S&P (ohne Volumen): 24,6 % = Handmix 24,8 %. Hybrid (35_): 18,4 % / mit Vola-Ziel 14,0 % bei −30 % | Nichtlineare Kombination; Stärke im oberen Rand, nicht im IC (0,030 = bester Einzelfaktor); Wichtigkeit vol_schub_6m_neg > vola_niedrig > mom_12_1_vola | **kandidat — die Stellschraube**; Bestätigung S&P/Regime/H läuft (Kette ML); Architektur v2 in Masterplan §7.2 |
 
 ## 4. Offene Hypothesen mit registrierter Bestehensregel
 
@@ -340,7 +345,8 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 | HYP-23 | Explosionen = Lotterie | 30_ Teil C | Top-Dezil ≤ Universum + 1 |
 | HYP-24 | Schnellerer Wiedereinstieg | 22_ --regimes trend_hyst | CAGR ≥ +1, MaxDD ≤ +5 — S&P verfehlt (+0,1), qlib läuft |
 | HYP-17 | Ruhiges Volumen hält auf 2016–2026 | 21_ projekt | ≥ 75 % positive Jahre |
-| HYP-06 | ML-Ranker schlägt Handmix OOS | 23_ auf projekt | CAGR ≥ Handmix + 2 |
+| HYP-06 | ML-Ranker schlägt Handmix OOS | 23_ auf projekt | CAGR ≥ Handmix + 2 — qlib ohne Tor +3,6/+5 ✓, mit Tor ✗, S&P ✗ (kein Volumen) → Projektcache entscheidet |
+| HYP-25 | Hybrid: Momentum über SMA200, Modell darunter, Vola-Ziel 0,25 | 35_ auf projekt | ≥ SPY − 1 UND ≥ momentum_trend + 2 UND MaxDD ≤ 0,9 × SPY — qlib bestanden (in-sample entworfen) |
 
 ---
 *Dokumentation zu einem Softwareprojekt, keine Anlageberatung.*

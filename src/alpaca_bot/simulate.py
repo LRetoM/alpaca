@@ -197,11 +197,11 @@ def run(
             sym: build_ranking_frame(df, market, ecfg.ranking_weights)
             for sym, df in per_symbol.items()
         }
-        if ecfg.score_quelle == "ml":
+        if ecfg.score_quelle in ("ml", "hybrid"):
             # Vorhersagen (Tag x Symbol, z. B. OOS aus scripts/23 oder modell.score_panel)
             # als Spalte `ml_score` - nur der Wert des jeweiligen Tages, nichts danach.
             if ml_scores is None:
-                raise ValueError("score_quelle='ml' braucht ml_scores (Tag x Symbol)")
+                raise ValueError("score_quelle ml/hybrid braucht ml_scores (Tag x Symbol)")
             ml = ml_scores.copy()
             if ml.index.tz is None:
                 ml.index = ml.index.tz_localize("UTC")

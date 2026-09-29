@@ -18,8 +18,8 @@
    gewichtet nach 1/Volatilität, nur wenn SPY über seinem 200-Tage-Schnitt
    liegt (Regime-Tor), Kurs ≥ 5 $, Umsatz ≥ 25 Mio. $/Tag.
 4. Er verkauft bei Stop (3 ATR), nach 63 Tagen, oder — frühestens nach
-   21 Tagen — wenn die Aktie unter das mittlere Perzentil fällt
-   (Rangverlust). Kein Gewinnziel: Gewinner laufen.
+   21 Tagen — wenn die Aktie unter das 20. Perzentil fällt (Rangverlust).
+   Kein Gewinnziel: Gewinner laufen. Höchstens drei neue Positionen je Tag.
 5. Über allem sitzt das Risiko-Dach: Drawdown 20 % vom Höchststand →
    Vollsperre (nur Verkäufe, Lösen nur von Hand), Tagesverlust 5 % → keine
    neuen Käufe heute.
@@ -34,11 +34,12 @@ Das Labor hat an diesem Tag vier Dinge gemessen, die die Startkonfiguration
 verändern (Masterplan §6.9–6.13, Lehren §1):
 
 1. **Kohorten-Lotterie.** Ein Engine-Replay streut je nach Startversatz
-   ±3 Punkte CAGR. Deshalb `max_new_per_day` (Deckel 3–5 neue Positionen
-   je Tag) als Engine-Regel — gestaffelte Kohorten wie in der Literatur.
-   Replays laufen; der Wert kommt in `for_ranking`, sobald gemessen.
+   ±3 Punkte CAGR. Deshalb `max_new_per_day=3` (höchstens drei neue
+   Positionen je Tag) als Engine-Regel — gestaffelte Kohorten wie in der
+   Literatur; gemessen +0,8 Punkte je Ziehung. **Jetzt Standard** in
+   `for_ranking` und im Daemon (`--max-new` 3).
 2. **Rangverlust erst unter dem 20. Perzentil** (statt 50): +1 Punkt CAGR,
-   ein Drittel weniger Drawdown auf S&P; qlib +1,7. Kandidat für den Standard.
+   ein Drittel weniger Drawdown auf S&P; qlib +1,7. **Jetzt Standard.**
 3. **Stop bleibt bei 3 ATR** (halbiert den Drawdown, kostet keine CAGR).
    Verlängerung statt Zeitausstieg: gemessen, hilft nicht, bleibt aus.
 4. **Score-Quelle.** Drei Fassungen, alle in der Engine gebaut:

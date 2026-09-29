@@ -105,7 +105,7 @@ def main() -> int:
 
     if args.strategy == "ranking":
         positions = args.positions or 50
-        max_new = args.max_new or 10
+        max_new = args.max_new or 3      # = EngineConfig.for_ranking(max_new_per_day)
         engine = EngineConfig.for_ranking(max_positions=positions,
                                           deploy_to_target=args.voll_investiert,
                                           score_quelle=args.score_quelle, ml_modell=args.modell)
