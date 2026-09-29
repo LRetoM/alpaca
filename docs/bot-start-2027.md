@@ -174,7 +174,7 @@ $P scripts/07_journal_report.py        # Slippage: Median muss < 8 bps bleiben
 - der gepaarte Vergleich `M00_ranking_basis` gegen `B00_basis` (Umkehr)
   über der Zufallsschwelle liegt (`18_fleet.py --vergleich`),
 - das Risiko-Dach mindestens einmal im Trockenlauf ausgelöst und gelöst
-  wurde (`python -c "from alpaca_bot.risiko import RisikoDach; print(RisikoDach().sperre())"`).
+  wurde (`python scripts/20_risiko.py`).
 
 ## 4. Stufe 3 — Live, klein
 
@@ -196,11 +196,11 @@ wird erst entfernt, wenn Stufe 2 bestanden ist — das ist Absicht.
 
 | Ereignis | Was passiert | Was du tust |
 |---|---|---|
-| Drawdown > 20 % | Vollsperre, nur Verkäufe | Ursache klären; `RisikoDach().sperre_loesen("ich habe die ursache verstanden")` |
+| Drawdown > 20 % | Vollsperre, nur Verkäufe | Ursache klären; `python scripts/20_risiko.py --entsperren` (fragt nach dem Freigabesatz) |
 | Tagesverlust > 5 % | keine neuen Käufe heute | nichts; morgen frei |
 | Slippage-Median > 15 bps | Abbruchkriterium (mehrbot-plan §13) | Universum auf Top 600 verkleinern |
 | Bot handelt gegen Regel (`audit.py`) | — | sofort aus, Logikfehler, kein Pech |
-| Einzahlung/Auszahlung | Drawdown-Marke würde verfälscht | `RisikoDach().einzahlung_melden(betrag, "…", id="<alpaca activity id>")` |
+| Einzahlung/Auszahlung | Drawdown-Marke würde verfälscht | nichts — der Daemon trägt Kapitalflüsse selbst nach (`_maybe_kapitalfluesse`); Kontrolle mit `python scripts/20_risiko.py --kapital` |
 
 ## 6. Was diese Strategie NICHT ist
 

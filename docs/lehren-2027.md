@@ -297,6 +297,25 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
   vorab registrierte Regel besteht. In-sample entworfen → HYP-25 mit
   Bestehensregel für den Projektcache (2020 und 2022 als Aus-Phasen).
 
+### 2.17 Zwei Arbeitsstränge ohne Abgleich (aufgefallen 2026-09-29 abends)
+- Messung: Die Labor-Session zweigte von `main` (04.08.) ab; `develop` hatte
+  seitdem 91 Commits (Schattenflotte, Trendbot, Querschnitt, 64 Testdateien,
+  `BEFUNDE.md` mit 8.700 Zeilen). Im Baum der Session kam nichts davon vor.
+- Was das gekostet hat: das Risiko-Dach ein zweites Mal gebaut; die gemessene
+  Spanne (12,2 bps) nicht gekannt, dadurch Engine-Replays ≈ 0,7 Punkte/Jahr zu
+  billig gerechnet; die Statistikregel (39,5 % Fehlalarm ohne `horizont=`)
+  nicht angewendet; zwei Tests von develop brachen (`ranking_weights` nicht im
+  Konfigurationsprotokoll, Werktagszählung im Quelltext).
+- Was NICHT verloren ging: Die Kernaussagen halten dem Abgleich stand oder
+  werden bestätigt (Survivorship, Umkehr, Momentum schwach). Siehe
+  `docs/zusammenfuehrung-develop.md`.
+- Regel: Jede Sitzung beginnt mit `git branch -a`, `git log --oneline
+  origin/develop` und dem Lesen von `BEFUNDE.md` §A–§C, **bevor** gemessen
+  wird. Der Arbeitsbranch zweigt vom aktuellsten Strang ab. Beide Register
+  (`BEFUNDE.md` von Hand, `befunde-2027.md` automatisch) werden geführt.
+- Verankert: `CLAUDE.md` Teil 9, Zusammenführungsdokument, dieser Eintrag.
+- Status: erledigt (Merge 2026-09-29), Folgearbeit in `zusammenfuehrung-develop.md` §4.
+
 ### 2.13 Die Gewinne sitzen in wenigen Namen — und die Regeln zwingen sie raus
 - Messung (Autopsie `33_`, Konzentration): S&P-Replay ohne Stop — die
   besten 5 % der Trades liefern 44 % des Bruttogewinns, die 10 besten

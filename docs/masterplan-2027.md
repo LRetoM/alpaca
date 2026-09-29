@@ -31,6 +31,13 @@
 
 ---
 
+> **Wichtig (2026-09-29, nach der Zusammenführung mit `develop`):** Dieser Plan wurde ohne
+> die 91 Commits und `BEFUNDE.md` von `develop` geschrieben. Widersprüche, Bestätigungen
+> und die daraus folgende Arbeitsliste stehen in
+> [zusammenfuehrung-develop.md](zusammenfuehrung-develop.md) — **zuerst dort lesen**. Kernpunkte:
+> gemessene Spanne 12,2 bps (Engine-Replays ≈ 0,7 Punkte/Jahr zu billig), Statistikregel
+> `gruppierter_test(horizont=…)` gilt, Trendbot ist der offene Konkurrent für den Kern.
+
 ## 0. Kurzfassung in zehn Sätzen (Stand 2026-09-29 abends, nach 239 Befunden)
 
 1. Die Infrastruktur ist fertig: eine Engine für Backtest, Papierdepot und

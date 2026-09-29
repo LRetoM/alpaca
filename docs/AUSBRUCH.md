@@ -1,0 +1,504 @@
+# Ausbruch-Werkstatt — kaufen, was gerade stark gestiegen ist
+
+> Angelegt 11.09.2026. **Voranmeldung: Dieses Dokument entsteht, bevor
+> ein einziges Ergebnis existiert.** Nach dem ersten Lauf wäre jede
+> Festlegung hier eine Erzählung über eine bereits bekannte Zahl.
+
+---
+
+## 1. Die Idee
+
+Alle 15 Minuten das ganze Universum absuchen. Springt ein Wert innerhalb
+weniger Stunden um X Prozent, einen großen Teil des Kapitals
+hineinlegen — in der Erwartung, dass die Bewegung weiterläuft. Verkauft
+wird nach fester Zeit, bei Gewinnziel oder am Stop.
+
+Bewusst ein volatiles System: große Gewinne sollen möglich sein, große
+Verluste werden dafür in Kauf genommen.
+
+**Das ist das Gegenteil der bisherigen Strategie.** `engine.py` kauft,
+was *gefallen* ist (Umkehr). Diese hier kauft, was *gestiegen* ist
+(Ausbruch/Momentum). Beide können nicht gleichzeitig recht haben — und
+genau deshalb ist es ein sauber getrennter, eigener Versuch und kein
+Parameter am bestehenden Bot.
+
+## 2. Warum das überhaupt einen Versuch wert ist
+
+Der Umkehr-Bot ist an der Kostenhürde gescheitert (§G54): Vorsprung
++0,11 % je Trade gegen 0,287 % Rundlaufkosten, Faktor 2,6 zu wenig.
+Eine Idee, die diese Hürde nehmen soll, muss **je Trade deutlich mehr
+verdienen** — nicht ein bisschen mehr.
+
+Genau das ist das Argument für Ausbrüche: Eine Bewegung von 10–20 % in
+Stunden ist zwei Größenordnungen über der Kostenschwelle. Wenn davon
+auch nur ein Bruchteil nachläuft, trägt es die Kosten mühelos.
+
+**Das Gegenargument, das genauso ernst zu nehmen ist:** Genau diese
+Werte haben die weitesten Spannen. Die gemessenen 12,2 bps sind der
+Median des *liquiden* Universums im Normalzustand. Ein Wert mitten in
+einem 20-%-Sprung liegt deutlich darüber. Deshalb ist `spanne_bps`
+einstellbar und sollte hier eher zu hoch als zu niedrig angesetzt
+werden.
+
+## 3. Was gebaut wurde
+
+| Datei | Zweck |
+|---|---|
+| `src/alpaca_bot/ausbruch.py` | Die Strategie. Reine Rechnung, keine I/O, 23 Stellschrauben. |
+| `src/alpaca_bot/ausbruch_daten.py` | Lokaler Bar-Vorrat als Parquet. Einmal laden, dann liest jeder Test von der Platte. |
+| `src/alpaca_bot/ausbruch_store.py` | `ausbruch.sqlite`: Läufe, Trades, Depotkurve, Symbol-Bestenliste, **Versuchszähler**. |
+| `scripts/46_ausbruch.py` | Oberfläche. Lokaler Server, Browser-UI, Live-Strom. |
+| `src/alpaca_bot/ausbruch_suche.py` | Automatische Suche: Erkundung, Bergsteigen, Neustart — mit Lern-/Prüffenster. |
+| `scripts/47_ausbruch_suche.py` | Live-Terminal für die Suche. |
+| `scripts/48_ausbruch_daten.py` | Kursvorrat aufbauen — NASDAQ-weit, mehrjährig, fortsetzbar. |
+| `scripts/49_ausbruch_dauerlauf.py` | Dauerlauf im Vordergrund, mit Live-Terminal. |
+| `scripts/50_ausbruch_dienst.py` | **Der Hintergrunddienst.** Setzt nach Neustart fort, 4 parallele Instanzen. |
+| `scripts/51_ausbruch_status.py` | Ein Befehl: Stand aller Instanzen, ohne den Lauf anzufassen. |
+| `scripts/52_ausbruch_auswertung.py` | Die Ernte: Randverteilung je Achse über alle Versuche. |
+| `src/alpaca_bot/ausbruch_versuche.py` | Versuchsprotokoll, eine SQLite je Instanz. |
+| `tests/test_ausbruch.py` | 25 Tests, Schwerpunkt auf den Lügen-Stellen (unten). |
+| `tests/test_ausbruch_suche.py` | 16 Tests, Schwerpunkt auf der Fenster-Trennung. |
+
+**Handelt nicht.** Kein Import von `trading.py`, kein Dienst ruft es
+auf. Der Weg zu echtem Geld führt über die Flotte
+(`UMBAUPLAN` Schritt 6), nie von hier.
+
+**Warum Browser statt Fenster:** `tkinter` fehlt in dieser
+Python-Installation (`_tkinter` nicht vorhanden). Der lokale Server
+braucht nur die Standardbibliothek, keine neue Abhängigkeit und keinen
+`ratelimit.QUOTAS`-Eintrag — er spricht mit niemandem außer 127.0.0.1.
+
+## 4. Die drei Stellen, an denen so ein Backtest lügt
+
+Alle drei sind zu unseren Ungunsten aufgelöst und durch Tests
+festgenagelt. **Wer eine davon umdreht, bekommt deutlich schönere Zahlen
+und ein System, das live verliert.**
+
+### 4.1 Lookahead beim Einstieg
+
+Das Signal entsteht auf dem **Schlusskurs** von Bar t. Gekauft wird zum
+**Eröffnungskurs** von Bar t+1.
+
+Wer stattdessen zum Schlusskurs von Bar t kauft, kauft zu dem Kurs, der
+den Anstieg gerade erzeugt hat. Das ist der häufigste Fehler in genau
+dieser Strategiefamilie und macht aus jedem Ergebnis eine Fiktion.
+Test: `test_kauf_erfolgt_zum_folgebar_nicht_zum_signalkurs`.
+
+### 4.2 Stop und Ziel in derselben Bar
+
+Berührt eine Bar den Stop **und** das Ziel, ist aus den Daten nicht zu
+erkennen, was zuerst kam. **Hier gilt immer der Stop.**
+
+Die Gegenannahme lässt jede Konfiguration mit weitem Ziel und engem Stop
+künstlich gut aussehen — und das ist genau die Ecke des Parameterraums,
+in die ein Sweep von selbst läuft.
+Test: `test_stop_gewinnt_wenn_eine_bar_beides_beruehrt`.
+
+### 4.3 Survivorship — hier härter als anderswo
+
+Das Universum kennt nur **heute gelistete** Symbole. Bei einer
+Ausbruch-Strategie ist das der größte Einzelvorbehalt des ganzen
+Vorhabens: Der Wert, der +40 % macht und ein halbes Jahr später
+verschwindet, ist gar nicht erst in den Daten. Übrig bleiben die
+Ausbrüche, die *überlebt* haben.
+
+§G11 beziffert den Schein-Vorteil auf 2–4 Prozentpunkte pro Jahr — für
+dieses Segment eher darüber. **Jede Zahl aus dieser Werkstatt ist eine
+Obergrenze.** Der Hinweis steht deshalb dauerhaft im Kopf der
+Oberfläche, nicht hinter einem Aufklapp-Pfeil.
+
+## 5. Der Versuchszähler — der eigentliche Zweck der Datenbank
+
+Eine Oberfläche zum Herumprobieren **ist** eine Maschine zur Herstellung
+von Scheingewinnern. Bei N Versuchen liegt das Zufallsmaximum bei
+`sqrt(2 ln N)` (§B2). Das lässt sich nicht abschalten — nur zählen.
+
+Deshalb:
+
+* Jeder Lauf wird **vor** der Rechnung angemeldet. Ein Lauf, der erst
+  nach dem Ergebnis gezählt würde, ließe sich stillschweigend verwerfen,
+  wenn er nicht gefällt.
+* `lauf_loeschen()` entfernt Trades und Kurve, **nicht** den
+  Zählereintrag — der Lauf bleibt als `verworfen` stehen.
+* Die Schwelle steht bei jedem Ergebnis neben dem t-Wert.
+
+**Getrennt von `fleet.schwelle_sigma()`.** Der Flottenzähler zählt
+angemeldete Vorwärtsbots; Historienläufe kosten dort bewusst keinen
+Platz (`BETRIEBSPLAN` §4). Hier läuft ein eigener Zähler für eine eigene
+Frage.
+
+### Die Grenze des Zählers — benannt, nicht beschönigt
+
+**Gezählt wird nur, was über die Oberfläche läuft.** `ausbruch.lauf()`
+ist eine reine Funktion und kennt die Datenbank nicht; ein direkter
+Aufruf aus einem Skript oder aus `python -c` erscheint nirgends im
+Zähler.
+
+Das ist bewusst so — eine Rechenfunktion, die beim Aufruf in eine
+Datenbank schreibt, wäre in Tests und in jedem anderen Zusammenhang
+unbrauchbar. Aber es heißt: **Der Zähler ist eine ehrliche Buchführung,
+keine Schranke.** Wer an ihm vorbei rechnet, hat die Historie genauso
+befragt; die Zahl in der Oberfläche ist dann zu niedrig, und die
+Schwelle damit zu leicht.
+
+Konkret betroffen: Der Belastungstest vom 11.09.2026 (598 Symbole,
+5,2 Sekunden) lief als Direktaufruf und steht deshalb nicht in
+`laeufe`. Wer Läufe außerhalb der Oberfläche fährt, führt sie von Hand
+nach — oder ruft `ausbruch_store.neuer_lauf()` selbst auf.
+
+## 5a. Die automatische Suche (`scripts/47_ausbruch_suche.py`)
+
+```
+python scripts/47_ausbruch_suche.py                  # Strg+C beendet
+python scripts/47_ausbruch_suche.py --symbole 200    # schneller, gröber
+python scripts/47_ausbruch_suche.py --score calmar
+python scripts/47_ausbruch_suche.py --fest halten_bars=26
+```
+
+Probiert Kombinationen durch, merkt sich die beste und sucht von dort
+weiter — **Erkundung → Bergsteigen → Neustart** im Wechsel, bis du
+abbrichst. Live-Terminal mit Versuchszahl, Tempo, Phase, aktuell bester
+Konfiguration und den letzten zwölf Versuchen.
+
+Tempo gemessen: **~1 Sekunde je Versuch bei 150 Symbolen**, ~5 s bei
+598. Also 700–3.600 Versuche pro Stunde.
+
+### Die eine Sache, die diese Suche überhaupt zulässig macht
+
+Eine Suche über 6·10¹¹ Kombinationen ist die perfekte Maschine zur
+Herstellung von Scheingewinnern. Bei N Versuchen liegt das
+Zufallsmaximum bei `sqrt(2 ln N)` — nach 3.000 Durchläufen bei **4,00**.
+Sie *wird* eine Konfiguration mit t > 4 finden, auch auf reinem Rauschen.
+
+Deshalb wird das Jahr geschnitten:
+
+```
+|<------- LERNFENSTER (70 %) ------->|<-- PRÜFFENSTER (30 %) -->|
+   Hier wird optimiert.                 Hier wird NUR nachgesehen.
+   Tausende Versuche.                   Kein Versuch wählt danach aus.
+```
+
+Findet die Suche im Lernfenster etwas Besseres, wird dieselbe
+Konfiguration **einmal** im Prüffenster nachgerechnet — protokolliert,
+aber **nie zur Auswahl benutzt**. Sonst wäre das Prüffenster nach dem
+zweiten Treffer genauso verbraucht wie das Lernfenster.
+
+**Die Zahl, auf die es ankommt, steht deshalb rechts, nicht links.**
+Und noch aussagekräftiger ist der **Abstand** zwischen beiden: Fällt eine
+Konfiguration von t=2,2 im Lernfenster auf t=−0,6 im Prüffenster, ist
+sie an den Lernzeitraum angepasst und nicht gut.
+
+> **Erster Probelauf (11.09.2026, 60 Symbole, 107 Versuche in 42
+> Sekunden):** Lernfenster t = 2,17 (+2,07 %), Prüffenster t = −0,55
+> (−0,88 %), **Abstand +2,72**. Genau das erwartete Bild. Die Suche
+> funktioniert — und ihr erstes Ergebnis ist die Bestätigung, dass der
+> Schutzmechanismus greift.
+
+### Jeder Teilversuch hebt die Schwelle — für alle
+
+`ausbruch_store.n_versuche()` zählt Handläufe **und** Suchversuche
+zusammen. Eine Suche mit 3.000 Durchläufen hebt die Hürde auf 4,00 —
+auch für spätere Handläufe in der Werkstatt. Das ist unbequem und
+richtig: Die Daten sind 3.000-mal befragt worden, und keine spätere
+Auswertung kann so tun, als wäre sie die erste.
+
+### Warum kein neuronales Netz
+
+Bei ~17 Achsen und Sekunden je Durchlauf ist örtliche Suche mit
+Neustarts schneller, nachvollziehbar und hat keine eigenen
+Hyperparameter, die wieder angepasst werden müssten. Ein DQN würde hier
+dasselbe tun, nur langsamer und undurchsichtiger — und seine
+Zwischenergebnisse wären nicht als Konfigurationszeile lesbar.
+
+---
+
+## 5b. Der Dauerlauf — mehr Symbole, mehr Jahre (11.09.2026)
+
+```
+# Schritt 1 (einmalig, Stunden):
+python scripts/48_ausbruch_daten.py --nasdaq --shortable --jahre 2021-2025
+
+# Schritt 2 (läuft, bis du Strg+C drückst):
+python scripts/49_ausbruch_dauerlauf.py
+```
+
+### Was den Sprung möglich gemacht hat
+
+Ein Profillauf zeigte: von 5,7 Sekunden je Versuch gingen **5,3 in den
+Aufbau der gemeinsamen Zeitachse** — `set().union()` über 3,7 Mio
+`Timestamp`-Objekte. Die Strategie selbst kostete 0,4.
+
+Ersetzt durch `np.unique` auf rohen int64-Werten, dazu `Kursdaten` als
+Behälter, der **einmal** ausrichtet und beliebig oft durchgerechnet
+wird, in `float32` statt `float64`:
+
+| | vorher | nachher |
+|---|---:|---:|
+| je Versuch (598 Symbole) | 5,7 s | **0,08 s** |
+| Versuche je Stunde | 630 | **~45.000** |
+| Speicher je 1.000 Symbol-Jahre | ~1,3 GB | **~0,18 GB** |
+
+Der Lern-/Prüf-Schnitt erzeugt jetzt **Sichten statt Kopien**
+(`np.shares_memory` bestätigt) — bei 5 GB Kursdaten der Unterschied
+zwischen „läuft" und „Rechner steht".
+
+### Was das kostet — vor dem Download lesen
+
+| Auswahl | Symbole | Jahre | Download | Platte | Speicher |
+|---|---:|---:|---:|---:|---:|
+| Top 600 (liegt vor) | 598 | 1 | fertig | 86 MB | 0,1 GB |
+| NASDAQ shortable | 2.171 | 3 | ~4,6 h | 0,9 GB | 1,0 GB |
+| **NASDAQ shortable** | **2.171** | **5** | **~7,7 h** | **1,6 GB** | **1,7 GB** |
+| NASDAQ vollständig | 5.568 | 2 | ~7,9 h | 1,6 GB | 1,7 GB |
+| NASDAQ vollständig | 5.568 | 5 | ~19,8 h | 4,1 GB | 4,2 GB |
+
+**Warum die volle NASDAQ-Liste nicht besser ist.** Von 5.568 handelbaren
+Werten hat die Mehrheit kaum Umsatz. Dort ist die Kostenannahme von
+12,2 bps (§G54, gemessen am *liquiden* Universum) nicht optimistisch,
+sondern falsch — 200 bps und mehr sind normal. Und der
+Survivorship-Vorbehalt aus §4.3 trifft gerade diese Werte am härtesten.
+**Mehr Symbole machen den Backtest besser aussehend, nicht ehrlicher.**
+
+Empfehlung deshalb `--shortable` (2.171): Was Alpaca nicht leerverkaufen
+lässt, ist meist auch nicht sinnvoll kaufbar. Und **fünf Jahre statt
+einem**, weil 2022 einen Bärenmarkt enthält — Ausbruch-Strategien
+funktionieren in steigenden Märkten fast immer und brechen in Wenden
+zusammen. Ein Lauf über 2025 allein kann das nicht zeigen.
+
+### Ein Fehler im Suchverfahren, gefunden und behoben
+
+Die erste Fassung kletterte immer nur von der **global** besten
+Konfiguration aus. War deren Nachbarschaft abgesucht, fiel die Suche für
+immer auf reines Würfeln zurück — gemessen **1.198 „Neustarts" bei 1.448
+Versuchen**, also praktisch kein Bergsteigen mehr.
+
+Behoben durch die übliche Trennung: `aktuell` ist der Punkt, von dem
+geklettert wird (ein Nachbar übernimmt, sobald er *ihn* schlägt, auch
+wenn er unter dem globalen Besten liegt), `beste_*` hält nur fest.
+Danach: **11 Neustarts bei 1.325 Versuchen.**
+
+Zweiter Fehler dabei: War der Raum vollständig abgesucht, drehte die
+Schleife endlos. Mit kleinem Raster oder vielen `--fest`-Achsen in der
+Praxis erreichbar. Beide mit Regressionstest.
+
+### Und das Ergebnis, das die ganze Konstruktion rechtfertigt
+
+Mit der besser arbeitenden Suche, 300 Symbole, 1.325 Versuche in einer
+Minute:
+
+| | Lernfenster | Prüffenster |
+|---|---:|---:|
+| t-Wert | **+5,99** | **−2,36** |
+| Rendite | +24,78 % | −4,69 % |
+
+**Abstand +8,35.** Je besser der Optimierer arbeitet, desto extremer die
+Überanpassung — genau wie die Theorie es vorhersagt. Ohne das
+Prüffenster stünde hier „t = 5,99 gefunden", und das wäre die Illusion
+mit Nachkommastellen, vor der §B2 warnt.
+
+---
+
+## 5c. Der Dauerbetrieb — 4 Instanzen, beliebig lange (11.09.2026)
+
+```
+# Starten (laufen dann dauerhaft, auch nach Neustart des Rechners):
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacaausbruch.a.plist
+#   ... ebenso b, c, d
+
+# Jederzeit nachsehen, ohne den Lauf anzufassen:
+python scripts/51_ausbruch_status.py
+
+# Auswerten (nach Stunden, Tagen oder Wochen):
+python scripts/52_ausbruch_auswertung.py
+
+# Stoppen:
+launchctl bootout gui/$(id -u)/de.local.alpacaausbruch.a
+```
+
+**Kein Zeitlimit.** Der Dienst läuft, bis er gestoppt wird — zehn
+Stunden oder einen Monat. Checkpoint alle 200 Versuche, also kostet ein
+Absturz höchstens ~40 Sekunden. `KeepAlive` startet ihn neu, der
+Checkpoint setzt fort.
+
+### Vier Instanzen statt einer
+
+Gemessen: eine Instanz lastete **einen von zehn Kernen** aus. Vier
+Instanzen (passend zu den 4 Performance-Kernen) bringen **5,4 Versuche
+je Sekunde**, also ~19.500 je Stunde oder **~940.000 in 48 Stunden**.
+Speicher: 4 × 1,2 GB von 26 GB.
+
+**Der Handelsbot und der Schattenbot laufen weiter.** Sie stehen bei
+0,0 % CPU (sie schlafen 33 Minuten, arbeiten 20 Sekunden) — sie zu
+stoppen brächte nichts und würde die B11-Messung (10.10.) und das
+Trendbot-Pferderennen (bis 30.11.) zerstören.
+
+### Was die Instanzen teilen — und was nicht
+
+| | geteilt? |
+|---|---|
+| Versuchszähler / Schwelle | **ja** — `ausbruch.sqlite`, über alle Instanzen |
+| Bester Fund (`ausbruch_elite.json`) | **ja** — 40 % der Neustarts setzen dort an |
+| Suchweg, `_gesehen`, Checkpoint | **nein** — je Instanz eigen |
+| Versuchsprotokoll | **nein** — eine SQLite je Instanz |
+
+**Warum nur 40 % der Neustarts beim gemeinsamen Besten ansetzen:**
+Würden alle vier immer dort ansetzen, wären vier parallele Suchen nur
+noch eine — mit vierfachem Stromverbrauch. Und „ansetzen" heißt *in der
+Umgebung*, mit zwei zufällig verstellten Achsen: Der Bestwert selbst ist
+schon geprüft, seine direkte Nachbarschaft meist auch.
+
+**Warum eine SQLite je Instanz:** Vier Prozesse, die bei 5 Schreib­vorgängen
+je Sekunde in dieselbe Datei schreiben, blockieren sich (`database is
+locked`). `zusammenfuehren()` liest am Ende alle in einem Rutsch.
+
+---
+
+## 5d. Die Korrektur, ohne die das Ganze nichts finden könnte
+
+**Bis zum 11.09.2026 verglich der Bericht den PRÜFwert mit der
+LERNschwelle.** Das ist ein Denkfehler mit drastischer Folge: Bei
+940.000 Versuchen liegt die Lernschwelle bei `sqrt(2 ln 940000)` =
+**5,24**. Ein Prüfwert von 3,5 wäre damit als „kein Befund" abgetan
+worden — auch bei einem echten Effekt. Das Verfahren wäre per
+Konstruktion unfähig gewesen, jemals etwas zu finden.
+
+**Richtig sind zwei getrennte Schwellen:**
+
+| | gilt für | Grundlage | typisch |
+|---|---|---|---|
+| **Lernschwelle** | den Lernwert | alle N Versuche | 5,24 bei 940.000 |
+| **Prüfschwelle** | den Prüfwert | die Zahl der **Prüfungen** | 2,8 bei 50 |
+
+Die Auswahl über N Versuche findet **ausschließlich im Lernfenster**
+statt. Das Prüffenster sieht nur die wenigen Konfigurationen, die dort
+gewonnen haben — jede dieser Bewertungen ist ein sauberer Einzeltest auf
+Daten, die an keiner Auswahl beteiligt waren. Die Vielfachtestung ist auf
+der Lernseite bereits bezahlt.
+
+> **Das ist kein Absenken der Latte.** Der Zähler `pruef_bewertungen`
+> läuft über alle Instanzen und alle Läufe hinweg weiter. Wer die Suche
+> zehnmal wiederholt und sich den besten Prüfwert heraussucht, hebt damit
+> seine eigene Hürde — genau wie §B2 es verlangt. Und die Bedingung
+> bleibt: Es darf **nie** auf den Prüfwert hin ausgewählt werden
+> (durch Tests abgesichert).
+
+---
+
+## 5e. Das Versuchsprotokoll — die eigentliche Ernte
+
+Jeder Versuch wird gespeichert, nicht nur der beste
+(`ausbruch_versuche_<instanz>.sqlite`). Der Grund:
+
+> Der beste Fund aus einer Million Versuchen ist per Konstruktion ein
+> Ausreißer. Die belastbare Erkenntnis ist nicht **welche Konfiguration
+> gewann**, sondern **welche Achsenwerte über hunderttausende Versuche
+> hinweg systematisch besser abschneiden.**
+
+`scripts/52_ausbruch_auswertung.py` rechnet daraus die Randverteilung je
+Achse — ein Balkendiagramm pro Stellschraube, mit der Zahl der Versuche
+dahinter. Beispiel aus den ersten 800 Versuchen:
+
+```
+  anstieg_pct
+                15   +0.876  n=    108  +##########
+                30   -1.690  n=    112  -####################
+```
+
+Das heißt: Konfigurationen mit `anstieg_pct=15` liegen im Mittel 0,88
+t-Punkte über dem Gesamtmittel, solche mit 30 liegen 1,69 darunter.
+**Diese Aussage stützt sich auf 220 Versuche, nicht auf einen.**
+
+### Die unverzerrte Stichprobe
+
+Für 1 % der Versuche wird das Prüffenster **zusätzlich** gerechnet —
+rein zur Protokollierung, nie zum Vergleich, nie zur Auswahl. Nur so
+lässt sich die eigentliche Frage beantworten:
+
+> Sagt ein guter Lernwert überhaupt etwas über den Prüfwert?
+
+Aus den Gewinnern allein ist das nicht zu beantworten — sie sind eine
+bewusst schiefe Auswahl. Die Auswertung gibt die Korrelation aus:
+nahe null heißt, dass die Suche reine Zeitraum-Anpassung findet und
+die ganze Strategiefamilie in dieser Form nichts trägt. **Das wäre ein
+Befund, kein Misserfolg.**
+
+---
+
+## 6. Das Gate — vorab festgelegt, bevor eine Zahl existiert
+
+Die Werkstatt darf eine Idee **verwerfen**, nie abnehmen
+(`BETRIEBSPLAN` §4). Der Weg nach vorn ist ein Flottenbot im
+Vorwärtsschatten — und dafür muss **alles** davon zutreffen:
+
+0. **Wenn die Konfiguration aus einer automatischen Suche stammt:
+   Maßgeblich ist allein das Prüffenster.** Der beste Wert im
+   Lernfenster ist bei genug Versuchen garantiert gut und zählt nicht.
+1. **t über der Zufallsschwelle** von `ausbruch_store.schwelle_sigma()`,
+   überlappungskorrigiert, bei mindestens **60 Handelstagen** mit Trades.
+2. **Mindestens 200 Trades.** Darunter trägt die Streuungsschätzung nicht.
+3. **Trägt bei 30 bps Spanne**, nicht nur bei 12,2. Wenn eine
+   Konfiguration nur mit der optimistischen Kostenannahme funktioniert,
+   ist sie keine Strategie, sondern eine Kostenwette.
+4. **Trägt in beiden Jahreshälften.** Ein Ergebnis, das allein aus
+   Januar–Juni kommt, ist ein Zeitraum, kein Effekt.
+5. **Hängt nicht an fünf Symbolen.** Die Top-5 der Bestenliste dürfen
+   nicht mehr als 50 % des Gesamtgewinns tragen.
+6. **Der maximale Rückgang ist ausgehalten worden** — also vorab
+   benannt, nicht nachträglich als „damit muss man leben" erklärt.
+
+**Fällt eines durch, gibt es keinen Flottenplatz.** Und diese sechs
+Punkte werden nicht nachträglich gelockert (§B2) — auch nicht, wenn
+fünf davon erfüllt sind.
+
+## 7. Ehrliche Vorbehalte
+
+* **Der Nachrichtenfaktor fehlt.** Ein 20-%-Sprung hat fast immer eine
+  Meldung als Ursache (Studienergebnis, Übernahme, Zahlen). Ob die
+  Bewegung nachläuft, hängt an der Art der Meldung — und die kennt diese
+  Rechnung nicht. `news.py` und `gdelt.py` existieren im Projekt; sie
+  anzubinden wäre der nächste ehrliche Schritt, nicht ein weiterer
+  Parameter.
+* **Ein Jahr ist wenig.** 2025 war ein steigender Markt. Momentum
+  funktioniert in steigenden Märkten fast immer und bricht in Wenden
+  zusammen. Ein Ergebnis aus 2025 allein sagt wenig; 2018 und 2022
+  gehören dazu.
+* **Die Datenlage ist besser als die Handelbarkeit.** 15-Minuten-Bars
+  sagen nichts darüber, ob zum Eröffnungskurs des Folgebars wirklich
+  Stück verfügbar waren. Bei einem Wert, der gerade 20 % gesprungen ist,
+  ist das keine Kleinigkeit.
+* **Diese Idee ist alt und gut untersucht.** Momentum auf kurzen
+  Horizonten ist eines der meistgetesteten Muster überhaupt. Dass es hier
+  zu finden wäre, ist nicht ausgeschlossen — aber die Vorannahme sollte
+  sein, dass die einfache Fassung nicht trägt.
+
+## 8. Bedienung
+
+```
+python scripts/46_ausbruch.py          # Browser öffnet sich
+python scripts/46_ausbruch.py --port 9000 --kein-browser
+```
+
+**Schritt 1 — Kursdaten.** Einmalig. 600 Symbole × ein Jahr
+15-Minuten-Bars sind rund 4 Millionen Zeilen und etwa 20 Minuten
+Ladezeit. Danach liest jeder Testlauf von der Platte und braucht
+Sekunden. Der Abruf ist fortsetzbar: Ein Abbruch kostet nichts.
+
+**Schritt 2 — Einstellen.** Alle 23 Stellschrauben, gruppiert nach
+Einstieg, Filter, Position, Ausstieg, Kosten, Betrieb. Die
+Kostenvorschau rechnet **vor** dem Lauf aus, wie viel Kostenlast die
+gewählte Haltedauer im Jahr erzeugt.
+
+**Schritt 3 — Laufen lassen.** Fortschrittsbalken, Live-Kontostand,
+Live-Gewinn, offene Positionen und ein Protokoll, das mitläuft.
+Abbrechen jederzeit möglich.
+
+Danach: Kennzahlen mit t-Wert gegen die Zufallsschwelle, die
+Bestenliste der Symbole, alle Trades und die Liste aller bisherigen
+Läufe.
+
+**Speicherorte** (nicht unter `~/Documents`, macOS-TCC):
+
+```
+~/Library/Application Support/alpaca-bot/data/intraday/15Min_2025/
+~/Library/Application Support/alpaca-bot/data/ausbruch.sqlite
+```

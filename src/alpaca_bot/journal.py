@@ -46,8 +46,15 @@ import pandas as pd
 from .config import DATA_DIR, RESULTS_DIR
 
 JOURNAL_DB = DATA_DIR / "journal.sqlite"
+
 RAW_DIR = DATA_DIR / "journal_raw"
-RAW_DIR.mkdir(parents=True, exist_ok=True)
+"""Standardort der JSONL-Sicherung - NUR fuer das Produktivjournal.
+
+Kein `mkdir` mehr beim Import und keine Verwendung mehr im Schreibpfad:
+Beides war der Fund vom 23.08.2026 (BEFUNDE §G19 Fund 4). Massgeblich
+ist `Journal.raw_dir`, das neben der jeweiligen Datenbank liegt. Diese
+Konstante bleibt als Ortsangabe fuer Werkzeuge stehen, die den
+Produktivbestand aufraeumen."""
 
 
 def _json_default(o: Any) -> Any:
@@ -146,6 +153,24 @@ class Journal:
     def __init__(self, path: Path = JOURNAL_DB):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Die JSONL-Sicherung liegt NEBEN ihrer Datenbank, nicht an einem
+        # festen Ort. Bis zum 23.08.2026 war `RAW_DIR` ein Modul-Global:
+        # `Journal(tmp_path/...)` isolierte die SQLite sauber, der
+        # RunLogger schrieb die JSONL aber weiter ins Produktivverzeichnis.
+        #
+        # Gemessene Folge (BEFUNDE §G19 Fund 4): 2.146 der 2.618 Dateien
+        # dort gehoerten zu KEINEM Lauf im Journal - 28,6 % aller Zeilen,
+        # 84 Dateien mit Symbol TEST. Das Modul verspricht ueber diese
+        # Dateien: "waere die Datenbank je beschaedigt, liesse sie sich
+        # daraus vollstaendig rekonstruieren." Eine Rekonstruktion haette
+        # Testtrades als echte eingespielt.
+        #
+        # Dass genau dieser Fehler schon einmal die SQLite traf, steht in
+        # `scripts/14_journal_bereinigen.py`: Es existiert, weil Symbol
+        # TEST in die Produktivdatenbank lief. Geraeumt wurde damals die
+        # Datenbank - das Leck blieb offen.
+        self.raw_dir = self.path.parent / "journal_raw"
+        self.raw_dir.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
         self._migrate()
@@ -162,7 +187,19 @@ class Journal:
             "orders": {
                 "decision_price": "REAL",
                 "decision_drift_bps": "REAL",
+                # 'quote' = echte Bid/Ask-Quote zum Ausfuehrungszeitpunkt,
+                # 'fallback' = keine Quote verfuegbar, Entscheidungskurs als
+                # Notloesung eingesetzt. Ohne dieses Feld liesse sich nicht
+                # unterscheiden, ob eine Zeile echte Ausfuehrungsqualitaet
+                # misst oder nur Kursdrift seit der Entscheidung - siehe
+                # live._reference_price().
+                "referenz_quelle": "TEXT",
             },
+            # Ohne die Codeversion je Lauf laesst sich spaeter nicht sagen,
+            # ob ein schlechteres Ergebnis an einer Aenderung lag oder am
+            # Markt - und damit auch nicht, auf welchen Stand man
+            # zurueckrollen muesste. Siehe config.code_version().
+            "runs": {"code_version": "TEXT"},
         }
         with self._conn() as c:
             for table, columns in wanted.items():
@@ -195,12 +232,14 @@ class Journal:
             "platform": platform.platform(),
             "argv": sys.argv,
         }
+        from .config import code_version
+
         with self._conn() as c:
             c.execute(
-                "INSERT INTO runs (run_id, script, started_at, status, config, environment)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO runs (run_id, script, started_at, status, config,"
+                " environment, code_version) VALUES (?,?,?,?,?,?,?)",
                 (run_id, script, dt.datetime.now(dt.UTC).isoformat(), "running",
-                 _dumps(config or {}), _dumps(env)),
+                 _dumps(config or {}), _dumps(env), code_version()),
             )
         logger = RunLogger(self, run_id, script)
         try:
@@ -272,12 +311,32 @@ class Journal:
         return written
 
     def decision_quality(self, horizon: int = 5,
-                         script: str | None = None) -> pd.DataFrame:
+                         script: str | None = "live_trade") -> pd.DataFrame:
         """Welche Begruendung hat sich tatsaechlich bewaehrt?
 
         Die wichtigste Auswertung im ganzen System. Sie beantwortet nicht
         "hat der Bot Geld verdient", sondern "welcher Teil seiner Logik
         war richtig" - und nur das laesst sich gezielt verbessern.
+
+        **`script` ist per Vorgabe `"live_trade"`** - also nur der echte
+        Bot. Bis zum 22.08.2026 war die Vorgabe `None` (alles), und die
+        Trennung musste jeder Aufrufer selbst mitgeben. Von vier
+        Aufrufern tat das genau einer:
+
+            scripts/13_tagesbericht.py   script="live_trade"   richtig
+            scripts/07_journal_report.py  -                    gemischt
+            src/alpaca_bot/selfcheck.py   -                    gemischt
+
+        Im Live-Journal standen zu dem Zeitpunkt 304 echte
+        Entscheidungen und 18.118 aus Simulationslaeufen, teils mit
+        Zeitstempeln bis 2021 zurueck. **98,4 % der Zeilen waren
+        Simulation** - die beiden ungefilterten Berichte beschrieben
+        damit praktisch ausschliesslich den Backtest und nannten es die
+        Entscheidungsqualitaet des Bots.
+
+        Die gefaehrliche Richtung braucht deshalb jetzt eine bewusste
+        Angabe: `script=None` liefert weiterhin alles, aber wer es
+        schreibt, hat es gewollt.
         """
         # `script` trennt Live-Betrieb von Simulation. Ohne diese Trennung
         # mischt die Auswertung tausende Backtest-Entscheidungen mit den
@@ -333,19 +392,130 @@ class Journal:
         agg = agg[agg["n"] >= 5]
         return agg.sort_values(["grund", "mittel"], ascending=[True, False]).round(4)
 
-    def slippage_report(self) -> pd.DataFrame:
+    def slippage_werte(self, *, nur_bereinigt: bool = True) -> pd.Series:
+        """Die EINZELNEN Slippage-Werte je Order - nicht je Symbol.
+
+        `slippage_report()` verdichtet auf Symbole. Fuer den Median ist das
+        die falsche Ebene: `docs/BETRIEBSPLAN.md` §3.1 verlangt den
+        "Slippage-Median ueber 30+ saubere **Orders**", nicht ueber
+        Symbole. Der Unterschied ist nicht akademisch - gemessen am
+        22.08.2026 lagen 73 Symbole mit 1 bis 6 Fuellungen vor; ein Median
+        ueber Symbol-Mediane gewichtet ein Symbol mit einer Fuellung
+        genauso wie eines mit sechs (§G16).
+
+        Beide Funktionen teilen sich bewusst dieselbe Bereinigung
+        (`_slippage_basis`): Wuerden sie getrennt filtern, koennten
+        Bericht und Pruefung auf verschiedenen Grundmengen rechnen und
+        widersprechende Zahlen liefern.
+        """
+        o = self._slippage_basis(nur_bereinigt=nur_bereinigt, still=True)
+        return o["slippage_bps"] if not o.empty else pd.Series(dtype=float)
+
+    def _slippage_basis(self, *, nur_bereinigt: bool = True,
+                        still: bool = False) -> pd.DataFrame:
+        """Die bereinigte Ordermenge samt gerechneter Slippage.
+
+        Gemeinsame Grundlage von `slippage_report` und `slippage_werte` -
+        siehe dort, warum die Trennung gefaehrlich waere.
+        """
+        o = self.table("orders", "dry_run = 0 AND fill_price IS NOT NULL")
+        if o.empty:
+            return o
+
+        legacy = o["status"].astype(str).str.endswith(" geschlossen")
+        if nur_bereinigt:
+            # Positivliste statt Ausschlussliste - der Fund vom 23.08.2026
+            # (BEFUNDE §G19 Fund 3).
+            #
+            # Hier stand bis dahin `o["referenz_quelle"] == "fallback"`.
+            # Der Wert existiert in den Daten NICHT ein einziges Mal: Die
+            # Spalte kam erst am 04.08.2026 per `_migrate` dazu, alle
+            # aelteren Zeilen tragen NULL. Und `NULL != "fallback"` - der
+            # Filter, der Zeilen ohne echte Marktquote fernhalten sollte,
+            # hat null Zeilen entfernt.
+            #
+            # Betroffen waren 31 der 162 auswertbaren Orders (19 %), alle
+            # aus 28.07.-04.08.2026, darunter genau die Ausreisser, die
+            # §G bereits als Datenfehler fuehrt: KGS -1.648, SIMO -1.584,
+            # TGTX -1.258 bps. Wirkung auf die Kennzahl:
+            #
+            #     mit den NULL-Zeilen : n=162  Median +0,0  Mittel -71,7 bps
+            #     nur verifizierte Ref: n=131  Median +0,0  Mittel -27,4 bps
+            #
+            # Der MEDIAN ist unveraendert - der Schluss aus BETRIEBSPLAN
+            # §3.1 ("Ausfuehrungsbedingung erfuellt") bleibt also gueltig.
+            # Falsch war die Grundmenge, nicht das Urteil. Genau deshalb
+            # ist die Positivliste die richtige Form: Eine Ausschlussliste
+            # muss jeden schlechten Wert kennen, eine Positivliste nur die
+            # guten - und ein spaeter hinzukommender Wert (oder wieder
+            # eine neue Spalte voller NULL) faellt automatisch heraus,
+            # statt automatisch durchzurutschen.
+            VERIFIZIERTE_REFERENZ = {"quote", "quote_verworfen"}
+            ohne_referenz = ~o["referenz_quelle"].isin(VERIFIZIERTE_REFERENZ)
+            ausgeschlossen = legacy | ohne_referenz
+            if ausgeschlossen.any() and not still:
+                n_null = int((o["referenz_quelle"].isna() & ~legacy).sum())
+                print(f"  [slippage_report] {int(legacy.sum())} Legacy-Zeile(n) "
+                      f"(vor dem close_position()-Fix) und "
+                      f"{int((ohne_referenz & ~legacy).sum())} Zeile(n) ohne "
+                      f"verifizierte Referenzquelle ausgeschlossen von "
+                      f"{len(o)} gesamt (davon {n_null} aus der Zeit vor "
+                      f"der Spalte `referenz_quelle`, 04.08.2026).")
+            o = o[~ausgeschlossen]
+        if o.empty:
+            return o
+
+        o = o.copy()
+        o["slippage_bps"] = (
+            (o["fill_price"] - o["expected_price"]) / o["expected_price"] * 10_000
+        ).where(o["side"] == "buy", lambda s: -s)
+        return o
+
+    def slippage_report(self, *, nur_bereinigt: bool = True) -> pd.DataFrame:
         """Erwarteter gegen tatsaechlichen Ausfuehrungspreis.
 
         Die Luecke zwischen Backtest und Realitaet. Wenn sie systematisch
         groesser ist als die im Backtest angesetzten Basispunkte, sind alle
         Backtest-Ergebnisse zu optimistisch - und zwar genau um diesen Betrag.
+
+        Zwei Arten von Zeilen verzerren dieses Bild, wenn man sie mitzaehlt:
+
+        1. **Legacy-Datensaetze aus der Zeit vor dem `close_position()`-Fix**
+           (Commit 9c26b6a, 03.08.2026). Vorher gab `close_position()` reinen
+           Text zurueck ("AMKR geschlossen") statt eines echten Broker-Status
+           - genau dieser Text steht noch im `status`-Feld alter Zeilen und
+           macht sie strukturell erkennbar, ohne auf ein Datum raten zu
+           muessen. Konkret beobachtet: drei AMKR-Verkaeufe vom 28.07.2026
+           mit `expected_price=60.74` bei Fuellpreisen um 45-46 - eine
+           Verzerrung von ueber +2000 bps, die den gesamten Mittelwert
+           uebertoent.
+        2. **Zeilen ohne verifizierte Marktquote.** Gezaehlt wird nur, was
+           `live._reference_price` ausdruecklich als echten, zeitgleichen
+           Marktpreis ausgewiesen hat - `referenz_quelle` in
+           {`quote`, `quote_verworfen`}. Alles andere faellt heraus:
+
+             * `fallback` - dort ist `expected_price` der
+               Entscheidungskurs, keine Marktbeobachtung. Die "Slippage"
+               waere in Wahrheit Kursdrift seit der Entscheidung, genau
+               die Vermischung, die dieses Modul verhindern soll.
+             * `NULL` - Zeilen aus der Zeit VOR dem 04.08.2026, als es die
+               Spalte noch nicht gab. Was ihr `expected_price` bedeutet,
+               ist nicht mehr feststellbar. Eine Zeile unbekannter
+               Herkunft ist keine Messung (BEFUNDE §G19 Fund 3).
+
+           `quote_verworfen` zaehlt bewusst MIT: Dort wich die Bid/Ask-
+           Quote zu stark vom letzten echten Trade ab und wurde durch
+           diesen ersetzt (beobachtet bei SIMO/KGS am 04.08.2026, Quote
+           11-14 % neben Fuellpreis UND Entscheidungskurs). Der verwendete
+           Wert ist dann ein echter, zeitgleicher Marktpreis.
+
+        `nur_bereinigt=True` (Standard) schliesst Legacy-Zeilen und alles
+        ohne verifizierte Referenz aus. `False` zeigt alles - auch die
+        bekannten Ausreisser - fuer die Nachvollziehbarkeit.
         """
-        o = self.table("orders", "dry_run = 0 AND fill_price IS NOT NULL")
+        o = self._slippage_basis(nur_bereinigt=nur_bereinigt)
         if o.empty:
             return pd.DataFrame()
-        o["slippage_bps"] = (
-            (o["fill_price"] - o["expected_price"]) / o["expected_price"] * 10_000
-        ).where(o["side"] == "buy", lambda s: -s)
         return (
             o.groupby("symbol")["slippage_bps"]
             .agg(n="size", mittel="mean", median="median", max="max")
@@ -380,9 +550,17 @@ class Journal:
             ).fetchone()[0]
             if n_failed:
                 problems.append(f"{n_failed} Lauf/Laeufe mit Fehler beendet.")
+            # Nur LIVE-Entscheidungen. Simulationslaeufe schreiben
+            # zehntausende Zeilen in dieselbe Tabelle; sie brauchen keine
+            # `outcomes` und wuerden diese Warnung dauerhaft leuchten
+            # lassen (gemessen 22.08.2026: 17.100 davon 18.118 aus
+            # Simulationen). Eine Warnung, die immer leuchtet, wird
+            # weggeklickt - und dann faellt die echte nicht mehr auf.
             n_no_outcome = c.execute(
-                "SELECT COUNT(*) FROM decisions WHERE decision_id NOT IN"
-                " (SELECT decision_id FROM outcomes)"
+                "SELECT COUNT(*) FROM decisions d"
+                " JOIN runs r ON d.run_id = r.run_id"
+                " WHERE r.script = 'live_trade'"
+                "   AND d.decision_id NOT IN (SELECT decision_id FROM outcomes)"
             ).fetchone()[0]
             if n_no_outcome:
                 problems.append(
@@ -392,10 +570,36 @@ class Journal:
         return problems
 
     def summary(self) -> str:
+        """Der Protokollkopf - LIVE und Simulation getrennt ausgewiesen.
+
+        **Warum getrennt (23.08.2026, BEFUNDE §G19 Fund 8).** Hier stand
+        vorher eine einzige Spalte ueber alle Quellen:
+
+            Entscheidungen  :  18425  (183 ausgefuehrt)
+
+        Das las sich wie eine Ausfuehrungsquote von 1 %. In Wahrheit
+        stammten 18.118 der Zeilen aus vier Simulationslaeufen mit
+        rueckdatierten Zeitstempeln bis 2021 (§G13 Fund 1), die nie
+        ausgefuehrt werden sollten. §G13 hat `decision_quality` und
+        `integrity_check` auf `live_trade` gefiltert - der Kopf DIESES
+        Berichts blieb ungefiltert. Er stand damit direkt ueber einem
+        Befund, der korrekt 62 statt 17.100 meldete, ohne dass der
+        Unterschied erklaerbar war.
+
+        `Zeitraum` verschaerfte es: Er kommt aus `runs.started_at` (echte
+        Uhrzeit) und zeigte 2026-07-28 bis 2026-08-21, waehrend die
+        Entscheidungen bis 2021 zurueckreichen.
+        """
         runs = self.table("runs")
         dec = self.table("decisions")
         orders = self.table("orders")
         out = self.table("outcomes")
+
+        live_runs = set(runs.loc[runs["script"] == "live_trade", "run_id"]) \
+            if not runs.empty else set()
+        dec_live = dec[dec["run_id"].isin(live_runs)] if not dec.empty else dec
+        n_sim = len(dec) - len(dec_live)
+
         lines = [
             "=" * 62,
             "  PROTOKOLL-UEBERSICHT",
@@ -403,15 +607,28 @@ class Journal:
             f"  Laeufe          : {len(runs):>6}"
             + (f"  ({(runs['status'] == 'failed').sum()} fehlgeschlagen)" if len(runs) else ""),
             f"  Schritte        : {len(self.table('steps')):>6}",
-            f"  Entscheidungen  : {len(dec):>6}"
-            + (f"  ({int(dec['executed'].sum())} ausgefuehrt)" if len(dec) else ""),
+            f"  Entscheidungen  : {len(dec_live):>6}  LIVE"
+            + (f"  ({int(dec_live['executed'].sum())} ausgefuehrt)"
+               if len(dec_live) else ""),
+            f"  + aus Simulation: {n_sim:>6}  (zaehlen in KEINER Live-Auswertung"
+            f" mit, §G13)",
             f"  Orders          : {len(orders):>6}"
             + (f"  ({int((orders['dry_run'] == 0).sum())} echt)" if len(orders) else ""),
             f"  Bewertete Ergeb.: {len(out):>6}",
         ]
         if not runs.empty:
-            lines.append(f"  Zeitraum        : {runs['started_at'].min()[:10]} "
+            lines.append(f"  Zeitraum (Laeufe): {runs['started_at'].min()[:10]} "
                          f"bis {runs['started_at'].max()[:10]}")
+        # Der Entscheidungszeitraum ist NICHT der Laufzeitraum. Simulationen
+        # schreiben rueckdatierte Zeitstempel; ohne diese Zeile sieht das
+        # Protokoll drei Wochen alt aus, obwohl es Zeilen von 2021 traegt.
+        if not dec.empty and n_sim:
+            ts = pd.to_datetime(dec["ts"], format="mixed", utc=True,
+                                errors="coerce").dropna()
+            if not ts.empty:
+                lines.append(f"  Zeitraum (Entsch.): {ts.min().date()} "
+                             f"bis {ts.max().date()}  <- reicht durch die "
+                             f"Simulationen weiter zurueck")
         problems = self.integrity_check()
         lines.append("")
         if problems:
@@ -432,7 +649,8 @@ class RunLogger:
     _raw: Any = field(default=None, init=False)
 
     def __post_init__(self):
-        self._raw = (RAW_DIR / f"{self.run_id}.jsonl").open("a", encoding="utf-8")
+        self._raw = (self.journal.raw_dir
+                     / f"{self.run_id}.jsonl").open("a", encoding="utf-8")
 
     # --- Schritte ---------------------------------------------------------
     def log(self, kind: str, message: str = "", level: str = "info", **payload) -> None:
@@ -528,6 +746,7 @@ class RunLogger:
         expected_price: float | None = None,
         decision_price: float | None = None,
         fill_price: float | None = None,
+        referenz_quelle: str | None = None,
         raw: Any = None,
     ) -> None:
         """Protokolliert eine Order und verknuepft sie mit ihrer Entscheidung.
@@ -542,6 +761,13 @@ class RunLogger:
 
         Beides zu vermischen war ein Fehler: Die Drift ueber Nacht wurde als
         Slippage ausgewiesen und ergab Werte wie -2452 Basispunkte.
+
+        `referenz_quelle` ('quote'|'quote_verworfen'|'fallback', siehe
+        live._reference_price) haelt fest, ob `expected_price` aus einer
+        echten, plausiblen Bid/Ask-Quote stammt, aus dem letzten Trade (weil
+        die Quote selbst unglaubwuerdig war), oder nur der Entscheidungskurs
+        als Notloesung war. `slippage_report()` nutzt das, um Kursdrift
+        nicht faelschlich als Slippage zu zaehlen.
         """
         oid = order_id or f"local_{uuid.uuid4().hex[:10]}"
 
@@ -563,10 +789,21 @@ class RunLogger:
                 "INSERT OR REPLACE INTO orders (order_id, decision_id, run_id, ts,"
                 " symbol, side, qty, notional, status, dry_run, fill_price,"
                 " expected_price, decision_price, slippage_bps, decision_drift_bps,"
-                " raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " referenz_quelle, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                # `raw` bleibt SQL-NULL, wenn nichts uebergeben wurde -
+                # NICHT der String 'null'. Bis zum 23.08.2026 stand
+                # `_dumps(raw)` hier unbedingt, und weil kein Aufrufer je
+                # ein `raw` uebergab, trugen 183 von 183 echten Zeilen
+                # den Text 'null' (BEFUNDE §G19 Fund 5). Eine Spalte, die
+                # zu 100 % gefuellt aussieht und nichts enthaelt, ist
+                # genau die Falle aus §G13 Fund 2: "Eine Null sieht wie
+                # eine Messung aus. Ein NULL waere aufgefallen."
+                # Gefuellt wird sie beim Broker-Abgleich
+                # (`live.reconcile_fills`), wo die Gegenseite vorliegt.
                 (oid, decision_id, self.run_id, ts, symbol, side, qty, notional,
                  status, int(dry_run), fill_price, expected_price, decision_price,
-                 slip, drift, _dumps(raw)),
+                 slip, drift, referenz_quelle,
+                 _dumps(raw) if raw is not None else None),
             )
             if decision_id:
                 c.execute(
@@ -583,17 +820,43 @@ class RunLogger:
         Damit laesst sich spaeter rekonstruieren, was das System zum
         Zeitpunkt der Entscheidung tatsaechlich gesehen hat.
         """
-        path = RAW_DIR / f"{self.run_id}__{name}.csv"
+        path = self.journal.raw_dir / f"{self.run_id}__{name}.csv"
         df.to_csv(path)
         self.log("snapshot", name, datei=str(path), zeilen=len(df))
         return path
 
+    _raw_defekt: bool = field(default=False, init=False)
+    """Ist die JSONL-Sicherung fuer diesen Lauf ausgefallen?"""
+
     def _write_raw(self, obj: dict) -> None:
+        """Schreibt ins JSONL-Rohprotokoll - die zweite Aufzeichnung.
+
+        **Warum das nicht still scheitern darf (§G18).** Das Modul
+        beschreibt die Aufgabenteilung so: "SQLite ist die
+        Auswertungsschicht, JSONL die Sicherung - waere die Datenbank je
+        beschaedigt, liesse sie sich daraus vollstaendig rekonstruieren."
+
+        Ein `except: pass` machte daraus eine Sicherung, die man fuer
+        vorhanden haelt, waehrend sie nicht mehr geschrieben wird - genau
+        die Fehlerklasse aus §G15 (gebaut, laeuft nicht, meldet sich
+        nie). Ein voller Datentraeger oder eine entzogene
+        Schreibberechtigung faellt sonst erst auf, wenn man die Sicherung
+        BRAUCHT.
+
+        Der Ausfall darf den Handel weiterhin nicht stoppen - deshalb
+        wird gemeldet, nicht geworfen. Und nur EINMAL je Lauf: Eine
+        Meldung bei jeder Zeile waere Laerm, und Laerm wird ueberlesen.
+        """
         try:
             self._raw.write(_dumps(obj) + "\n")
             self._raw.flush()
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as e:
+            if not self._raw_defekt:
+                self._raw_defekt = True
+                print(f"  [Journal] ROHPROTOKOLL FAELLT AUS: "
+                      f"{type(e).__name__}: {e}. Die SQLite-Aufzeichnung "
+                      f"laeuft weiter, aber die JSONL-Sicherung dieses "
+                      f"Laufs ist unvollstaendig.")
 
 
 def _bucket(value) -> str:

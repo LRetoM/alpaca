@@ -116,12 +116,130 @@ class Lifecycle:
             return pd.read_sql_query("SELECT * FROM trades", c)
 
     def pending_analysis(self) -> list[str]:
-        """Trades, deren Nachlauf noch nicht ausgewertet wurde."""
+        """Trades, deren Nachlauf noch nicht vollstaendig ausgewertet ist.
+
+        Die Bedingung MUSS alle Nachlauf-Fenster abdecken, nicht nur das
+        kuerzeste. Frueher stand hier allein `after_5d IS NULL`: Sobald
+        der 5-Tage-Wert gefuellt war, verliess der Trade die Warteschlange -
+        und `after_10d`, das fuenf Tage laenger braucht, wurde NIE
+        nachgetragen. Bestaetigt am 15.08.2026: 36 von 36 Trades hatten
+        `after_10d = None`, obwohl fuer die aelteren laengst Kurse
+        vorlagen. Genau dieser Wert beantwortet aber die Frage, ob der
+        Zeitausstieg nach 5 Tagen zu frueh kommt.
+        """
         with self._conn() as c:
             rows = c.execute(
-                "SELECT trade_id FROM trades WHERE after_5d IS NULL"
+                "SELECT trade_id FROM trades"
+                " WHERE after_1d IS NULL OR after_5d IS NULL OR after_10d IS NULL"
             ).fetchall()
         return [r["trade_id"] for r in rows]
+
+
+def handelstage(entry_date, exit_ts) -> int | None:
+    """Haltedauer in HANDELSTAGEN - dieselbe Rechnung wie build_portfolio.
+
+    Kalendertage waeren hier falsch: Eine Position von Freitag bis Montag
+    hat drei Kalendertage, aber nur einen Handelstag gelebt - und der
+    Zeitausstieg (`max_hold_days`) rechnet in Handelstagen. Zwei
+    verschiedene Zaehlweisen im selben System machen jede Auswertung nach
+    Haltedauer unvergleichbar.
+
+    **Seit dem 26.08.2026 ueber den echten Boersenkalender** (§G38). Bis
+    dahin stand hier `pd.bdate_range`, das Montag bis Freitag zaehlt und
+    Feiertage NICHT kennt. Simulation und Schattenbetrieb zaehlen dagegen
+    Bars, und am Feiertag gibt es keine - in jeder Feiertagswoche verkaufte
+    der Live-Bot damit einen Handelstag frueher als jede Messung, gegen
+    die er verglichen wird.
+    """
+    from .handelskalender import zwischen
+    if not entry_date:
+        return None
+    try:
+        start = pd.Timestamp(entry_date)
+        if start.tz is None:
+            start = start.tz_localize("UTC")
+        ende = pd.Timestamp(exit_ts)
+        if ende.tz is None:
+            ende = ende.tz_localize("UTC")
+        return zwischen(start, ende)
+    except Exception:  # noqa: BLE001 - Protokoll darf den Handel nie stoppen
+        return None
+
+
+def eintrag_anlegen(
+    *, symbol: str, meta: dict, exit_price: float | None,
+    exit_reason: str, return_pct: float | None, exit_ts=None,
+    bars_held: int | None = None, store: Lifecycle | None = None,
+) -> None:
+    """Legt den Lebenslauf eines geschlossenen Trades an - EIN Ort fuer ALLE Ausstiege.
+
+    **Warum das eine gemeinsame Funktion ist (23.08.2026, BEFUNDE §G21).**
+    Bis dahin stand dieser Code ausschliesslich in
+    `daemon._record_lifecycle`, also im normalen `sell`-Pfad. Der am
+    15.08.2026 ergaenzte Intraday-Stop (`live.pruefe_stops_intraday`)
+    schreibt seinen Ausstieg direkt ueber `state.record_exit` und ging an
+    dieser Stelle vorbei.
+
+    Gemessen am 23.08.2026, Abdeckung des Lebenslaufs je Ausstiegsgrund:
+
+        zeitausstieg              39/39   100 %
+        these_traegt_nicht_mehr   11/11   100 %
+        gewinnziel_erreicht        4/4    100 %
+        stop_ausgeloest            2/2    100 %
+        stop_intraday              0/2      0 %   <- fehlte vollstaendig
+
+    **Die Richtung des Fehlers wiegt schwerer als seine Groesse.** Der
+    Intraday-Stop feuert per Konstruktion bei scharfen Einbruechen - er
+    trifft also fast nur Verlusttrades. Die beiden fehlenden lagen bei
+    -8,9 % und -7,8 %, waehrend die 56 erfassten im Mittel +3,34 %
+    zeigten. Der Lernbericht war dadurch systematisch zu gut (+3,34 %
+    statt +2,94 %) und nannte `stop_ausgeloest` (-5,5 %) den
+    schlechtesten Ausstiegsgrund, obwohl `stop_intraday` (-8,3 %)
+    schlechter war und schlicht unsichtbar blieb.
+
+    Dass es heute nur 0,4 Prozentpunkte sind, liegt allein an n=2. Der
+    Fehler waechst mit jedem Intraday-Stop und immer in dieselbe
+    Richtung - genau die Sorte, die man nicht aussitzt.
+
+    MAE, MFE und der Nachlauf bleiben hier leer: Der Kursverlauf NACH dem
+    Ausstieg existiert noch nicht. Das ergaenzt
+    `daemon._analyse_closed_trades()` in den Folgetagen.
+
+    `bars_held` wird vom Aufrufer aus den DATEN gerechnet und nicht aus
+    `meta` uebernommen: `position_meta.bars_held` wird beim Anlegen auf 0
+    gesetzt und NIE erhoeht - die Engine berechnet den Wert zur Laufzeit
+    frisch aus `entry_date` (`live.build_portfolio`), schreibt ihn aber
+    nicht zurueck. Wer `meta` vertraut, schreibt fuer JEDEN Trade eine 0
+    ins Protokoll (bestaetigt: 36 von 36 Trades hatten `bars_held = 0`).
+    """
+    import uuid
+
+    # `state.load_positions()` liefert die Rohzeile, `reasons` ist dort
+    # bereits eine TEXT-Spalte. Ein Aufrufer, der stattdessen das Dict
+    # durchreicht, bekaeme sonst `sqlite3.ProgrammingError` - und weil
+    # beide Aufrufer den Fehler fangen muessen (ein Ausfall hier darf den
+    # Verkauf nicht rueckgaengig machen), waere das Ergebnis genau die
+    # stille Luecke, die diese Funktion schliesst.
+    gruende = meta.get("reasons")
+    if isinstance(gruende, (dict, list)):
+        gruende = json.dumps(gruende, ensure_ascii=False, default=str)
+
+    ts = pd.Timestamp(exit_ts or pd.Timestamp.now(tz="UTC"))
+    (store or Lifecycle()).record({
+        "trade_id": uuid.uuid4().hex,
+        "symbol": symbol,
+        "entry_date": str(meta.get("entry_date") or ""),
+        "entry_price": meta.get("entry_price"),
+        "entry_score": meta.get("entry_score"),
+        "entry_reasons": gruende,
+        "planned_stop": meta.get("stop_price"),
+        "planned_target": meta.get("target_price"),
+        "exit_date": ts.isoformat(),
+        "exit_price": exit_price,
+        "exit_reason": exit_reason,
+        "return_pct": return_pct,
+        "bars_held": bars_held,
+    })
 
 
 def analyse_path(
@@ -272,13 +390,29 @@ def analyse(trades: pd.DataFrame, mindestanzahl: int = 30) -> list[Insight]:
     # --- 5. Sagt der Einstiegs-Score das Ergebnis vorher? ---
     if done["entry_score"].notna().sum() >= 10:
         korr = done["entry_score"].corr(done["return_pct"], method="spearman")
+        # Das VORZEICHEN entscheidet, nicht nur die Staerke. Frueher stand
+        # hier nur `abs(korr) < 0.1`, wodurch eine deutlich NEGATIVE
+        # Korrelation als "sortiert in die richtige Richtung" gemeldet
+        # wurde - also genau der schlimmste Fall (die Rangliste sortiert
+        # verkehrt herum) als Erfolg. Beobachtet am 15.08.2026: korr =
+        # -0.133 wurde gelobt.
+        if abs(korr) < 0.1:
+            vorschlag = ("Ein Score, der nicht mit dem Ergebnis korreliert, "
+                         "sortiert die Kandidaten nicht - dann ist die "
+                         "Rangliste wertlos.")
+        elif korr < 0:
+            vorschlag = ("ACHTUNG: Die Korrelation ist NEGATIV - hohe Scores "
+                         "fuehrten zu SCHLECHTEREN Ergebnissen. Entweder ist "
+                         "die Rangliste verkehrt herum, oder die Stichprobe "
+                         "ist noch zu klein. Keine Regelaenderung ohne "
+                         "Bestaetigung im Schattenbetrieb.")
+        else:
+            vorschlag = "Der Score sortiert in die richtige Richtung."
         out.append(Insight(
             "Aussagekraft des Scores",
             f"Rangkorrelation zwischen Einstiegs-Score und Ergebnis: {korr:+.3f}.",
             f"{int(done['entry_score'].notna().sum())} Trades mit Score",
-            "Ein Score, der nicht mit dem Ergebnis korreliert, sortiert die "
-            "Kandidaten nicht - dann ist die Rangliste wertlos."
-            if abs(korr) < 0.1 else "Der Score sortiert in die richtige Richtung.",
+            vorschlag,
             belastbar=genug,
         ))
 

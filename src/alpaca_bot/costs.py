@@ -352,18 +352,52 @@ def actual_activities(
     return pd.DataFrame(data)
 
 
-def reconcile(expected_bps: float, journal_df: pd.DataFrame) -> str:
+def reconcile(expected_bps: float, journal_df: pd.DataFrame,
+              *, werte: pd.Series | None = None) -> str:
     """Vergleicht angenommene mit tatsaechlich aufgetretenen Kosten.
 
     Speist sich aus dem Handelsprotokoll (`journal.slippage_report`).
     Weicht die Realitaet dauerhaft nach oben ab, sind ALLE Backtests um
     genau diese Differenz zu optimistisch - und muessen neu bewertet
     werden, nicht die Strategie.
+
+    **Gemessen wird der MEDIAN, nicht der Mittelwert (§G16).** Bis zum
+    22.08.2026 stand hier `journal_df["mittel"].mean()` - der
+    ungewichtete Mittelwert der Symbol-Mittelwerte. Ausgegeben wurde
+    damit im Tagesbericht:
+
+        angenommen :    3.0 bps
+        tatsaechlich:  -80.6 bps
+        -> Ausfuehrung ist 83.6 bps besser als angenommen.
+
+    Die Aussage war frei erfunden. Drei kaputte IEX-Quotes (KGS, SIMO,
+    GNRC - §G, 04.08.2026) trugen darin genauso viel wie 70 saubere
+    Symbole; der Median ueber dieselben 162 Orders liegt bei +0,0 bps.
+
+    Das wiegt schwer, weil `docs/BETRIEBSPLAN.md` §5.2 genau diesen
+    Abschnitt als das benennt, was alle 1-2 Wochen zu lesen ist - und
+    dort ausdruecklich den **Median** erwartet.
+
+    Args:
+        werte: die EINZELNEN Slippage-Werte je Order
+            (`journal.slippage_werte()`). Das ist die Ebene, die §3.1
+            meint ("ueber 30+ saubere Orders"). Fehlen sie, wird auf den
+            Median der Symbol-Mediane zurueckgefallen - gekennzeichnet,
+            damit die groebere Ebene sichtbar bleibt.
     """
-    if journal_df.empty:
+    if journal_df is None or journal_df.empty:
         return ("Noch keine echten Ausfuehrungen protokolliert. "
                 "Der Abgleich wird erst nach den ersten Live-Trades aussagekraeftig.")
-    actual = float(journal_df["mittel"].mean())
+
+    if werte is not None and len(werte.dropna()):
+        w = werte.dropna()
+        actual, n, ebene = float(w.median()), len(w), "Orders"
+    else:
+        spalte = "median" if "median" in journal_df else "mittel"
+        actual = float(journal_df[spalte].median())
+        n = int(journal_df["n"].sum()) if "n" in journal_df else len(journal_df)
+        ebene = "Symbol-Mediane"
+
     diff = actual - expected_bps
     verdict = (
         "Backtest-Annahme ist realistisch."
@@ -375,8 +409,20 @@ def reconcile(expected_bps: float, journal_df: pd.DataFrame) -> str:
             else f"Ausfuehrung ist {abs(diff):.1f} bps besser als angenommen."
         )
     )
+
+    # Ausreisser gehoeren daneben, nicht weggemittelt: Der Median traegt
+    # sie bewusst nicht mit, aber sie sind Information (§G16).
+    zusatz = ""
+    if werte is not None and len(werte.dropna()):
+        gross = werte.dropna()
+        gross = gross[gross.abs() > 100]
+        if len(gross):
+            zusatz = (f"\n   {len(gross)} von {n} Order(s) ueber |100| bps "
+                      f"(groesste {gross.abs().max():.0f}) - der Median "
+                      f"traegt sie nicht mit; pruefen ob Datenfehler (§G).")
+
     return (
         f"angenommen : {expected_bps:>6.1f} bps\n"
-        f"tatsaechlich: {actual:>6.1f} bps\n"
-        f"Differenz   : {diff:>+6.1f} bps\n-> {verdict}"
+        f"tatsaechlich: {actual:>6.1f} bps   (Median ueber {n} {ebene})\n"
+        f"Differenz   : {diff:>+6.1f} bps\n-> {verdict}{zusatz}"
     )

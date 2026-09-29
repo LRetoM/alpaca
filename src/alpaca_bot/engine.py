@@ -83,6 +83,28 @@ class MarketSnapshot:
     ebenfalls nur bis as_of - `signals.build_reversal_frame` filtert intern
     per Symbol und wendet die Verfuegbarkeitsverzoegerung an (pit.asof_join).
     Fehlt dieses Feld, entfaellt der Nachrichtenfaktor ersatzlos."""
+    kontext: dict[str, dict] = field(default_factory=dict)
+    """Zusatzangaben je Symbol fuer das PROTOKOLL - nie fuer die Entscheidung.
+
+    Erlaubte Schluessel: `sektor`, `liq_dezil`. Sie beantworten spaeter
+    Fragen, die am Depot sonst unbeantwortbar bleiben: "Funktioniert die
+    Strategie bei Nebenwerten besser?" und "Klumpt das Depot in einem
+    Sektor?" (BEFUNDE, Luecken im Betriebsplan).
+
+    **Bewusst NICHT in die Score-Berechnung eingebunden.** Wuerde der
+    Sektor die Entscheidung beeinflussen, waere das eine ungetestete
+    Strategieaenderung. Hier geht es ausschliesslich darum, spaeter
+    auswerten zu koennen, was ohnehin passiert ist."""
+
+    regime: dict = field(default_factory=dict)
+    """Marktlage zum Entscheidungszeitpunkt - ebenfalls nur fuers Protokoll.
+
+    Der Schattenbetrieb erfasst das seit jeher (`shadow._regime`), der
+    Live-Pfad bisher gar nicht. Damit war die wichtigste Frage des
+    Projekts am Depot nicht beantwortbar: In WELCHER Marktlage traegt die
+    Strategie? (docs/schattenbetrieb.md §13 nennt genau das "wo der echte
+    Gewinn liegt".)"""
+
     signals: dict[str, pd.DataFrame] = field(default_factory=dict)
     """Optional vorberechnete Signale, ebenfalls bis as_of geschnitten.
 
@@ -230,6 +252,35 @@ class EngineConfig:
     min_score: float = 0.55
     """Ab wann gilt ein Wert als Kandidat."""
 
+    groessen_modus: str = "inverse_vola"
+    """Wie das freie Kapital auf die Kandidaten verteilt wird.
+
+    **Die einzige Strukturachse, die bis zum 26.08.2026 nie gemessen
+    wurde.** Alle 13 Flottenbots und alle 14 Lernlauf-Achsen variieren
+    Ein- und Ausstiegsregeln; wie VIEL ein Kandidat bekommt, war fest
+    verdrahtet.
+
+        inverse_vola   Gewicht = min(1.5, 0.03/atr_pct). Risikoparitaet:
+                       volatile Werte bekommen weniger. **Vorgabe, und
+                       bitgleich zum Verhalten vor dem 26.08.2026.**
+        gleich         Gewicht = 1.0 fuer jeden. Die Nullhypothese - hat
+                       die Volatilitaetsgewichtung ueberhaupt je etwas
+                       gebracht? Niemand hat es geprueft.
+        score          Gewicht = Score. Der Score entscheidet heute nur,
+                       OB gekauft wird und in welcher Reihenfolge, nicht
+                       wieviel. Traegt er Information (IC > 0, sonst gaebe
+                       es die Strategie nicht), liegt hier Kapital an der
+                       falschen Stelle.
+        score_vola     Beides multipliziert.
+
+    **Warum das die interessanteste verbliebene Achse ist:** Sie aendert
+    die Kosten je Einheit Vorsprung, OHNE den Umschlag zu aendern. Jede
+    andere Achse justiert Randbedingungen eines Vorsprungs, der zu klein
+    ist (BEFUNDE §A, §B6).
+
+    Zu messen im Historienlauf (`32_lernlauf.py`, 3.767 Handelstage), nicht
+    im Schatten (15 Tage) - und erst danach als Voranmeldung."""
+
     exit_score: float = 0.35
     """Faellt der Score darunter, wird verkauft - die These traegt nicht mehr."""
 
@@ -246,6 +297,66 @@ class EngineConfig:
 
     max_hold_days: int = 60
     """Zeitausstieg. Eine These, die 60 Tage nicht aufgeht, war falsch."""
+
+    zeitausstieg_dynamisch: bool = False
+    """Darf der Zeitausstieg aufgeschoben werden, solange die Position traegt?
+
+    Standard `False` = unveraendertes Verhalten: Nach `max_hold_days` wird
+    verkauft, egal wie der Wert gerade laeuft.
+
+    `True` = die Frist wird verlaengert, SOLANGE zwei Bedingungen zugleich
+    gelten (siehe `_traegt_noch`): Die Position steht im Gewinn UND ihr
+    Kurs liegt nahe an ihrem eigenen Hoechststand seit Einstieg. Faellt
+    sie vom Hoechststand zurueck oder ins Minus, greift der Zeitausstieg
+    sofort - auch rueckwirkend, wenn die Frist laengst ueberschritten ist.
+
+    **Warum ueberhaupt:** Gemessen am 15.08.2026 sind 15 von 24
+    Ausstiegen im Schattenbetrieb Zeitausstiege (62 %) - die Frist ist der
+    mit Abstand wirksamste Ausstiegsgrund. Zugleich zeigte sich, dass
+    `target_atr` praktisch WIRKUNGSLOS ist (Bot B03: identische Renditen,
+    nur anderes Etikett, weil `exit_score` gleichzeitig ausloest). Wer
+    Gewinne laufen lassen will, muss deshalb genau hier ansetzen und
+    nicht am Gewinnziel.
+
+    **Warum nicht einfach `max_hold_days` hochsetzen:** Das wuerde auch
+    jede stagnierende Position laenger halten und damit Kapital binden,
+    das anderswo arbeiten koennte. B04_halten_lang misst genau das
+    (10 statt 5 Tage) und liegt bei t = 0.94 - kein nachweisbarer Vorteil.
+    Die dynamische Variante haelt NUR die Werte laenger, die tatsaechlich
+    noch laufen.
+
+    **Ungetestet.** Gehoert in die Flotte, nicht in den Live-Bot."""
+
+    trend_rueckfall_atr: float = 1.0
+    """Wie weit darf der Kurs vom Hoechststand zurueckfallen, ohne dass der
+    Trend als gebrochen gilt - gemessen in ATR, nicht in Prozent.
+
+    **Warum ATR und kein fester Prozentsatz:** Umkehr-Kandidaten sind per
+    Definition Werte, die gerade stark gefallen sind - also volatile.
+    Gemessen an den tatsaechlich gehaltenen Positionen (15.08.2026, 200
+    Positionstage) betraegt ihr ATR im Median **5,16 %**, im oberen Viertel
+    ueber 8 %. Ein fester Schwellwert kann das nicht abbilden:
+
+        feste 2 %      -> loeste an 27,5 % aller Positionstage aus
+        1.0 x ATR      -> loest an  6,0 % aus  (~5,2 % beim Median)
+        1.5 x ATR      -> loest an  1,0 % aus
+
+    Bei 2 % wuerde also mehr als jeder vierte Tag als "Trend gebrochen"
+    gelten, obwohl eine Bewegung dieser Groesse fuer diese Werte voellig
+    normales Rauschen ist. Die Verlaengerung waere damit praktisch nie
+    wirksam geworden - der Parameter haette anders geheissen als er wirkt.
+
+    1.0 als Standard: Ein Rueckfall um eine volle Tagesschwankung ist mehr
+    als Rauschen, aber noch keine Trendwende. Derselbe Massstab, den
+    `stop_atr` und `target_atr` bereits verwenden - ein fester Prozentwert
+    waere hier der einzige Fremdkoerper im System gewesen."""
+
+    max_hold_days_hart: int = 20
+    """Absolute Obergrenze, auch wenn die Position noch traegt. Ohne sie
+    koennte eine Position unbegrenzt laufen - und der Umkehr-Effekt ist
+    auf 3-5 Tagen gemessen, nicht auf Monaten. Was so lange laeuft, ist
+    kein Umkehr-Trade mehr, sondern ein Momentum-Trade unter falschem
+    Namen (genau der Fehler, der den ersten Anlauf ruiniert hat)."""
 
     min_dollar_volume: float = 2_000_000
     """Liquiditaetsuntergrenze. Was nicht handelbar ist, ist kein Signal."""
@@ -383,17 +494,29 @@ class EngineConfig:
             "max_position_pct": self.max_position_pct,
             "min_position_pct": self.min_position_pct,
             "min_score": self.min_score,
+            "groessen_modus": self.groessen_modus,
             "exit_score": self.exit_score,
             "stop_atr": self.stop_atr,
             "target_atr": self.target_atr,
             "trail_after_atr": self.trail_after_atr,
             "max_hold_days": self.max_hold_days,
+            "zeitausstieg_dynamisch": self.zeitausstieg_dynamisch,
+            "trend_rueckfall_atr": self.trend_rueckfall_atr,
+            "max_hold_days_hart": self.max_hold_days_hart,
             "min_dollar_volume": self.min_dollar_volume,
             "min_price": self.min_price,
             "reenter_cooldown_days": self.reenter_cooldown_days,
             "sizing": self.sizing,
             "score_quelle": self.score_quelle,
             "renew_rank_pct": self.renew_rank_pct,
+            # Gewichte der Ranking-Strategie: sonst prueft der Regelabgleich nie, ob ein
+            # Bot mit anderen Gewichten laeuft, als er angemeldet wurde.
+            "ranking_weights": {
+                **{k: float(getattr(self.ranking_weights, k)) for k in self.ranking_weights.FAKTOREN},
+                "market_regime_filter": bool(self.ranking_weights.market_regime_filter),
+                "min_price": float(self.ranking_weights.min_price),
+                "max_volatility": float(self.ranking_weights.max_volatility),
+            },
             "stop_atr_modellphase": self.stop_atr_modellphase,
             "ml_modell": self.ml_modell,
             "max_new_per_day": self.max_new_per_day,
@@ -446,7 +569,7 @@ class EngineConfig:
 
     @classmethod
     def for_reversal(cls, **overrides) -> EngineConfig:
-        """Voreinstellungen fuer die Kurzfrist-Umkehr.
+        """Voreinstellungen fuer die Kurzfrist-Umkehr - der GELTENDE Stand.
 
         Die Haltedauer MUSS zum Horizont passen, auf dem der Effekt
         gemessen wurde (3-5 Tage). Genau dieser Fehler hat den ersten
@@ -456,6 +579,71 @@ class EngineConfig:
         Enge Ziele und Stops, kurze Haltedauer, hoher Umschlag - dafuer
         muss der Vorsprung je Trade die Kosten deutlich uebersteigen.
         Ob er das tut, entscheidet die Simulation, nicht die Hoffnung.
+
+        ------------------------------------------------------------------
+        MESSSTAND: was ist an diesen Werten geprueft? (Stand 23.08.2026)
+        ------------------------------------------------------------------
+        Diese Tabelle beantwortet die Frage, die sich in ein paar
+        Generationen zwangslaeufig wieder stellt: *"Ist das der beste Wert
+        oder nur der erste, den jemand hingeschrieben hat?"* Sie nennt je
+        Achse den Flottenbot, der die Alternative geprueft hat, und das
+        Ergebnis. Kein Eintrag = nie gegengemessen.
+
+          Wert                       geprueft durch     Ergebnis
+          -------------------------  -----------------  --------------------
+          min_score=0.35             B05 (-> 0.50)      wirkungslos: band nie,
+                                                        alle Kaeufe >= 0.678
+                                     B12 (-> 0.80)      LAEUFT seit 21.08.,
+                                                        filtert 21,6 % (kalibriert
+                                                        am Median 0,97 der
+                                                        echten Kaeufe)
+          stop_atr=2.0               B01 (-> 1.5)       wirkungslos, stillgelegt
+                                     B02 (-> 3.0)       wirkungslos, stillgelegt
+                                                        (in 14 Tagen kein
+                                                        einziger Stop ausgeloest)
+          target_atr=2.0             B03 (-> 3.0)       wirkungslos, stillgelegt -
+                                                        `exit_score` feuert am
+                                                        selben Tag zum selben Kurs
+          max_hold_days=5            B04 (-> 10)        laeuft, unter der Schwelle
+                                     Historienlauf      marktbereinigt NEGATIV auf
+                                                        allen Horizonten (§G11)
+          zeitausstieg_dynamisch=F   B11                LAEUFT, Termin 10.10.2026
+                                                        (BETRIEBSPLAN §3.3)
+          max_positions=15           B07 (-> 25)        laeuft, Tendenz NEGATIV
+          deploy_to_target=F*        B08                laeuft, unter der Schwelle
+          allow_topup=F*             B09                misst NICHTS - bitgleich
+                                                        mit B08 (§G16 Fund 1)
+          Regimefilter an            B06                im Bullenmarkt wirkungslos,
+                                                        wartet auf Regimewechsel
+          reenter_cooldown_days=3    --                 NIE gegengemessen; Kosten
+                                                        beziffert in §F
+          exit_score=0.10            --                 NIE gegengemessen, obwohl
+                                                        §E ihn als den Wert
+                                                        ausweist, der `target_atr`
+                                                        aushebelt
+          trail_after_atr=99.0       --                 NIE gegengemessen
+          min_dollar_volume=1e6      --                 Liquiditaetsgrenze, keine
+                                                        Ertragsachse
+          min_price=3.0              --                 dito
+
+        (*) Der LIVE-Bot laeuft seit dem 30.07.2026 mit
+        `deploy_to_target=True` und `allow_topup=True` - er setzt sie ueber
+        `scripts/12_daemon.py`. Die Vorgabe hier ist bewusst `False`
+        geblieben, weil `B00_basis` sie traegt. Genau diese Luecke war
+        BEFUNDE §G6: "B00_basis entspricht dem Live-Bot" stimmte danach
+        nie wieder. Wer die Live-Konfiguration braucht, nimmt
+        `B09_nachkauf`, nicht diese Vorgaben.
+
+        **Wie diese Tabelle aktuell bleibt.** Sie wird bei jeder
+        Stilllegung und jeder Anmeldung mitgezogen. Die laufenden t-Werte
+        stehen bewusst NICHT hier - sie aendern sich taeglich, und eine
+        abgeschriebene Zahl ist binnen einer Woche falsch (BEFUNDE §G19
+        Fund 2). Abrufen mit `python scripts/27_status.py`.
+
+        **Was "kein Eintrag" bedeutet.** Nicht "gut", sondern
+        "ungemessen". Drei Achsen tragen die Strategie mit und wurden nie
+        gegengeprueft - `exit_score` ist die auffaelligste, weil §E ihn
+        als den Wert ausweist, der `target_atr` wirkungslos macht.
         """
         defaults = dict(
             strategy="reversal",
@@ -470,6 +658,24 @@ class EngineConfig:
         )
         defaults.update(overrides)
         return cls(**defaults)
+
+
+def kandidatengewicht(atr_pct: float, score: float, modus: str) -> float:
+    """Relatives Gewicht eines Kandidaten nach `EngineConfig.groessen_modus`.
+
+    Rein relativ: `verteile_kapital` normiert anschliessend. Ein Gewicht
+    von 0 ist deshalb verboten - es wuerde die Position stumm auf null
+    setzen, statt sie klein zu machen. Der Score kann bei `min_score=0`
+    beliebig nahe an 0 liegen, darum die Untergrenze.
+    """
+    vola = _vola_gewicht(atr_pct)
+    if modus == "gleich":
+        return 1.0
+    if modus == "score":
+        return max(float(score), 0.05)
+    if modus == "score_vola":
+        return max(float(score), 0.05) * vola
+    return vola  # "inverse_vola" - die Vorgabe, unveraendert
 
 
 def _vola_gewicht(atr_pct: float) -> float:
@@ -776,7 +982,8 @@ class Engine:
             if luft < mindest:
                 continue
 
-            gewichte[sym] = _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+            gewichte[sym] = kandidatengewicht(
+                float(row.get("atr_pct", 0) or 0), score, cfg.groessen_modus)
             restluft[sym] = luft
             info[sym] = (score, row, price, pos)
 
@@ -798,6 +1005,7 @@ class Engine:
             gruende["nachkauf"] = True
             gruende["bestand_vorher"] = round(pos.qty * price, 2)
             gruende["gewinn_pct"] = round(pos.unrealized_pct(price), 4)
+            self._mit_kontext(gruende, snapshot, sym)
             out.append(
                 Decision(
                     symbol=sym,
@@ -856,16 +1064,33 @@ class Engine:
                 if not np.isfinite(score):
                     score = -9.0
 
+            verlaengert = False
             reason: str | None = None
             if price <= pos.stop_price:
                 reason = "stop_ausgeloest"
             elif price >= pos.target_price:
                 reason = "gewinnziel_erreicht"
             elif pos.bars_held >= cfg.max_hold_days:
+                # Zwei unabhaengige Verlaengerungsregeln, beide standardmaessig aus:
+                #  (1) ranking: `renew_rank_pct` - bleibt, wer noch im Kaufbereich steht
+                #      (2026-09-29, gemessen: hilft nicht, Schalter fuer Replays)
+                #  (2) `zeitausstieg_dynamisch` - Trendpruefung mit harter Grenze (develop)
+                # Die gesamte Sonderbehandlung haengt an den Schaltern. Stehen sie aus,
+                # gilt exakt die alte Regel - ohne dass `max_hold_days_hart` gelesen wird
+                # (sonst bekaeme eine Position ab Tag 20 das Etikett "zeitausstieg_hart"
+                # statt "zeitausstieg" und die Auswertung nach Ausstiegsgruenden waere
+                # still verfaelscht).
                 if (cfg.strategy == "ranking" and cfg.renew_rank_pct is not None
                         and rang_pct is not None and rang_pct >= cfg.renew_rank_pct):
-                    # Verlaengerung statt Verkauf: die Aktie steht noch im Kaufbereich.
-                    self.__dict__.setdefault("verlaengert", []).append((sym, pos.bars_held))
+                    self.__dict__.setdefault("verlaengert_rang", []).append((sym, pos.bars_held))
+                elif not cfg.zeitausstieg_dynamisch:
+                    reason = "zeitausstieg"
+                elif pos.bars_held >= cfg.max_hold_days_hart:
+                    # Harte Grenze VOR der Trendpruefung, sonst koennte eine
+                    # dauerhaft steigende Position unbegrenzt weiterlaufen.
+                    reason = "zeitausstieg_hart"
+                elif self._traegt_noch(pos, price, float(row.get("atr", 0) or 0)):
+                    verlaengert = True
                 else:
                     reason = "zeitausstieg"
             elif cfg.strategy == "ranking":
@@ -876,6 +1101,15 @@ class Engine:
             elif score < cfg.exit_score:
                 reason = "these_traegt_nicht_mehr"
 
+            # Die Score-Regel gilt AUCH fuer verlaengerte Positionen. Sonst
+            # entstuende eine Position, die zwar noch steigt, deren These
+            # aber laengst nicht mehr traegt - und die durch die
+            # Verlaengerung gegen genau die Regel immun waere, die sie
+            # sonst geschlossen haette.
+            if verlaengert and score < cfg.exit_score:
+                reason = "these_traegt_nicht_mehr"
+                verlaengert = False
+
             if reason:
                 out.append(
                     Decision(
@@ -884,7 +1118,7 @@ class Engine:
                         conviction=score,
                         price=price,
                         target_notional=pos.qty * price,
-                        reasons={
+                        reasons=self._mit_kontext({
                             "ausstiegsgrund": reason,
                             "gewinn_pct": round(pnl, 4),
                             "tage_gehalten": pos.bars_held,
@@ -893,10 +1127,82 @@ class Engine:
                             "einstieg": round(pos.entry_price, 4),
                             "stop": round(pos.stop_price, 4),
                             "ziel": round(pos.target_price, 4),
-                        },
+                            # Nur gesetzt, wenn die Frist ueberschritten war -
+                            # macht im Protokoll unterscheidbar, ob ein Trade
+                            # regulaer oder nach Verlaengerung endete.
+                            **({"nach_verlaengerung": True}
+                               if pos.bars_held > cfg.max_hold_days else {}),
+                        }, snapshot, sym),
                     )
                 )
         return out
+
+    @staticmethod
+    def _mit_kontext(gruende: dict, snapshot: MarketSnapshot, sym: str) -> dict:
+        """Haengt Regime, Sektor und Liquiditaetsdezil an eine Begruendung.
+
+        Beeinflusst die Entscheidung NICHT. Sie wird dadurch im Nachhinein
+        zuordenbar: "in welcher Marktlage und bei welcher Werteklasse
+        traegt die Strategie?" - die wichtigste offene Frage des Projekts.
+
+        **Warum als eigene Funktion.** Bis zum 22.08.2026 stand dieser
+        Block nur in der Kaufschleife. `topup` und `sell` bekamen nichts -
+        und `topup` ist mit 110 von 304 Live-Entscheidungen die Mehrheit
+        der Kapitalzuteilung (bis zu 9 Nachkaeufe je Symbol, §G2). Eine
+        Auswertung der Sektorkonzentration uebersah damit den groesseren
+        Teil (§G13 Fund 3). Drei Aufrufstellen mit demselben kopierten
+        Block waeren die naechste Gelegenheit, eine davon zu vergessen.
+
+        `reasons` ist ein freies Dictionary, und
+        `journal.decision_quality()` gruppiert neue Schluessel automatisch
+        nach Wertbaendern - es braucht dafuer keine Schemaaenderung.
+        """
+        for schluessel, wert in (snapshot.kontext.get(sym) or {}).items():
+            gruende[schluessel] = wert
+        for schluessel, wert in (snapshot.regime or {}).items():
+            gruende[schluessel] = wert
+        return gruende
+
+    def _traegt_noch(self, pos: Position, price: float, atr: float) -> bool:
+        """Laeuft die Position noch, oder stagniert sie nur?
+
+        Zwei Bedingungen, beide notwendig:
+
+          1. **Im Gewinn.** Eine Position im Minus laenger zu halten, weil
+             sie „noch laufen koennte", ist Hoffnung, keine Regel - und
+             genau das Muster, das aus einem begrenzten Verlust einen
+             grossen macht.
+          2. **Nahe am eigenen Hoechststand.** `high_water` wird taeglich
+             in `update_position` fortgeschrieben. Faellt der Kurs mehr als
+             `trend_rueckfall_atr` x ATR darunter zurueck, ist der Trend
+             gebrochen - dann wird die aufgeschobene Frist sofort wirksam.
+
+        Der Abstand skaliert mit der Volatilitaet des Wertes: Ein ruhiger
+        Wert darf weniger zurueckfallen als ein unruhiger, bevor das als
+        Trendbruch gilt. Ein fester Prozentsatz waere hier falsch - siehe
+        die Messung im Docstring von `trend_rueckfall_atr`.
+
+        Fehlt der ATR (0 oder nicht berechenbar), gilt die Position als
+        NICHT mehr tragend: Ohne Volatilitaetsmass laesst sich Rauschen
+        nicht von einer Trendwende unterscheiden, und im Zweifel gilt die
+        urspruengliche Regel - verkaufen. Eine Verlaengerung ist eine
+        Ausnahme und muss positiv begruendet sein, nicht durch fehlende
+        Daten entstehen.
+
+        Bewusst KEINE Bedingung auf den Score: Der misst „ist der Wert
+        ueberverkauft", also die Einstiegs-These. Nach einem erfolgreichen
+        Anstieg ist ein Umkehr-Kandidat definitionsgemaess nicht mehr
+        ueberverkauft - der Score MUSS also fallen. Ihn hier zu verlangen
+        hiesse, die Verlaengerung genau dann zu verweigern, wenn sie
+        funktioniert hat. Die Score-Untergrenze (`exit_score`) greift
+        weiterhin separat.
+        """
+        if pos.entry_price <= 0 or price <= pos.entry_price:
+            return False
+        if atr <= 0:
+            return False
+        hoechst = max(pos.high_water or pos.entry_price, price)
+        return (hoechst - price) <= self.cfg.trend_rueckfall_atr * atr
 
     # -- Einstiege ----------------------------------------------------------
     def _find_entries(
@@ -993,8 +1299,8 @@ class Engine:
         verteilt: dict[str, float] = {}
         if cfg.deploy_to_target:
             verteilt = verteile_kapital(
-                {sym: (1.0 if cfg.sizing == "gleich"
-                       else _vola_gewicht(float(row.get("atr_pct", 0) or 0)))
+                {sym: kandidatengewicht(float(row.get("atr_pct", 0) or 0), _score,
+                                        "gleich" if cfg.sizing == "gleich" else cfg.groessen_modus)
                  for sym, _score, row, _price in chosen},
                 frei=free, deckel=cap, mindest=mindest,
             )
@@ -1037,6 +1343,22 @@ class Engine:
             reasons["rang"] = len(out) + 1
             reasons["stop_abstand_pct"] = round(1 - stop / price, 4)
             reasons["ziel_abstand_pct"] = round(target / price - 1, 4)
+
+            # Auswertungsschluessel - beeinflussen die Entscheidung NICHT,
+            # machen sie aber im Nachhinein zuordenbar. `reasons` ist ein
+            # freies Dictionary, und `journal.decision_quality()` gruppiert
+            # neue Schluessel automatisch nach Wertbaendern - es braucht
+            # dafuer keine Schemaaenderung.
+            reasons["kandidaten_gesamt"] = len(candidates)
+            # `dollar_volume` steht in der Kurszeile und wird oben bereits
+            # fuer die Liquiditaetsschwelle gelesen - nur nie protokolliert.
+            # `shadow.py:1064` erwartet es unter genau diesem Namen und
+            # schrieb deshalb seit jeher NULL: 0 von 12.250 Vorhersagen
+            # hatten eine Liquiditaetsangabe (§G15). Damit war die Frage
+            # "entsteht der Vorsprung nur bei illiquiden Werten?" nicht
+            # beantwortbar - eine der wenigen echten Auswertungsachsen.
+            reasons["dollar_volume"] = round(float(row.get("dollar_volume", 0) or 0), 2)
+            self._mit_kontext(reasons, snapshot, sym)
 
             out.append(
                 Decision(

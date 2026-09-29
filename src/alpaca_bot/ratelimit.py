@@ -123,9 +123,17 @@ QUOTAS: dict[str, Quota] = {
     ),
     "gdelt": Quota(
         name="GDELT DOC API",
-        per_minute=30,
-        note="Kein offizielles Limit. BigQuery-Variante: 1 TB Abfragen/Monat gratis.",
-        verified="2026-07-28",
+        per_second=0.2,
+        note=(
+            "1 Anfrage je 5 Sekunden - GEMESSEN am 25.08.2026, nicht "
+            "geschaetzt: Bei 30/min antwortete die API mit HTTP 429 und "
+            "dem Klartext 'Please limit requests to one every 5 seconds'. "
+            "Der vorherige Eintrag (30/min, 'kein offizielles Limit') war "
+            "eine unbelegte Annahme und damit zu schnell. "
+            "BigQuery-Variante: 1 TB Abfragen/Monat gratis."
+        ),
+        verified="2026-08-25",
+        docs="https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/",
     ),
     "wikipedia": Quota(
         name="Wikimedia Pageviews API",
@@ -258,7 +266,15 @@ class RateLimiter:
                     recent = sum(1 for t in counter.events if now - t <= window)
                     if recent + n <= allowed:
                         break
-                    wait = window - (now - counter.events[0]) + 0.01
+                    # Ein einzelner Aufruf fuer MEHR als ein volles Fenster
+                    # zulaesst (n > allowed) kann nie regulaer durchgehen -
+                    # dann reicht es, das Fenster leerlaufen zu lassen und
+                    # danach bewusst zu ueberschreiten (Aufruferfehler, aber
+                    # besser als Endlosschleife / IndexError bei leerem deque).
+                    if n > allowed and recent == 0:
+                        break
+                    wait = ((window - (now - counter.events[0]) + 0.01)
+                            if counter.events else 0.05)
                 if self.verbose:
                     print(f"  [Drossel] {self.quota.name}: warte {wait:.1f}s "
                           f"({recent}/{allowed} im {window:.0f}s-Fenster)")

@@ -1,0 +1,823 @@
+# Betriebsplan — was läuft, was beobachtet wird, wann entschieden wird
+
+> Stand: 15.08.2026. **Dieses Dokument beantwortet: Was passiert jetzt,
+> wie lange, und woran erkennen wir, ob es funktioniert hat?**
+>
+> Ergänzt `docs/BEFUNDE.md` (was wir bereits wissen) um den Fahrplan
+> nach vorn. Beide werden bei jeder Änderung mitgeführt.
+
+---
+
+## 1. Neustart des Rechners — was passiert
+
+**Ja, beide Bots starten automatisch wieder** — mit einer Bedingung.
+
+| Schritt | Verhalten |
+|---|---|
+| Mac fährt hoch | FileVault verlangt das Passwort — **noch läuft nichts** |
+| Du meldest dich an | launchd lädt beide Dienste (`RunAtLoad=true`) |
+| Bot startet | Liest Positionen von Alpaca + Marken aus `state.sqlite`, macht weiter |
+| Prozess stirbt später | launchd startet ihn neu (`KeepAlive=true`, 60 s Sperre) |
+
+**Wichtig:** Die Dienste sind an deinen Benutzer gebunden. Am
+Anmeldebildschirm laufen sie **nicht**. Da du beim Update ohnehin
+anwesend bist und dich anmeldest, ist das unkritisch — aber es ist der
+Grund, warum ein unbeaufsichtigter Neustart (Stromausfall) den Bot
+pausieren würde, bis sich jemand anmeldet.
+
+**Nach dem Neustart prüfen:**
+```
+python scripts/18_health_check.py      # muss GRÜN zeigen
+```
+
+Ein Datenverlust ist nicht möglich: Alpaca kennt die Positionen, die
+Datenbanken liegen außerhalb des Projektordners und überleben alles.
+
+---
+
+## 2. Was wurde geändert — Live-Bot gegen Schattenbot
+
+Das ist die wichtigste Unterscheidung des ganzen Umbaus.
+
+### 2.1 Am LIVE-Bot: nur Messung, keine Handelslogik
+
+| Änderung | Wirkung auf Handelsentscheidungen |
+|---|---|
+| Quote-Plausibilitätsprüfung (2 %) | **keine** — betrifft nur `expected_price` im Protokoll |
+| `bars_held` korrekt berechnet | **keine** — Protokollfeld |
+| `after_10d` wird gefüllt | **keine** — Auswertung |
+| Score-Vorzeichen im Bericht | **keine** — Berichtstext |
+| Slippage-Bereinigung | **keine** — Auswertung |
+| Symbolauswahl bei `evaluate_outcomes` | **keine** — Auswertung |
+| `zeitausstieg_dynamisch` | **AUS** — Standard `False` |
+| **Intraday-Stop** (neu 15.08.) | **JA — echte Verhaltensänderung.** Stop-Marken werden jetzt jeden Zyklus (~15 Min) gegen den aktuellen Kurs geprüft statt einmal täglich gegen den Vortagesschluss. Bringt Live mit dem Schatten in Übereinstimmung, der das schon immer so gerechnet hat. |
+
+> **Der Live-Bot wählt Kandidaten exakt wie vor dem Urlaub.** Einzige
+> Verhaltensänderung ist der Intraday-Stop (Zeile oben) — er verkauft
+> früher, kauft aber nichts anderes. Verifiziert: Bei
+> `zeitausstieg_dynamisch=False` wird `max_hold_days_hart` nicht einmal
+> gelesen; Tag 5, 19, 20 und 25 ergeben alle unverändert `zeitausstieg`.
+
+Das ist Absicht: Wir haben elf Tage saubere Vergleichsdaten. Änderte
+sich jetzt gleichzeitig die Handelslogik, wäre nicht mehr trennbar, was
+woran lag.
+
+### 2.2 Im SCHATTEN: die neue Idee, ohne Kapitalrisiko
+
+`B11_dyn_ausstieg_live` — die dynamische Haltedauer:
+
+```
+Position hat 5 Tage erreicht
+  ├─ im Gewinn UND weniger als 1 x ATR unter ihrem Höchststand
+  │    └─ weiter halten
+  ├─ Score unter exit_score
+  │    └─ verkaufen ("these_traegt_nicht_mehr")
+  ├─ Tag 20 erreicht
+  │    └─ verkaufen ("zeitausstieg_hart")
+  └─ sonst
+       └─ verkaufen ("zeitausstieg")
+```
+
+---
+
+## 3. Was wir erwarten — und woran wir es messen
+
+**Vorab festgelegt, damit später keine Erzählung entsteht.**
+
+### 3.1 Die eine Frage, die zuerst beantwortet werden muss
+
+> **Trägt die Strategie nach echten Kosten?**
+
+| | Wert |
+|---|---|
+| Gemessener Vorsprung | +0,11 % je Trade |
+| Rundlauf-Breakeven bei 5 bps Spread | 0,142 % |
+| **Erforderlich** | Slippage-Median **< 8 bps** über 30+ saubere Orders |
+| **Stand 23.08.2026** | **+0,0 bps Median über 131 prüfbare Orders** |
+
+**Die Ausführungsbedingung ist damit erfüllt.** 131 prüfbare Orders
+gegen die geforderten 30, Median +0,0 bps gegen die geforderten < 8.
+Die Ausführung im Papierdepot kostet also praktisch nichts gegenüber dem
+Referenzkurs.
+
+> **Korrektur der Grundmenge vom 23.08.2026 (`BEFUNDE.md` §G19 Fund 3).**
+> Hier stand vorher „162 prüfbare Orders". Die Bereinigung, die Zeilen
+> ohne echte Marktquote entfernen sollte, filterte auf
+> `referenz_quelle == 'fallback'` — einen Wert, den es in den Daten nie
+> gab. Die Spalte kam erst am 04.08.2026 dazu; ältere Zeilen tragen
+> `NULL`, und `NULL != 'fallback'`. So blieben 31 Orders aus
+> 28.07.–04.08. in der Messung, darunter genau die Ausreißer, die §G
+> bereits als Datenfehler führt (KGS −1.648, SIMO −1.584, TGTX −1.258 bps).
+>
+> | | n | Median | Mittel |
+> |---|---:|---:|---:|
+> | vorher | 162 | +0,0 bps | −71,7 bps |
+> | **jetzt** | **131** | **+0,0 bps** | **−27,4 bps** |
+>
+> **Der Schluss oben ändert sich nicht** — der Median ist beidseitig +0,0,
+> und 131 liegt weiterhin weit über den geforderten 30. Falsch war die
+> Grundmenge, nicht das Urteil. Dass es folgenlos blieb, liegt allein am
+> Median: §G16 Fund 9 hatte die Kostenkontrolle vom Mittelwert auf ihn
+> umgestellt. Der Mittelwert war um **44,3 bps** verzerrt.
+
+**Was das NICHT heißt.** Die Frage aus der Überschrift ist damit *nicht*
+beantwortet, nur ihre eine Hälfte:
+
+* **Slippage** (Abweichung vom Referenzkurs zum Orderzeitpunkt) ist
+  gemessen und unauffällig.
+* **Spread und Gebühren** fallen im Papierdepot gar nicht erst an
+  (`README`: „Im Paper-Konto fällt nichts davon an — Paper-Ergebnisse
+  sind deshalb systematisch zu gut"). Der Rundlauf-Breakeven von 0,142 %
+  bleibt vollständig bestehen, und der gemessene Vorsprung von +0,11 %
+  liegt weiterhin darunter (§A: „der zentrale Konflikt").
+
+Der Engpass ist also nicht mehr die Ausführungsqualität, sondern
+weiterhin der Vorsprung selbst.
+
+> **Warum diese Zahl vorher falsch aussah:** Die automatische
+> Kostenkontrolle (`shadow.pruefungen()` Nr. 5) rechnete bis zum
+> 22.08.2026 einen **Mittelwert** statt des Medians und meldete
+> −92,0 bps — getrieben von drei kaputten IEX-Quotes (KGS −1.648,
+> SIMO −1.584), die §G bereits als Datenfehler führt. Behoben, siehe
+> `BEFUNDE.md` §G16 Fund 9.
+
+### 3.2 Die Flotte — Erwartung je Bot
+
+Schwelle: **`fleet.schwelle_sigma()`** — hier steht bewusst keine Zahl.
+Sie steigt mit jedem je angemeldeten Bot (die Anmeldung von B12 hob sie
+von 2,83 auf 2,85). Eine abgeschriebene Zahl im Dokument wäre nach der
+nächsten Anmeldung falsch und würde die Hürde nachträglich senken.
+Abrufen: `python scripts/21_fleet.py` (weist sie bei jeder Auswertung aus).
+
+**Stand 21.08.2026:** `B01`, `B02`, `B03`, `B05` **stillgelegt** — Befund
+seit 15.08. unverändert (0,0 Differenz zu B00 über 13 Handelstage),
+mehr Zeit ändert daran nichts. Zählen weiter im Versuchszähler.
+
+| Bot | Erwartung | Stand |
+|---|---|---|
+| `B11_dyn_ausstieg_live` | **offen** — hält Gewinner länger, ohne Stagnierende zu binden | 5 Tage |
+| `B04_halten_lang` | wird vermutlich **nichts** zeigen | t = 0,86, 13 Tage |
+| `B07_mehr_positionen` | Verdacht auf **negativ** | t = −2,63, 12 Tage |
+| `B08`/`B09` | offen | t = 0,65, 12 Tage |
+| `B06_ohne_regime` | **wirkungslos im Bullenmarkt** — läuft weiter, wartet auf Regimewechsel | siehe BEFUNDE §E |
+| `B01`/`B02`/`B03`/`B05` | **stillgelegt** — bestätigt wirkungslos | siehe BEFUNDE §E |
+
+### 3.3 Was „Erfolg" für B11_dyn_ausstieg_live konkret heißt
+
+Geprüft wird `B11_dyn_ausstieg_live` gegen **`B09_nachkauf`** — die bei
+seiner Anmeldung hinterlegte Referenz. Der Vorgänger `B10_dyn_ausstieg`
+ist seit 16.08. stillgelegt (er hat **null** Ausstiege produziert) und
+zählt nur noch im Versuchszähler mit.
+
+> **Korrektur vom 23.08.2026 (`BEFUNDE.md` §G19 Fund 1).** Hier stand bis
+> dahin `B00_basis`. Das war ein Übersehen beim Nachziehen von §G6: Jener
+> Befund hat `B00_basis` am 16.08.2026 als Live-Referenz **widerlegt**
+> (der Live-Bot läuft seit dem 30.07. mit `deploy_to_target=True` und
+> `allow_topup=True`, `B00_basis` steht auf `False`/`False`) und
+> `B11_dyn_ausstieg_live` eigens gegen `B09_nachkauf` angemeldet — daher
+> sein Namenszusatz „gegen echte Live-Basis". Dieses Dokument wurde nicht
+> nachgezogen, und `21_fleet.py --basis` trug `B00_basis` als
+> hartkodierten Standard.
+>
+> **Es war keine Formalie:** t = 0,99 gegen `B00_basis`, t = 1,24 gegen
+> `B09_nachkauf` (gemessen 23.08.2026). Beide Zahlen heißen „Kriterium 1".
+>
+> Das ist **keine nachträgliche Anpassung des Vertrags** im Sinne der
+> Warnung unten. Der Vertrag wird auf die Referenz zurückgesetzt, die bei
+> der Anmeldung am 16.08.2026 festgelegt wurde — die Kriterien selbst
+> bleiben Wort für Wort unverändert. Maßgeblich ist ab jetzt die
+> **Registrierung**, nicht dieser Absatz: `shadow_eval.referenz_bot()`
+> liest sie, und `--basis` ohne Angabe folgt ihr.
+>
+> **Einordnung:** Der Vergleich bleibt so oder so **intern gültig** —
+> beide Seiten teilen denselben Rhythmus, die getestete Achse
+> (`zeitausstieg_dynamisch`) ist sauber isoliert. Was `B09_nachkauf`
+> **nicht** ist: ein Spiegel des echten Live-Bots (§G16 Fund 1,
+> `shadow.pruefungen()` Nr. 10 weist die Abweichung bei jedem Aufruf aus).
+> Ein bestandenes B11 heißt also „besser als B09 unter Spiegelbedingungen",
+> nicht „besser als der Live-Bot".
+
+**Diese vier Kriterien sind der Entscheidungsvertrag.** Sie stehen vorab
+fest und werden nicht nachträglich angepasst — weder nach oben noch nach
+unten. Ein Kommando prüft alle vier:
+
+```
+python scripts/21_fleet.py --kriterien B11_dyn_ausstieg_live
+```
+
+B11 gilt als **bestanden**, wenn *alle vier* zutreffen:
+
+1. `vergleich_gepaart("B11_dyn_ausstieg_live", "B09_nachkauf")` liefert einen
+   t-Wert über **`fleet.schwelle_sigma()`** (keine feste Zahl, siehe §3.2).
+   Den Bot-Namen hier gar nicht erst abschreiben: `--kriterien` nimmt ohne
+   `--basis` die registrierte Referenz und weist sie im Kopf mit aus.
+2. über mindestens **20 auswertbare Handelstage** — das sind Tage *nach*
+   Abzug der Sperrzone (`SPERRZONE_ANTEIL = 0,20`). 20 auswertbare Tage
+   entsprechen **25 rohen** Handelstagen.
+3. Anteil verlängerter Positionen liegt zwischen **10 % und 60 %**
+   (darunter: Regel greift praktisch nie; darüber: sie ist keine
+   Ausnahme mehr, sondern hebelt den Zeitausstieg aus).
+   Nenner sind **nur die Ausstiege, die die Frist erreicht haben**
+   (`bars_held >= max_hold_days`) — eine nach zwei Tagen ausgestoppte
+   Position hatte nie die Gelegenheit, verlängert zu werden.
+4. Die verlängerten Trades sind **nicht** allein durch wenige Ausreißer
+   getragen — Median ebenfalls positiv
+
+> **Festlegung vom 23.08.2026: Die Sperrzone gilt für Kriterium 1, nicht
+> für 3 und 4.** Beim Durchrechnen der Kriterien fiel auf, dass der
+> Vertrag dazu schwieg und die Umsetzung asymmetrisch ist:
+> `vergleich_gepaart` (Kriterium 1) verwirft die jüngsten 20 % der
+> Handelstage, die Kriterien 3 und 4 rechnen über **alle** Ausstiege.
+>
+> Das wird **nicht angeglichen**, aber es steht jetzt hier — und zwar
+> *bevor* Daten dazu existieren, denn genau darum geht es:
+>
+> * **Kriterium 3 (Verlängerungsquote) misst einen Mechanismus,** nicht
+>   ein Ergebnis: „greift die Regel überhaupt". Dafür ist mehr Datenbasis
+>   besser, und eine Quote lässt sich nicht zugunsten eines Ergebnisses
+>   erzählen.
+> * **Kriterium 4 (Median positiv) ist ein Ergebniswert** und damit
+>   grundsätzlich das, wogegen die Sperrzone schützt. Es bleibt trotzdem
+>   ungefiltert, weil es kein Schwellenwert-Kriterium ist, sondern eine
+>   Vorzeichenprüfung gegen die Ausreißer-Falle („trägt der Median oder
+>   nur ein Glückstreffer"). Bei einer reinen Vorzeichenfrage kostet die
+>   Sperrzone 20 % der ohnehin knappen Fälle, ohne die Erzählgefahr
+>   nennenswert zu senken.
+>
+> **Der Punkt ist nicht, welche Antwort richtig ist, sondern wann sie
+> fällt.** Am 10.10. wäre dieselbe Frage mit Kenntnis des Ergebnisses zu
+> beantworten — genau der Fehler, gegen den §G10 den Vertrag überhaupt
+> erst geschrieben hat. Deshalb steht sie hier, sechs Wochen vorher.
+
+> **Vorab festgehaltene Erwartung vom 23.08.2026 — was der 10.10.
+> beantworten kann und was nicht (`BEFUNDE.md` §G22).**
+>
+> Vor dem Termin gemessen, wie groß ein Unterschied sein müsste, damit
+> Kriterium 1 ihn überhaupt findet. Bei 31 auswertbaren Tagen und der
+> gemessenen Streuung der Tagesdifferenz:
+>
+> | Streuungsschätzung | nachweisbar ab | kumuliert über 31 Tage |
+> |---|---:|---:|
+> | B11 gegen B09 (eigene, n=5) | 0,34 %/Tag | **10,5 %** |
+> | B04 gegen B00 (belastbarer, n=18) | 0,18 %/Tag | **5,4 %** |
+>
+> Zum Vergleich: Der **gesamte** gemessene Vorsprung der Strategie
+> beträgt +0,11 % **je Trade** (§A), auf das Depot gerechnet grob
+> 0,02–0,03 %/Tag.
+>
+> **B11 müsste also mehrfach so viel beitragen, wie die Strategie
+> insgesamt verdient, um am 10.10. bestehen zu können.** Der
+> wahrscheinlichste Ausgang ist deshalb: Kriterium 1 fällt durch, es
+> bleibt beim Zeitausstieg.
+>
+> **Das ist kein Grund, den Vertrag zu ändern** — die konservative
+> Vorgabe „im Zweifel keine Änderung" ist genau richtig. Es ist ein
+> Grund, das Ergebnis richtig zu lesen: „durchgefallen" heißt hier
+> **nicht nachweisbar**, nicht **widerlegt**. Die Auswertung weist die
+> Trennschärfe seit dem 23.08.2026 bei jedem Aufruf mit aus, damit diese
+> Verwechslung nicht passiert.
+>
+> **Warum das hier steht und nicht am 10.10.:** Nach dem Termin wäre
+> dieselbe Rechnung eine nachträgliche Erklärung für ein unerwünschtes
+> Ergebnis. Vorher ist sie eine Vorhersage.
+>
+> **Die Ursache ist bekannt und benannt.** `shadow_eval.vergleich_gepaart`
+> versprach „Streuung 3–5× kleiner, entscheidbar nach 6–10 Wochen".
+> Nachgemessen gilt das für Bots, die sich nur im Kapitaleinsatz
+> unterscheiden (B08: 3,6×) — nicht für B11 gegen B09 (**1,1×**), die
+> andere Positionen unterschiedlich lange halten. Der Docstring ist
+> korrigiert.
+
+**Fällt einer der vier durch, bleibt es beim Zeitausstieg nach 5 Tagen.**
+
+**Drei Zustände, nicht zwei.** Jedes Kriterium kann *erfüllt*,
+*durchgefallen* oder **offen** sein. `offen` heißt „noch keine
+Datengrundlage" und ist **kein** Bestehen. Zwei erfüllte und zwei offene
+Kriterien sind kein 2:0.
+
+---
+
+### 3.4 Die Spannen-Messung — vorab festgelegt am 26.08.2026, 15:05 Uhr
+
+**Diese Festlegung entsteht 25 Minuten vor Handelsbeginn und damit
+bevor eine einzige Zahl existiert.** Genau darum geht es: Nach der
+Messung wäre jede Einordnung eine Erzählung über ein bereits bekanntes
+Ergebnis.
+
+**Die Frage.** `costs.py:151` rechnet mit 5 bps Spanne — laut eigenem
+Quelltextkommentar der Wert „für Large Caps typisch", angewandt auf ein
+Universum, das Large Caps absichtlich meidet (`universe.py:87`, §G39).
+An dieser Zahl hängt der Breakeven, der zentrale Konflikt aus §A und
+jedes Backtestergebnis.
+
+**Gemessen wird** mit `scripts/37_spannen_messen.py`, sechs Aufnahmen im
+Abstand von zehn Minuten über das Live-Universum, aufgeschlüsselt nach
+Liquiditätsdezil. Maßgeblich ist der **Median über die Dezile 1–6** —
+dort kauft der Bot laut Journal.
+
+#### Die Zahl, um die es geht
+
+Bei 5 Tagen Haltedauer und ~50 Umschlägen im Jahr:
+
+| Spanne | Breakeven | Lücke zum Vorsprung (+0,110 %) | annualisiert |
+|---:|---:|---:|---:|
+| 3,0 bps | 0,102 % | −0,008 pp | +0,4 %/Jahr |
+| **3,4 bps** | **0,110 %** | **±0** | **±0** |
+| 5,0 bps (Annahme heute) | 0,142 % | +0,032 pp | −1,6 %/Jahr |
+| 8,0 bps | 0,203 % | +0,092 pp | −4,6 %/Jahr |
+| 10,0 bps | 0,243 % | +0,133 pp | −6,6 %/Jahr |
+| 15,0 bps | 0,343 % | +0,233 pp | −11,6 %/Jahr |
+| 20,0 bps | 0,443 % | +0,333 pp | −16,7 %/Jahr |
+
+**Die Strategie braucht bei heutigem Umschlag eine Spanne von 3,4 bps
+oder besser, um überhaupt bei null herauszukommen.** Die geltende
+Annahme von 5,0 bps liegt bereits darüber. Das ist keine neue
+Erkenntnis, sondern §A in einer Zahl — aber es zeigt, wie eng der
+Korridor ist, in dem diese Strategie funktionieren kann.
+
+#### Was welches Ergebnis bedeutet — festgelegt vor der Messung
+
+| Median Dezile 1–6 | Urteil | Was folgt |
+|---|---|---|
+| **≤ 5 bps** | Annahme bestätigt | Der zentrale Konflikt bleibt wie beschrieben. Weitersuchen ist vertretbar. |
+| **5–10 bps** | Annahme zu günstig | Die Lücke ist 3–4× größer als gedacht. Der Hebel ist **Umschlag**, nicht der nächste Faktor. `max_hold_days` wird zur Hauptfrage. |
+| **10–20 bps** | Annahme deutlich zu günstig | Kein Faktorfund dieser Größenordnung schließt das. Entweder radikal längere Haltedauer oder die Strategie ist in dieser Form nicht handelbar. |
+| **> 20 bps** | zweite Quelle nötig | Vor jedem Schluss gegen eine Nicht-IEX-Quelle prüfen. Bestätigt sie sich: **einstellen** ist die ehrliche Konsequenz, nicht Versuch 64. |
+
+#### Die Asymmetrie, die mitgelesen werden muss
+
+Der freie Feed ist IEX und sieht ~2 % des US-Volumens (§G29). Die
+gemessene Spanne ist deshalb eine **Obergrenze**, keine Punktschätzung.
+Daraus folgt eine bewusst ungleiche Beweislast:
+
+* **Ein gutes Ergebnis ist beweiskräftig.** Liegt schon die Obergrenze
+  bei ≤ 5 bps, ist die Frage entschieden.
+* **Ein schlechtes Ergebnis ist es nicht.** Über 20 bps kann ebenso gut
+  IEX sein wie der Markt. Dann braucht es eine zweite Quelle, bevor
+  irgendetwas daraus folgt.
+
+Diese Asymmetrie steht hier, **damit sie nicht nachträglich nur in die
+eine Richtung angewandt wird** — also nicht „das schlechte Ergebnis war
+ja nur IEX", während ein gutes Ergebnis unbesehen gilt.
+
+#### Was diese Messung ausdrücklich NICHT auslöst
+
+* **Kein neuer Wert in `costs.py`.** Ein geänderter Kostenparameter
+  bewertet jede laufende und jede vergangene Messung neu. Das ist eine
+  eigene, vorangemeldete Entscheidung — keine Nebenwirkung einer
+  Messung.
+* **Keine Rehabilitierung von `K03_limit_statt_market`.** Der Kandidat
+  ist nach vorab festgelegter Regel verworfen (§G40). Zeigt die Messung
+  eine weitere Spanne, ist der Weg eine **neue** Voranmeldung mit dem
+  gemessenen Wert und einem eigenen Zählerplatz (§B2).
+* **Keine Änderung an der Handelslogik vor dem 10.10.2026.**
+
+---
+
+### 3.5 Der `costs.py`-Wert — vorab festgelegt am 04.09.2026
+
+**Anlass.** §G51 hat die Spanne mit der konsolidierten NBBO
+(`delayed_sip`) gemessen: **Median 12,2 bps** über die Dezile 1–6, an
+einem Handelstag, drei Aufnahmen. `costs.py` rechnet mit **5,0 bps**.
+Die Lücke ist real und groß. Trotzdem wird der Wert **jetzt nicht
+geändert** — und dieser Absatz legt vorab fest, wann und wie.
+
+**Warum nicht sofort:**
+
+1. **Eine Momentaufnahme ist dünn.** §37 sagt es im eigenen Docstring:
+   Spannen schwanken über den Tag und zwischen Tagen. Ein Tag trägt
+   keinen neuen Parameter.
+2. **Ein geänderter Kostenparameter bewertet jede laufende und vergangene
+   Messung neu.** Das ist genau die Vergleichsbasis, die §G10/§G22 für
+   den 10.10.-Termin schützen. Eine Änderung fünf Wochen davor zerstört
+   B11s Grundlage.
+3. §3.4 hält es bereits fest: „Kein neuer Wert in `costs.py` … eine
+   eigene, vorangemeldete Entscheidung — keine Nebenwirkung einer
+   Messung."
+
+**Die Datengrundlage, die den Wechsel auslöst:** Der LaunchAgent
+`de.local.alpacaspannen` sammelt ab dem 04.09.2026 werktags 6 Aufnahmen
+je Tag in `spannen.sqlite`. Der Wechsel wird vorbereitet, sobald
+
+* **mindestens 4 verschiedene Handelstage** erfasst sind **und**
+* der Median (Dezile 1–6, nur Quotes < 20 min alt, Eröffnungs-20-Min
+  ausgeschlossen) über diese Tage **stabil** ist (Spannweite der
+  Tagesmediane < 4 bps).
+
+**Was dann passiert — in dieser Reihenfolge, nicht früher:**
+
+| Schritt | Wann |
+|---|---|
+| `costs.DEFAULT_FEES` / `SimConfig.spread_bps` von 5,0 auf den gemessenen Median | **nach dem 10.10.2026** (B11-Entscheidung zuerst, mit der alten Basis, wie vertraglich) |
+| Vollständiger Neulauf: `10_simulate.py`, `32_lernlauf.py`, `shadow_eval` mit dem neuen Wert | direkt danach |
+| Ergebnis als neuer §G in `BEFUNDE.md`, mit Vorher/Nachher | direkt danach |
+| Prüfen, ob `TAKTIKWECHSEL` §7 (Einstellungskriterium) greift | mit demselben Lauf |
+
+**Was diese Festlegung ausdrücklich nicht ist:** keine Änderung an der
+Handelslogik (`EngineConfig`) und keine an `costs.py` vor dem 10.10. Der
+laufende Betrieb und alle laufenden Messungen bleiben unberührt.
+
+> **Die Bedingung ist erfüllt — Stand 11.09.2026 (`BEFUNDE.md` §G54).**
+> 5 Handelstage (03./04./08./09./10.09.), Tagesmediane 11,51–12,85 bps,
+> **Spannweite 1,34 bps** gegen die geforderten < 4. Der Median der
+> Tagesmediane liegt bei **12,2 bps**. Damit ist der Wechsel
+> *vorbereitungsreif* — er findet trotzdem erst **nach dem 10.10.** statt,
+> genau wie oben festgelegt. Die Stabilität ist das eigentlich Neue: §G51
+> war eine Momentaufnahme an einem Tag, jetzt sind es fünf.
+>
+> **Was vorgezogen wurde und warum es erlaubt war:** Zwei Läufe von
+> `10_simulate.py --spread 5.0` und `--spread 12.2` über 8 Jahre. Das
+> ändert `costs.py` nicht — die Spanne ist dort ein Übergabeparameter an
+> `simulate.run`. Ergebnis: CAGR **+1,95 % → −2,84 %**, Erwartungswert je
+> Trade **+0,07 % → −0,10 %**. Die laufende B11-Messung ist davon
+> unberührt; sie rechnet weiter mit der alten Basis.
+
+---
+
+## 4. Zeitplan — wie lange laufen lassen
+
+B11 ist seit **18.08.2026** angemeldet. Alle Tagesangaben zählen ab dort.
+
+| Zeitraum | Was passiert | Was NICHT passiert |
+|---|---|---|
+| **jetzt – ca. 12.09.** (≈19 roh / **15 auswertbar**) | B11 und B00 laufen unverändert und sammeln Daten. | Keine Parameteränderung, keine neue Hypothese, **keine neue Bot-Anmeldung** |
+| **~~ca. 12.09.~~ 11.09.2026 — erledigt** | Erste Zwischenauswertung — **reine Zwischenschau**. Kriterium 2 war an diesem Tag noch nicht erfüllbar (14 < 20 auswertbare Tage). Vorgezogen, weil der 12.09.2026 ein Samstag ist. Ergebnis: `BEFUNDE.md` §G56. | **Keine Entscheidung** getroffen. Auch kein Abbruch. |
+| **ca. 10.10.** (≈39 roh / **31 auswertbar**) | Entscheidung über `B11_dyn_ausstieg_live` nach §3.3 | — |
+
+### Rohe gegen auswertbare Handelstage
+
+Das sind zwei verschiedene Zahlen und sie werden leicht verwechselt.
+`vergleich_gepaart` verwirft die **jüngsten 20 %** der Handelstage
+(`SPERRZONE_ANTEIL = 0,20`), damit ein Ergebnis nicht nachträglich auf
+die letzten Tage hin erzählt werden kann. Gezählt wird danach.
+
+| roh | auswertbar |
+|---|---|
+| 25 | 20 ← Kriterium 2 aus §3.3 |
+| 39 (Stand 10.10.) | 31 |
+| 75 | 60 ← `shadow_eval.MIN_TAGE` |
+
+### `MIN_TAGE` ist ein Hinweis, kein Veto — Festlegung vom 21.08.2026
+
+`shadow_eval.MIN_TAGE` steht auf **60** und steuert die
+`belastbar`-Flagge in `vergleich_gepaart`. Dieses Dokument behauptete
+bis zum 21.08.2026 an dieser Stelle, die Konstante sei 20. **Das war
+falsch** — sie stand seit dem ersten Schatten-Commit auf 60 (Beleg:
+`docs/BEFUNDE.md` §G10).
+
+Die Folge wäre gewesen: 60 auswertbare Tage erreicht B11 erst am
+**~30.11.2026**. Am 10.10. wäre `belastbar` zwingend `False` gewesen,
+**egal wie gut der t-Wert ist** — der vorab festgelegte Termin hätte
+kein Ergebnis liefern können.
+
+**Festlegung:** Maßgeblich für die Abnahme sind die vier Kriterien aus
+**§3.3**. `MIN_TAGE` bleibt als strengere Hausmarke von
+`vergleich_gepaart` bestehen und wird ausgewiesen, hat aber **kein
+Vetorecht**. Das deckt sich mit dem eigenen Anspruch des Moduls
+(`shadow_eval.py`: „A schlägt B ist nach 6–10 Wochen entscheidbar") —
+60 auswertbare Tage sind 15 Wochen.
+
+Der Grund für ein Tage-Minimum überhaupt steht in §B1 von
+`docs/BEFUNDE.md`: Maßgeblich ist die Zahl der **Handelstage**, nicht
+der Trades. Elf Tage Betrieb haben nur 8 auswertbare Tage ergeben — zu
+wenig für jede Aussage.
+
+### Die Schwelle steigt vor dem 10.10. — bewusst und vorab festgelegt
+
+**Ergänzung vom 22.08.2026.** Der Musterspeicher legt ab dem 20.
+Schattenhandelstag automatisch Regimeschnitte als Kandidaten an, und
+seit `BEFUNDE.md` §G16 zählt jeder davon korrekt im Versuchszähler.
+Bei vier bis sechs Schnitten hebt das `fleet.schwelle_sigma()` von
+**2,85 auf etwa 2,93** — für alle laufenden Messungen, auch für B11.
+
+Das ist eine bewusste Entscheidung und steht deshalb *vor* dem Termin
+hier. Sie ist **kein Grund**, den Entscheidungsvertrag aus §3.3
+anzupassen. Maßgeblich bleibt der bei der Auswertung abgerufene Wert
+(`python scripts/21_fleet.py`), nie eine abgeschriebene Zahl.
+
+### Vor dem 10.10. keine neuen Bots anmelden
+
+Jede Anmeldung hebt `fleet.schwelle_sigma()` für **alle** Bots, auch
+rückwirkend für die laufende Messung (B12 hob sie von 2,83 auf 2,85).
+Ein während der Messung angemeldeter Bot erschwert B11 also die eigene
+Prüfung, ohne selbst etwas beizutragen. Neue Ideen werden bis zum
+10.10. in §7 gesammelt, nicht angemeldet.
+
+### Ideen trotzdem prüfen — der Historienfilter
+
+„Nicht anmelden" heißt nicht „nicht prüfen". Seit 21.08.2026 fährt
+`scripts/10_simulate.py` dieselbe Konfiguration wie der Live-Bot
+(`for_reversal()`, Marktfilter an, 1.200 Symbole — vorher war es eine
+andere Strategie, siehe `docs/BEFUNDE.md` §G11). Damit lässt sich eine
+Idee an Altdaten in Minuten durchspielen, statt Wochen auf eine
+Vorwärtsmessung zu warten:
+
+```
+python scripts/10_simulate.py --min-score 0.45     # eine Achse ändern
+```
+
+**Seit dem Umbau vom 25.08.2026 (`docs/UMBAUPLAN.md`) gibt es das
+batchfähige Gegenstück:** `scripts/32_lernlauf.py` fährt mehrere Bot-
+Konfigurationen gleichzeitig über 15 Jahre Historie (Standard), schreibt
+je Bot und Jahr nach `lernlauf.sqlite`, weist einen gepaarten t-Wert und
+eine Trennschärfe gegen die Basis aus und prüft per Walk-Forward, ob die
+historisch beste Auswahl ins nächste, ungesehene Jahr trägt. Was das
+übersteht, geht ins Kandidatenregister (`scripts/33_kandidaten.py`,
+`alpaca_bot.kandidatenregister`) — **nicht** direkt in die Flotte, siehe
+`docs/UMBAUPLAN.md` Schritt 6 für den vollständigen Weg. `10_simulate.py`
+bleibt für den schnellen Einzelachsen-Blick nützlich; `32_lernlauf.py`
+ist das Werkzeug, wenn mehrere Konfigurationen gegeneinander sollen.
+
+**Was das entscheidet — und was nicht.** Der Lauf darf eine Idee
+**verwerfen**. Er darf sie **nicht** abnehmen. Zwei Gründe:
+
+* **Survivorship:** Alpaca kennt nur heute gelistete Symbole. Der
+  Schein-Vorteil liegt bei 2–4 Prozentpunkten pro Jahr — mehr, als die
+  Strategie je verdienen wird. Jedes Ergebnis ist eine **Obergrenze**.
+* **Rückwärts ist kein Vorwärtstest.** Wer die Historie oft genug
+  befragt, findet dort alles.
+
+Reihenfolge also: erst Historienfilter (billig, verwirft viel), was das
+überlebt, kommt nach dem 10.10. als Flottenbot in den Schatten, und erst
+§3.3 nimmt ab. Ein Flottenplatz ist teuer — er hebt `schwelle_sigma` für
+alle. Der Filter sorgt dafür, dass dieser Platz nicht an eine Idee geht,
+die schon an der Vergangenheit scheitert.
+
+**Erste Anwendung (21.08.2026): „einfach länger halten" ist erledigt.**
+Über alle 2.149 Zeitausstiege des Historienlaufs gemessen, was der Kurs
+danach tat — marktbereinigt gegen SPY, gruppiert nach Ausstiegstag:
+nach 1/2/3/5/10 Tagen jeweils −0,09 / −0,16 / −0,13 / −0,09 / −0,05 %,
+kein Horizont über der Schwelle, jeder Punktschätzer negativ
+(`docs/BEFUNDE.md` §G11). Roh sieht es umgekehrt aus (+0,43 % nach 10
+Tagen) — das ist der Markt, nicht die Strategie.
+
+Für die Auswertung am **10.10.** heißt das: eine Verlängerung der
+Haltedauer als solche braucht keinen Flottenplatz mehr.
+`B11_dyn_ausstieg_live` prüft die schärfere Fassung — *signalgesteuert*
+aussteigen statt nach fester Frist — und wird davon **nicht**
+vorentschieden. Die vier Kriterien aus §3.3 bleiben unverändert
+maßgeblich; diese Messung ist Kontext, kein Kriterium.
+
+---
+
+## 5. Was du beobachten solltest — und was nicht
+
+### 5.1 Wöchentlich (2 Minuten)
+
+```
+python scripts/18_health_check.py
+```
+**Grün** = nichts zu tun. **Gelb/Rot** = melden. Zeigt jetzt auch den
+Drawdown und warnt bereits, wenn er 75 % der Sperrgrenze erreicht (15 %) —
+also **bevor** gesperrt wird.
+
+Bei aktiver Sperre:
+```
+python scripts/20_risiko.py               # Grund und Kennzahlen ansehen
+python scripts/20_risiko.py --entsperren  # erst NACH Ursachenklärung
+```
+
+### 5.2 Alle 1–2 Wochen (10 Minuten)
+
+```
+python scripts/13_tagesbericht.py --tage 14
+```
+Interessant sind dort:
+- Abschnitt **[3] Ausführung**: Slippage-Median — die Kernfrage aus §3.1
+- Abschnitt **[6] Nachbetrachtung**: Zeitausstieg und Wiedereinstiege
+- **Regelabgleich** am Ende: muss „Keine Abweichungen" zeigen
+
+### 5.3 Was du bewusst NICHT tun solltest
+
+- **Nicht auf die Depotrendite schauen und daraus schließen.** +8,36 % in
+  elf Tagen ist überwiegend Marktbewegung (SPY +5,07 %) und eine
+  Stichprobe von 36 Trades. Eine gute Woche ist kein Befund, eine
+  schlechte auch nicht.
+- **Nicht bei einem Verlusttag eingreifen.** Der Bot hat Stop-Marken; ein
+  Eingriff von Hand macht die Messung wertlos.
+- **Keine Parameter „mal eben" ändern.** Jede Änderung setzt die
+  Vergleichsbasis zurück und hebt die Signifikanzschwelle.
+
+---
+
+## 6. Ist das Projekt sinnvoll aufgebaut? — ehrliche Einschätzung
+
+### Was gut ist
+
+| Punkt | Warum es zählt |
+|---|---|
+| **Ein Entscheidungspfad** | `Engine.decide()` läuft in Backtest, Schatten und Live. Abweichungen können nur aus Ausführung stammen. |
+| **Strukturelle Lookahead-Sperre** | `MarketSnapshot.validate()` — die Engine *kann* nicht in die Zukunft sehen. |
+| **Schatten handelt nicht** | Kein Schattenmodul importiert `trading.py`. Seit 23.08.2026 **geprüft** (`selfcheck`-Regel 9, §G19) statt behauptet. Geltungsbereich ist der Quelltext — zur Laufzeit lädt das Paket-`__init__.py` `trading` mit, dort tragen `dry_run=True` und `_check_risk()`. |
+| **Voranmeldung + Versuchszähler** | Schutz gegen nachträgliche Erzählungen. |
+| **Automatische Integritätsprüfung** | Findet Protokollfehler, bevor sie Entscheidungen verfälschen. |
+| **Betrieb bewährt** | 11 Tage ununterbrochen, 1 abgefangener Fehler. |
+
+### Was seit 15.08.2026 gebaut ist — Live-Tauglichkeit
+
+| Baustein | Was er verhindert | Datei |
+|---|---|---|
+| **Drawdown-Sperre** (20 %) | Dass ein Bot mit kaputter Logik das Konto leerhandelt | `risiko.py` |
+| **Tagesverlustgrenze** (5 %) | Weiterkaufen in einen laufenden Absturz | `risiko.py` |
+| **Exposure-Grenze** (100 %) | Ungewollten Hebel (Alpaca erlaubt bis 4×) | `risiko.py` |
+| **Cash-Reserve** (2 %) | Zwangsverkäufe bei Kurslücken | `risiko.py` |
+| **Klumpenkontrolle** (40 %/Sektor) | Dass 15 Positionen in Wahrheit *eine* Wette sind | `risiko.py` + `universe.sektoren` |
+| **Positionsobergrenze** (30) | Konfigurationsfehler bei `max_positions` | `risiko.py` |
+| **Kapitalflüsse** | Dass Einzahlungen als Gewinn gelesen werden | `kapital.py` |
+| **Zeitgewichtete Rendite** | Unvergleichbare Kennzahlen nach Einzahlung | `kapital.py` |
+| **Equity je Zyklus** | Dass ein Drawdown-Beginn nicht rekonstruierbar ist | `state.kapital_verlauf` |
+
+**Wichtige Eigenschaften, bewusst so gebaut:**
+
+- **Die Sperre ist persistent und löst sich nie selbst.** Eine Sperre, die
+  sich nach einer Stunde aufhebt, kauft genau in den Crash zurück, wegen
+  dem sie ausgelöst hat. Lösen nur über `scripts/20_risiko.py --entsperren`
+  mit wörtlicher Bestätigung.
+- **Verkaufen ist immer erlaubt.** Eine Sperre darf nie verhindern, aus
+  einer Position herauszukommen.
+- **Fällt die Risikoprüfung selbst aus, wird nicht gehandelt.** Ein
+  Risiko-Dach, das im Zweifel durchlässt, ist keines.
+- **Auch Nachkäufe werden geprüft.** Sonst ließen sich die Grenzen über
+  wiederholtes Aufstocken umgehen (gemessen: bis zu 9 Nachkäufe je Symbol).
+
+### Was weiterhin fehlt
+
+| Lücke | Folge | Priorität |
+|---|---|---|
+| **Regime nicht protokolliert** | „In welcher Marktlage funktioniert es?" ist am Depot nicht beantwortbar. | mittel |
+| **Laptop statt Server** | Deckel zu = alles aus. Kein Auto-Login wegen FileVault. | mittel |
+| **Slippage noch nicht belastbar** | Die Kernfrage (§3.1) braucht 30+ saubere Orders | läuft |
+
+**Einschätzung:** Der Mess- und Lernapparat ist für ein Privatprojekt
+ungewöhnlich sauber. Die Lücken liegen fast alle im **Risikoschutz** —
+also genau dort, wo es teuer wird, sobald echtes Geld im Spiel ist. Für
+den Papierbetrieb ist das vertretbar; **vor dem Wechsel auf echtes Geld
+ist das Risiko-Dach Pflicht.**
+
+---
+
+## 7. Reihenfolge der nächsten Schritte
+
+| # | Schritt | Wann | Bedingung |
+|---|---|---|---|
+| 1 | Bots laufen lassen, nichts ändern | jetzt – ~12.09. | — |
+| 2 | ~~Risiko-Dach bauen~~ | **erledigt 15.08.** | — |
+| 3 | ~~Kapitalflüsse erfassen~~ | **erledigt 15.08.** | — |
+| 4 | ~~Zwischenauswertung (**keine** Entscheidung)~~ | **erledigt 11.09.** | §G56 |
+| 5 | Entscheidung über `B11_dyn_ausstieg_live` | ~10.10. | alle 4 Kriterien aus §3.3, geprüft mit `--kriterien` |
+| 6 | Echtgeld erwägen | frühestens danach | Slippage-Median < 8 bps **und** Risiko-Dach steht |
+
+**Schritte 2 und 3 sind die einzigen, die jetzt sinnvoll parallel laufen
+können** — sie ändern nichts an den Handelsentscheidungen und stören die
+laufende Messung deshalb nicht.
+
+---
+
+### 7.1 Was der 10.10. liefert — vorab festgelegt (23.08.2026)
+
+Aus der Trennschärfe-Rechnung (`BEFUNDE.md` §G22) lässt sich vorher
+sagen, welche Fragen an diesem Tag beantwortet sein werden und welche
+nicht. **Das steht hier, damit am 10.10. niemand die Enttäuschung über
+Kriterium 1 mit einem Misserfolg verwechselt.**
+
+**Kommt sicher — hängt an keiner Signifikanzschwelle:**
+
+| Frage | Warum sie trägt |
+|---|---|
+| **Greift die dynamische Regel?** (Kriterium 3) | ~75 Ausstiege im Nenner, Standardfehler eines Anteils 5,3 % — die Bandbreite 10–60 % ist klar trennbar |
+| **Sind die verlängerten Trades im Plus?** (Kriterium 4) | ~22 verlängerte Trades, reine Vorzeichenfrage |
+| **Wie stark sinkt der Umschlag?** | Mittlere Haltedauer ist Arithmetik, keine Statistik (B04 zeigt es heute schon: 6,11 statt 4,47 Tage = 41 statt 56 Rundläufe/Jahr) |
+| **Wie groß ist die Streuung wirklich?** | Erst mit ~31 Tagen belastbar — heute steht sie auf 5 Tagen |
+| **Tragen die Ausführungskosten?** (§3.1) | bereits beantwortet, wird nur bestätigt |
+
+**Kommt wahrscheinlich nicht:**
+
+| Frage | Warum nicht |
+|---|---|
+| **Ist B11 messbar besser?** (Kriterium 1) | Nachweisbar wären 5,4–10,5 % kumuliert über 31 Tage. Bestehenswahrscheinlichkeit: 4 % bei wahrem Effekt 0,10 %/Tag, 25 % bei 0,20 %, 60 % beim heutigen Punktschätzer — der aber aus 5 Tagen stammt und dessen 95 %-Bereich von −0,35 bis +0,92 %/Tag reicht |
+| **Sagen B04, B07, B08 etwas?** | alle bei 0,2–0,4× ihrer Nachweisgrenze |
+| **Sagen B06, B09 etwas?** | **nie** — bitgleich mit ihrer Referenz (§G16, §E) |
+
+**Der wahrscheinlichste Ausgang:** Kriterien 2, 3 und 4 erfüllt,
+Kriterium 1 durchgefallen → es bleibt beim Zeitausstieg nach 5 Tagen.
+Das ist ein **Ergebnis**, keine verlorene Runde.
+
+---
+
+### 7.2 Der Plan nach dem 10.10.
+
+Welcher Zweig gilt, entscheidet die Auswertung selbst.
+
+**Zweig A — alle vier Kriterien erfüllt.** Dann geht `zeitausstieg_dynamisch`
+live, mit derselben Sorgfalt wie beim Intraday-Stop: Tests, Health-Check,
+vollständiger Dienstneustart, und danach `audit.py` und
+`shadow.pruefungen()` täglich, bis eine Woche ohne Abweichung vorliegt.
+`B11` läuft als Schattenkontrolle weiter.
+
+**Zweig B — Kriterium 1 durchgefallen, 3 und 4 erfüllt** (der erwartete Fall).
+Vier Schritte, in dieser Reihenfolge:
+
+1. **`B11` läuft weiter.** Er ist im Versuchszähler bereits bezahlt; ihn
+   stillzulegen wirft die Daten weg, ohne die Schwelle zu senken
+   (stillgelegte Bots zählen dauerhaft mit, §B2).
+2. **Neuen Termin aus der Trennschärfe ableiten, nicht aus dem Kalender.**
+   Am 10.10. steht erstmals eine belastbare Streuungsschätzung zur
+   Verfügung. `shadow_eval.trennschaerfe(..., n_tage=)` sagt dann, wie
+   viele Tage für 80 % Trefferwahrscheinlichkeit nötig sind. **Ergibt die
+   Rechnung mehr als ~12 Monate, ist `B11` in dieser Form nicht
+   entscheidbar** — dann wird er stillgelegt und die Frage neu gestellt,
+   statt Jahre zu warten.
+3. **Die Lehre aus §G22 auf jede künftige Anmeldung anwenden:**
+   Trennschärfe **vor** der Anmeldung abschätzen. Ein Bot, dessen Depot
+   stark vom Referenzbot abweicht, ist langsam entscheidbar — gemessen
+   1,1× Reduktion bei `B11` gegen 3,6× bei `B08`. Eine Idee, die sich als
+   *kleine* Änderung an einer bestehenden Regel formulieren lässt, ist der
+   Idee vorzuziehen, die das halbe Depot umbaut.
+4. **Erst Historienfilter, dann Flottenplatz.** `scripts/10_simulate.py`
+   kostet keinen Versuchszähler und darf verwerfen (§4). Der nächste
+   Kandidat ist die auffälligste nie gemessene Achse:
+
+> **Überholt seit 26.08.2026, hier nachgezogen am 11.09.2026.** Der
+> Absatz unten sagt, `exit_score` sei nie gegengeprüft. Der Lernlauf
+> `d44ad22a8731` hat ihn als `exit_score_null` (t = +1,03) und
+> `exit_score_hoch` (t = −0,31) gegen die Basis gemessen — beide weit
+> unter der Schwelle, beide ohne Befund. Ebenso `trail_after_atr`
+> (`trailing`, t = −3,53, das klarste Negativsignal des Laufs) und
+> `reenter_cooldown_days` (`kein_cooldown`, t = +0,28). **Damit ist die
+> Liste der ungemessenen Achsen leer.** Der Absatz bleibt stehen, weil er
+> die Begründung trägt, warum diese Achsen überhaupt drankamen.
+>
+> **`exit_score` (0,10) wurde nie gegengeprüft** — obwohl §E ihn
+> ausdrücklich als den Wert ausweist, der `target_atr` wirkungslos macht
+> („Ausstieg am selben Tag zum selben Kurs, nur mit anderem Etikett").
+> Er entscheidet damit faktisch über einen großen Teil der Ausstiege und
+> ist die einzige ungemessene Achse mit belegter Wirkung. Ebenfalls offen,
+> aber ohne solchen Beleg: `trail_after_atr` und `reenter_cooldown_days`
+> (§F beziffert deren Kosten immerhin).
+
+**Was in beiden Zweigen gilt:** Der zentrale Konflikt aus §A bleibt
+unberührt. Vorsprung +0,11 % je Trade gegen Rundlauf-Breakeven 0,142 %.
+
+> **Vorsicht mit dem Umschlag-Argument.** Weniger Rundläufe senken die
+> Kostenlast pro Jahr (B04: 5,9 % statt 8,0 % je Positionsplatz) — aber
+> sie senken den Bruttoertrag im gleichen Maß. Der Vergleich *je Trade*
+> ändert sich dadurch **nicht**. Nur wenn längeres Halten den Ertrag **je
+> Trade** hebt, verschiebt sich §A — und genau das braucht wieder
+> Statistik. Ein „B11 spart 2,4 Prozentpunkte Kosten pro Jahr" ist
+> richtig gerechnet und trotzdem kein Argument für die Live-Schaltung.
+
+---
+
+## 8. Abbruchkriterien
+
+| Ereignis | Konsequenz |
+|---|---|
+| Health-Check zweimal in Folge ROT | Handel aus, Ursache klären — **eine befristete Ausnahme siehe unten** |
+| Regelabgleich meldet Abweichung | Sofort aus — ein Regelbruch ist ein Logikfehler, kein Pech |
+| Slippage-Median > 15 bps über 30 Trades | Alle Backtest- und Schattenergebnisse neu bewerten |
+| Konto-Drawdown > 20 % | **automatische Vollsperre** durch `risiko.py`, Lösen nur von Hand |
+| `B11_dyn_ausstieg_live` verlängert > 60 % der Positionen | Regel greift zu oft, Schwelle war falsch kalibriert (= §3.3 Kriterium 3) |
+
+### 8.1 Die eine befristete Ausnahme — festgelegt am 26.08.2026
+
+**Der Widerspruch, um den es geht.** Der Health-Check steht seit dem
+25.08.2026 ROT, und er stand es an mehreren Tagen in Folge. Nach der
+Tabelle oben müsste der Handel aus sein. Er läuft weiter. Bis heute war
+das eine **stillschweigende** Übergehung eines vorab festgelegten
+Abbruchkriteriums — und damit dieselbe Art Aufweichung wie das Lockern
+einer Schwelle, nur aus der anderen Richtung.
+
+**Die Ursache ist bekannt und benannt.** `18_health_check.py` prüft die
+*jüngsten 20* Entscheidungen je Aktionsart auf ihre Kontextfelder
+(`regime_markt`, `regime_vola`, `sektor`, `liq_dezil`). Diese wurden am
+25.08. repariert (§G36, Commit 19:49). 19 der 20 jüngsten Zeilen stammen
+von davor. Der Prüfer meldet also korrekt einen Zustand, der bereits
+behoben ist und aus dem Fenster wandert.
+
+**Die Ausnahme, die hiermit gilt:**
+
+> Ein ROT, dessen Ursache **dokumentiert**, **behoben** und
+> **selbstheilend** ist, stoppt den Handel nicht — aber nur bis zu einem
+> hier genannten Stichtag.
+
+**Stichtag für diesen Fall: 10.09.2026.**
+
+Gerechnet: Es fehlen 19 neue Verkäufe bzw. Nachkäufe je Aktionsart. Im
+August lagen Median 15,5 und Mittel 17,4 Verkäufe plus Nachkäufe je
+Handelstag; selbst bei stark gedrosseltem Handel sind 19 in zehn
+Handelstagen erreicht. Der Puffer ist also großzügig, nicht knapp.
+
+**Ist der Health-Check am 10.09.2026 nicht grün, ist die Ursache eine
+andere als §G36 — und §8 greift ohne weitere Diskussion.**
+
+**Was diese Ausnahme ausdrücklich nicht ist:**
+
+* **Keine Lockerung des Prüfers.** An `18_health_check.py` wird nichts
+  geändert. Eine Schwelle zu senken, damit die eigene Reparatur früher
+  grün aussieht, bleibt verboten (§B2).
+* **Kein Muster für künftige Rotmeldungen.** Jede weitere Ausnahme
+  braucht einen eigenen Absatz hier, mit eigener Ursache und eigenem
+  Stichtag. Ohne Stichtag keine Ausnahme.
+* **Keine rückwirkende Rechtfertigung.** Zwischen dem 25.08. und heute
+  wurde das Kriterium übergangen, ohne dass es irgendwo stand. Das war
+  ein Fehler, und er steht deshalb hier.

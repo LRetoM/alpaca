@@ -80,6 +80,39 @@ def main() -> int:
         gruende.append(f"Status nicht abrufbar: {type(e).__name__}: {e}")
         ampel = "ROT"
 
+    # --- 2b. Risiko-Dach ---
+    # Steht bewusst VOR der Datenintegritaet: Eine aktive Sperre ist die
+    # wichtigste Einzelinformation ueberhaupt - sie bedeutet, dass der Bot
+    # gerade NICHT handelt. Wer sie uebersieht, wundert sich tagelang ueber
+    # ausbleibende Trades.
+    try:
+        from alpaca_bot import risiko
+        from alpaca_bot.state import Store as _S
+
+        sperre = _S().sperre_lesen()
+        if int(sperre.get("aktiv") or 0) == 1:
+            ampel = "ROT"
+            gruende.append(f"RISIKO-SPERRE AKTIV: {sperre.get('grund')}")
+            print(f"  Risiko-Dach     : SPERRE AKTIV")
+        else:
+            v = _S().kapital_verlauf(tage=90)
+            if v.empty:
+                print("  Risiko-Dach     : frei (noch keine Messpunkte)")
+            else:
+                a = v.iloc[-1]
+                g = risiko.Risikogrenzen()
+                print(f"  Risiko-Dach     : frei | Drawdown "
+                      f"{a['drawdown_pct']:.1%} (Grenze {g.max_drawdown_pct:.0%}) "
+                      f"| Exposure {a['exposure']:.0%}")
+                if a["drawdown_pct"] > g.max_drawdown_pct * 0.75:
+                    ampel = "GELB" if ampel == "GRUEN" else ampel
+                    gruende.append(
+                        f"Drawdown {a['drawdown_pct']:.1%} naehert sich der "
+                        f"Grenze {g.max_drawdown_pct:.0%}.")
+    except Exception as e:  # noqa: BLE001
+        gruende.append(f"Risiko-Dach nicht pruefbar: {type(e).__name__}: {e}")
+        ampel = "ROT"
+
     # --- 3. Datenintegritaet ---
     try:
         from alpaca_bot import data_integrity
@@ -93,6 +126,60 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         gruende.append(f"Datenintegritaet nicht pruefbar: {type(e).__name__}: {e}")
         ampel = "ROT"
+
+    # --- 3b. Nutzungsnachweis ---
+    # Bewusst GELB und nicht ROT: Ein stillstehender Baustein ist kein
+    # Datenverlust und kein Handelsfehler - er kostet nur Zeit, in der wir
+    # nichts lernen. Das rechtfertigt eine Warnung, keinen Stopp. Er gehoert
+    # aber hierher, weil genau das dreimal wochenlang unbemerkt blieb (§G15).
+    try:
+        from alpaca_bot import nutzung
+
+        befunde = nutzung.pruefen()
+        schlecht = [b for b in befunde if not b.ok]
+        print(f"  Bausteine       : {len(befunde) - len(schlecht)}/{len(befunde)} "
+              f"arbeiten wie geplant")
+        if schlecht:
+            ampel = "GELB" if ampel == "GRUEN" else ampel
+            for b in schlecht:
+                gruende.append(f"Baustein '{b.baustein}': "
+                               f"{b.detail.splitlines()[0]}")
+    except Exception as e:  # noqa: BLE001 - der Nachweis darf nie blockieren
+        print(f"  Bausteine       : nicht pruefbar ({type(e).__name__})")
+
+    # --- 3c. Regelabgleich ---
+    # BETRIEBSPLAN §8 fuehrt ihn als Abbruchkriterium: "Regelabgleich
+    # meldet Abweichung -> Sofort aus - ein Regelbruch ist ein Logikfehler,
+    # kein Pech." Bis zum 22.08.2026 lief er trotzdem nur in
+    # `13_tagesbericht.py`, also "alle 1-2 Wochen" von Hand (§5.2). Ein
+    # Abbruchkriterium, das auf einen manuellen Aufruf wartet, ist keines.
+    #
+    # Anders als die Datenintegritaet prueft er nicht die ZAHLEN, sondern
+    # das VERHALTEN: Hat der Bot getan, was seine damals geltenden Regeln
+    # vorsahen? Beides ist noetig - ein Bot kann sauber protokollieren und
+    # trotzdem systematisch etwas anderes tun als geplant.
+    try:
+        from alpaca_bot import audit
+
+        a = audit.run_audit(days=7)
+        n_auff = len(a.findings) - len(a.violations)
+        print(f"  Regelabgleich   : "
+              + ("keine Abweichungen" if not a.findings else
+                 f"{len(a.violations)} Verstoss/Verstoesse, {n_auff} auffaellig"))
+        if not a.clean:
+            ampel = "ROT"
+            for v in a.violations:
+                gruende.append(f"REGELVERSTOSS: {v.rule} - {v.detail[:110]}")
+        else:
+            # Auffaelligkeiten faerben bewusst NICHT: Sie sind
+            # erklaerungsbeduerftig, nicht falsch (z. B. eine Position, die
+            # durch Kursgewinn ueber ihre Einstiegsgrenze gewachsen ist).
+            for f in a.findings:
+                gruende.append(f"Regelabgleich (auffaellig): {f.rule} - "
+                               f"{f.detail[:110]}")
+    except Exception as e:  # noqa: BLE001 - darf die Ampel nicht zerreissen
+        print(f"  Regelabgleich   : nicht pruefbar ({type(e).__name__})")
+        gruende.append(f"Regelabgleich nicht pruefbar: {type(e).__name__}: {e}")
 
     # --- 4. Depot vs. Zustand ---
     try:

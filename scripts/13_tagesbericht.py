@@ -22,6 +22,7 @@ import sys
 import pandas as pd
 
 from alpaca_bot import account, costs, data, live
+from alpaca_bot.daemon import HORIZONTE_LIVE, Daemon
 from alpaca_bot.journal import Journal, make_price_lookup
 from alpaca_bot.state import Store
 
@@ -108,16 +109,27 @@ def main() -> int:
     else:
         print(slip.to_string())
         print()
-        print(costs.reconcile(args.erwartete_slippage, slip))
+        # Einzelwerte durchreichen: §3.1 misst ueber ORDERS, nicht ueber
+        # Symbole. Ohne sie faellt reconcile auf die groebere Ebene zurueck.
+        print(costs.reconcile(args.erwartete_slippage, slip,
+                              werte=j.slippage_werte()))
 
     # --- 4. Entscheidungsqualitaet ---
     print("\n[4] WELCHE BEGRUENDUNG HAT SICH BEWAEHRT?")
     dec = j.table("decisions")
     if not dec.empty:
-        symbols = sorted(dec["symbol"].dropna().unique())[:200]
+        # Dieselbe Auswahl wie im Daemon (BEFUNDE §G55). Hier stand bis
+        # zum 11.09.2026 `sorted(...)[:200]` - die Urfassung des Fehlers,
+        # die im Daemon laengst ersetzt war: rein alphabetisch, und bei
+        # 1.046 Symbolen fiel alles ab etwa "C" heraus. Der Bericht trug
+        # damit weniger nach, als er konnte, und tat es unbemerkt.
+        symbols = Daemon._symbole_mit_offenen_horizonten(
+            dec, j.table("outcomes"), HORIZONTE_LIVE
+        )
         try:
             bars = data.get_bars(symbols, "1D", lookback_days=120)
-            added = j.evaluate_outcomes(make_price_lookup(bars), horizons=(1, 3, 5))
+            added = j.evaluate_outcomes(make_price_lookup(bars),
+                                        horizons=HORIZONTE_LIVE)
             if added:
                 print(f"    {added} Ergebnis(se) nachgetragen.")
         except Exception as e:  # noqa: BLE001
@@ -154,10 +166,23 @@ def main() -> int:
 
         if not broker.empty:
             print()
+            heute = pd.Timestamp.now(tz="UTC").normalize()
             rows = []
             for sym, row in broker.iterrows():
                 m = stored.get(sym, {})
                 cur = float(row.get("current_price") or 0)
+                # Haltedauer aus dem Einstiegsdatum rechnen, NICHT aus dem
+                # gespeicherten `bars_held`: Der wird beim Anlegen auf 0
+                # gesetzt und nie erhoeht (siehe daemon._record_lifecycle).
+                # Angezeigt werden muss derselbe Wert, den die Engine fuer
+                # den Zeitausstieg verwendet - sonst steht hier dauerhaft
+                # "0 Tage", waehrend die Position vor dem Ausstieg steht.
+                tage = None
+                if m and m.get("entry_date"):
+                    e = pd.Timestamp(m["entry_date"])
+                    if e.tz is None:
+                        e = e.tz_localize("UTC")
+                    tage = max(0, len(pd.bdate_range(e.normalize(), heute)) - 1)
                 rows.append({
                     "Symbol": sym,
                     "Stueck": round(float(row["qty"]), 3),
@@ -166,7 +191,7 @@ def main() -> int:
                     "G/V %": row.get("unrealized_plpc"),
                     "Stop": round(float(m["stop_price"]), 2) if m else None,
                     "Ziel": round(float(m["target_price"]), 2) if m else None,
-                    "Tage": m.get("bars_held") if m else None,
+                    "Tage": tage,
                 })
             print(pd.DataFrame(rows).to_string(index=False))
 
@@ -178,7 +203,41 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"    Kontoabruf fehlgeschlagen: {type(e).__name__}: {e}")
 
-    # --- 6. Lief er nach Plan? ---
+    # --- 5b. Risiko und Kapital ---
+    print()
+    try:
+        from alpaca_bot import kapital, risiko
+
+        print(risiko.bericht())
+        print()
+        print(kapital.bericht())
+    except Exception as e:  # noqa: BLE001
+        print(f"    Risiko-/Kapitalbericht fehlgeschlagen: {type(e).__name__}: {e}")
+
+    # --- 5c. Ergebnisse nach Codeversion ---
+    print()
+    try:
+        from alpaca_bot import versionen
+
+        print(versionen.bericht(j))
+    except Exception as e:  # noqa: BLE001
+        print(f"    Versionsbericht fehlgeschlagen: {type(e).__name__}: {e}")
+
+    # --- 6. Waren die Ausstiege richtig? ---
+    print("\n[6] NACHBETRACHTUNG: ZEITAUSSTIEG UND WIEDEREINSTIEGE")
+    try:
+        from alpaca_bot import nachbetrachtung
+        from alpaca_bot.data import get_bars
+
+        # Marktreihe mitgeben, sonst misst der Nachlauf nur, ob der Markt
+        # gestiegen ist - und nicht, ob der Ausstieg richtig war.
+        spy = get_bars(["SPY"], "1D", lookback_days=90).xs("SPY", level="symbol")
+        spy.index = pd.DatetimeIndex(spy.index).tz_localize(None).normalize()
+        print(nachbetrachtung.bericht(markt=spy["close"]))
+    except Exception as e:  # noqa: BLE001 - Bericht darf nie am Zusatz scheitern
+        print(f"    Nachbetrachtung fehlgeschlagen: {type(e).__name__}: {e}")
+
+    # --- 7. Lief er nach Plan? ---
     print()
     from alpaca_bot import audit
 

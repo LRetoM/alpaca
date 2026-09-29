@@ -56,6 +56,44 @@ class SimConfig:
     fees: FeeSchedule = field(default_factory=lambda: DEFAULT_FEES)
     log_to_journal: bool = True
 
+    # --- Limitorder-Einstieg (25.08.2026, BEFUNDE §G34) -------------------
+    limit_einstieg: bool = False
+    """Einstiege als Limitorder statt als Marktorder simulieren.
+
+    **Warum das ueberhaupt geprueft wird.** Der Spread ist 54 % der
+    Rundlaufkosten (5,00 von 9,22 $ je 10.000-$-Rundlauf). Eine
+    Marktorder zahlt ihn per Konstruktion, eine Limitorder kann ihn
+    vereinnahmen. Faellt der effektive Spread von 5 auf 3 bps, sinkt der
+    Breakeven von 0,1423 % auf 0,1022 % - und die Luecke zum gemessenen
+    Vorsprung von +0,11 % je Trade (§A) schliesst sich vollstaendig.
+
+    **Warum es im Papierdepot NICHT pruefbar ist.** Alpacas Simulator
+    fuellt Limitorders laut eigener Dokumentation grosszuegig, sobald der
+    Kurs die Marke beruehrt - ohne Warteschlangenposition. Genau der
+    Teil, der bei Limitorders entscheidet, ist dort unrealistisch.
+    Deshalb hier, auf echten OHLC-Daten."""
+
+    limit_offset_bps: float = 10.0
+    """Wie weit UNTER dem Entscheidungskurs die Kaufmarke liegt.
+
+    Die Order wird am Abend von T gestellt, es gibt also nur den
+    Schlusskurs von T als Bezug. 10 bps ist bewusst nah am Kurs: Je
+    tiefer die Marke, desto mehr Spread spart man je Ausfuehrung - und
+    desto seltener wird ausgefuehrt. Was ueberwiegt, ist genau die
+    Frage, die dieser Lauf beantwortet."""
+
+    limit_puffer_bps: float = 2.0
+    """Um wie viel das Tagestief die Marke UNTERSCHREITEN muss, damit
+    als ausgefuehrt gilt.
+
+    **Der Ehrlichkeitsparameter.** Beruehrt das Tief die Marke exakt,
+    ist in der Realitaet voellig offen, ob man an der Reihe war -
+    Warteschlangenposition kennt diese Simulation nicht. Ohne Puffer
+    wuerde das Modell jeden Beruehrer als Ausfuehrung zaehlen und damit
+    denselben Fehler machen wie Alpacas Papierdepot. 2 bps ist ein
+    bewusst konservativer Aufschlag: im Zweifel lieber eine Ausfuehrung
+    zu wenig als eine zu viel."""
+
 
 @dataclass
 class Trade:
@@ -155,12 +193,41 @@ def run(
     end: str | None = None,
     verbose: bool = True,
     ml_scores: pd.DataFrame | None = None,
+    nach_entscheidung=None,
+    signal_frames: dict[str, pd.DataFrame] | None = None,
 ) -> SimResult:
     """Spielt die Historie Tag fuer Tag durch.
 
     Args:
         bars: MultiIndex (symbol, timestamp) mit OHLCV.
         insider: optionale Insider-Merkmale je Symbol.
+        signal_frames: bereits berechnete Signale je Symbol. Die
+            Signalberechnung ist der teuerste Schritt und haengt NUR von
+            `reversal_weights` ab - nicht von Stop, Ziel, Frist oder
+            `min_score`. Wer mehrere Bots vergleicht, die sich nur in
+            Ausstiegsparametern unterscheiden, rechnet sie damit EINMAL
+            statt N-mal. Genau diese Ersparnis nutzt der Schattenbetrieb
+            schon ueber `fleet.signal_schluessel`; hier steht sie auch dem
+            Historienlauf zur Verfuegung.
+
+            **Vorsicht:** Wer Bots mit VERSCHIEDENEN Gewichten vergleicht,
+            darf die Rahmen nicht teilen - sonst rechnen beide mit den
+            Signalen des einen. `32_lernlauf.py` gruppiert deshalb nach
+            demselben Schluessel wie die Flotte.
+        nach_entscheidung: optionaler Haken zum PRUEFEN einer Regelidee,
+            aufgerufen als `f(snapshot, portfolio, decisions, signals)` und
+            gibt die (moeglicherweise erweiterte) Entscheidungsliste zurueck.
+
+            **Wofuer das da ist und wofuer nicht.** Der Historienlauf ist
+            laut BETRIEBSPLAN §4 der billige Filter: Er darf eine Idee
+            VERWERFEN, nicht abnehmen, und er kostet keinen
+            Versuchszaehler. Ohne diesen Haken muesste man fuer jede
+            Variante die Schleife nachbauen - und ein Nachbau ist genau
+            der Fehler aus §G11 Fund 1, wo die Historiensimulation
+            unbemerkt eine andere Strategie fuhr als der Live-Bot.
+
+            Der Haken laesst `Engine.decide()` unberuehrt. Wer ihn nicht
+            uebergibt, bekommt bitgleich dasselbe wie vorher.
     """
     cfg = sim_config or SimConfig()
     engine = Engine(engine_config or EngineConfig())
@@ -184,35 +251,39 @@ def run(
     from .signals import build_ranking_frame, build_reversal_frame, build_signal_frame
 
     ecfg = engine.cfg
-    if verbose:
-        print(f"    Berechne Signale ({ecfg.strategy}) fuer "
-              f"{len(per_symbol)} Symbole ...")
-    if ecfg.strategy == "reversal":
-        signal_frames = {
-            sym: build_reversal_frame(df, market, ecfg.reversal_weights)
-            for sym, df in per_symbol.items()
-        }
-    elif ecfg.strategy == "ranking":
-        signal_frames = {
-            sym: build_ranking_frame(df, market, ecfg.ranking_weights)
-            for sym, df in per_symbol.items()
-        }
-        if ecfg.score_quelle in ("ml", "hybrid"):
-            # Vorhersagen (Tag x Symbol, z. B. OOS aus scripts/23 oder modell.score_panel)
-            # als Spalte `ml_score` - nur der Wert des jeweiligen Tages, nichts danach.
-            if ml_scores is None:
-                raise ValueError("score_quelle ml/hybrid braucht ml_scores (Tag x Symbol)")
-            ml = ml_scores.copy()
-            if ml.index.tz is None:
-                ml.index = ml.index.tz_localize("UTC")
-            for sym, fr in signal_frames.items():
-                col = ml[sym] if sym in ml.columns else pd.Series(index=ml.index, dtype="float64")
-                fr["ml_score"] = col.reindex(fr.index).astype(float)
-    else:
-        signal_frames = {
-            sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
-            for sym, df in per_symbol.items()
-        }
+    if signal_frames is None:
+        if verbose:
+            print(f"    Berechne Signale ({ecfg.strategy}) fuer "
+                  f"{len(per_symbol)} Symbole ...")
+        if ecfg.strategy == "reversal":
+            signal_frames = {
+                sym: build_reversal_frame(df, market, ecfg.reversal_weights)
+                for sym, df in per_symbol.items()
+            }
+        elif ecfg.strategy == "ranking":
+            signal_frames = {
+                sym: build_ranking_frame(df, market, ecfg.ranking_weights)
+                for sym, df in per_symbol.items()
+            }
+        else:
+            signal_frames = {
+                sym: build_signal_frame(df, insider.get(sym), ecfg.weights)
+                for sym, df in per_symbol.items()
+            }
+    elif verbose:
+        print(f"    Signale uebernommen ({len(signal_frames)} Symbole)")
+
+    if ecfg.strategy == "ranking" and ecfg.score_quelle in ("ml", "hybrid"):
+        # Vorhersagen (Tag x Symbol, z. B. OOS aus scripts/23 oder modell.score_panel)
+        # als Spalte `ml_score` - nur der Wert des jeweiligen Tages, nichts danach.
+        if ml_scores is None:
+            raise ValueError("score_quelle ml/hybrid braucht ml_scores (Tag x Symbol)")
+        ml = ml_scores.copy()
+        if ml.index.tz is None:
+            ml.index = ml.index.tz_localize("UTC")
+        for sym, fr in signal_frames.items():
+            col = ml[sym] if sym in ml.columns else pd.Series(index=ml.index, dtype="float64")
+            fr["ml_score"] = col.reindex(fr.index).astype(float)
 
     # Gemeinsamer Handelskalender.
     calendar = sorted(set().union(*[set(df.index) for df in per_symbol.values()]))
@@ -252,12 +323,28 @@ def run(
                 bar = df.loc[today]
                 fill = float(bar["open"])
 
+                # Limitorder-Einstieg: Marke aus dem Entscheidungskurs,
+                # Ausfuehrung nur bei echtem Unterschreiten (§G34).
+                # Verkaeufe bleiben bewusst Marktorders - ein Ausstieg,
+                # der nicht ausgefuehrt wird, ist keine gesparte Gebuehr,
+                # sondern eine ungewollt offene Position.
+                limit_kauf = cfg.limit_einstieg and d.action in ("buy", "topup")
+                if limit_kauf:
+                    gefuellt, _marke = limit_fuellung(float(d.price), bar, cfg)
+                    if gefuellt is None:
+                        blocked["limit_nicht_gefuellt"] = (
+                            blocked.get("limit_nicht_gefuellt", 0) + 1)
+                        continue
+                    fill = gefuellt
+
                 if d.action == "buy":
-                    _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked)
+                    _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked,
+                                 limit=limit_kauf)
                 elif d.action == "topup":
                     _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked,
                                    min_gewinn=ecfg.topup_min_gain_pct,
-                                   max_position_pct=ecfg.max_position_pct)
+                                   max_position_pct=ecfg.max_position_pct,
+                                   limit=limit_kauf)
                 elif d.action == "sell":
                     _execute_sell(
                         d, bar, today, portfolio, open_meta, cfg, trades,
@@ -321,6 +408,11 @@ def run(
             )
 
             decisions = engine.decide(snapshot, portfolio)
+            if nach_entscheidung is not None:
+                decisions = nach_entscheidung(
+                    snapshot, portfolio, decisions,
+                    {s: signal_frames[s].loc[:today] for s in active},
+                )
 
             for d in decisions:
                 decision_log.append({
@@ -365,21 +457,77 @@ def _atr_at(df: pd.DataFrame, when: pd.Timestamp) -> float:
     return float(val) if np.isfinite(val) else 0.0
 
 
-def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked):
+def limit_fuellung(entscheidungskurs: float, bar, cfg: SimConfig
+                   ) -> tuple[float | None, float]:
+    """Wird eine Kauf-Limitorder an diesem Tag ausgefuehrt - und zu welchem Kurs?
+
+    Die Order liegt bei `entscheidungskurs * (1 - limit_offset_bps)`. Sie
+    wird gestellt am Abend von T und gilt fuer T+1; als Bezug gibt es
+    deshalb nur den Schlusskurs von T, nicht die Eroeffnung von T+1.
+
+    **Ausgefuehrt gilt nur, wenn das Tagestief die Marke um
+    `limit_puffer_bps` UNTERSCHREITET.** Ein blosses Beruehren zaehlt
+    nicht: Ob man an der Reihe gewesen waere, haengt an der
+    Warteschlangenposition, die diese Simulation nicht kennt. Ohne
+    diesen Puffer machte das Modell exakt den Fehler, den Alpacas
+    Papierdepot macht (§G34) - und der macht Limitorders kuenstlich gut
+    aussehen.
+
+    **Der Ausfuehrungskurs ist `min(open, marke)`.** Eroeffnet der Wert
+    bereits unter der Marke, bekommt man die Eroeffnung, nicht die
+    Marke. Fuer einen Kaeufer ist das der bessere Kurs - aber es ist
+    zugleich der Fall, in dem etwas passiert ist: Genau so entsteht
+    adverse Selektion, und sie wird hier nicht wegdefiniert, sondern
+    faellt automatisch in die Trade-Ergebnisse.
+
+    Returns:
+        `(fuellkurs, marke)`. `fuellkurs is None` heisst: nicht
+        ausgefuehrt - der Einstieg entfaellt ersatzlos. Diese
+        Opportunitaetskosten sind der Preis der Limitorder und werden
+        als `limit_nicht_gefuellt` gezaehlt.
+    """
+    marke = entscheidungskurs * (1 - cfg.limit_offset_bps / 10_000)
+    schwelle = marke * (1 - cfg.limit_puffer_bps / 10_000)
+    tief = float(bar["low"])
+    if tief > schwelle:
+        return None, marke
+    return min(float(bar["open"]), marke), marke
+
+
+def _kaufkosten(qty: float, fill: float, cfg: SimConfig, *, limit: bool):
+    """Kosten eines Kaufs - mit oder ohne Spread/Slippage.
+
+    **Der ganze Punkt der Limitorder steckt in diesen beiden Nullen.**
+    Eine Marktorder kauft zum Briefkurs und traegt zusaetzlich
+    Slippage. Eine ausgefuehrte Limitorder bekommt ihre Marke oder
+    besser - sie zahlt die Spanne nicht, sie stellt sie. Negative
+    Slippage gibt es per Definition nicht: schlechter als die Marke
+    wird nicht ausgefuehrt.
+
+    Gebuehren (SEC, FINRA) bleiben in beiden Faellen; sie haengen am
+    Volumen, nicht am Ordertyp.
+    """
+    return estimate_costs(
+        "buy", qty, last=fill,
+        spread_bps=0.0 if limit else cfg.spread_bps,
+        slippage_bps=0.0 if limit else cfg.slippage_bps,
+        fees=cfg.fees)
+
+
+def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked, *,
+                 limit: bool = False):
     qty = int(d.target_notional / fill) if fill > 0 else 0
     if qty <= 0:
         blocked["betrag_zu_klein"] = blocked.get("betrag_zu_klein", 0) + 1
         return
 
-    cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
-                          slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+    cost = _kaufkosten(qty, fill, cfg, limit=limit)
     if cost.net_proceeds > portfolio.cash:
         qty = int(portfolio.cash * 0.98 / (fill * 1.01))
         if qty <= 0:
             blocked["kapital_erschoepft"] = blocked.get("kapital_erschoepft", 0) + 1
             return
-        cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
-                              slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+        cost = _kaufkosten(qty, fill, cfg, limit=limit)
 
     portfolio.cash -= cost.net_proceeds
     portfolio.positions[d.symbol] = Position(
@@ -395,7 +543,8 @@ def _execute_buy(d, fill, today, portfolio, open_meta, cfg, blocked):
 
 
 def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
-                   min_gewinn: float = 0.0, max_position_pct: float = 0.10):
+                   min_gewinn: float = 0.0, max_position_pct: float = 0.10,
+                   limit: bool = False):
     """Nachkauf in eine bestehende Position.
 
     Die Stueckzahl waechst, der Einstand wird zum Mischkurs. Stop, Ziel,
@@ -432,15 +581,13 @@ def _execute_topup(d, fill, today, portfolio, open_meta, cfg, blocked, *,
         blocked["betrag_zu_klein"] = blocked.get("betrag_zu_klein", 0) + 1
         return
 
-    cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
-                          slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+    cost = _kaufkosten(qty, fill, cfg, limit=limit)
     if cost.net_proceeds > portfolio.cash:
         qty = int(portfolio.cash * 0.98 / (fill * 1.01))
         if qty <= 0:
             blocked["kapital_erschoepft"] = blocked.get("kapital_erschoepft", 0) + 1
             return
-        cost = estimate_costs("buy", qty, last=fill, spread_bps=cfg.spread_bps,
-                              slippage_bps=cfg.slippage_bps, fees=cfg.fees)
+        cost = _kaufkosten(qty, fill, cfg, limit=limit)
 
     portfolio.cash -= cost.net_proceeds
     neu_qty = pos.qty + qty

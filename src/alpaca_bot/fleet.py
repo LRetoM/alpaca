@@ -49,8 +49,20 @@ from .shadow import ShadowStore
 STARTAUFSTELLUNG = [
     dict(bot_id="B00_basis", name="Basis", familie="referenz",
          achse=None, wert=None, aenderung={},
-         hypothese="Referenz, gegen die alle anderen gemessen werden. "
-                   "Entspricht exakt der Einstellung des Live-Bots."),
+         hypothese="Referenz fuer die faktoriellen Vergleiche B01-B08 "
+                   "(je EIN geaenderter Parameter gegen diese Basis). "
+                   "WICHTIG, gefunden am 16.08.2026: Diese Konfiguration "
+                   "entspricht NICHT mehr dem Live-Bot. Am 30.07.2026 "
+                   "(Commits 3e3d30e, f253724) wurden deploy_to_target und "
+                   "allow_topup zum Live-STANDARD, B00 blieb bei False/False "
+                   "stehen. Die Vergleiche B01-B07 gegen B00 bleiben "
+                   "INTERN gueltig (beide Seiten teilen dieselbe False/False-"
+                   "Basis, der jeweils eine Achse ist sauber isoliert) - nur "
+                   "die Behauptung 'entspricht dem Live-Bot' war falsch. Die "
+                   "tatsaechliche Live-Konfiguration liefert B09_nachkauf "
+                   "(zufaellig exakt deckungsgleich seit 30.07.2026, siehe "
+                   "dort). Fuer Vergleiche gegen den ECHTEN Live-Bot ist "
+                   "B09_nachkauf die richtige Basis, nicht B00."),
     dict(bot_id="B01_stop_eng", name="Enger Stop", familie="stop_abstand",
          achse="stop_atr", wert="1.5", aenderung={"stop_atr": 1.5},
          hypothese="Ein schnellerer Ausstieg spart Verluste. Gegenhypothese "
@@ -113,7 +125,15 @@ STARTAUFSTELLUNG = [
                    "nachzukaufen waere Average-Down. Offene Frage: Verstaerkt "
                    "das die Gewinner oder konzentriert es Kapital in Werten, "
                    "die ohnehin gleich ihr Ziel erreichen und verkauft "
-                   "werden?"),
+                   "werden?\n\n"
+                   "NACHTRAG 16.08.2026: Diese Konfiguration "
+                   "(deploy_to_target=True, allow_topup=True, sonst "
+                   "for_reversal()-Standard) ist seit dem 30.07.2026 "
+                   "zufaellig EXAKT identisch mit dem, was scripts/"
+                   "12_daemon.py tatsaechlich live faehrt (Skript-Defaults "
+                   "seit Commits 3e3d30e/f253724). B09 ist damit die "
+                   "korrekte Referenz fuer 'vergleiche gegen den echten "
+                   "Live-Bot' - nicht B00_basis (siehe dessen Eintrag)."),
 ]
 
 
@@ -264,6 +284,19 @@ def alle_bots(store: ShadowStore | None = None) -> pd.DataFrame:
     return _store(store).table("bots")
 
 
+def bot(bot_id: str, store: ShadowStore | None = None) -> Bot | None:
+    """Ein einzelner Bot samt Konfiguration - auch ein stillgelegter.
+
+    `aktive_bots` filtert auf status='laeuft'. Eine Auswertung muss aber
+    auch die Konfiguration eines stillgelegten Bots noch lesen koennen,
+    sonst waere dessen Historie nachtraeglich nicht mehr interpretierbar.
+    """
+    s = _store(store)
+    with s._conn() as c:
+        row = c.execute("SELECT * FROM bots WHERE bot_id=?", (bot_id,)).fetchone()
+    return _bot_aus_zeile(row) if row else None
+
+
 def n_versuche(store: ShadowStore | None = None) -> int:
     """Anzahl ALLER je gestarteten Versuche - Grundlage der Schwelle."""
     s = _store(store)
@@ -316,7 +349,7 @@ def uebersicht(store: ShadowStore | None = None) -> str:
     lines = ["=" * 78, "  BOT-FLOTTE", "=" * 78]
     if df.empty:
         lines.append("  Keine Bots angemeldet.")
-        lines.append("  -> python scripts/18_fleet.py --startaufstellung")
+        lines.append("  -> python scripts/21_fleet.py --startaufstellung")
         return "\n".join(lines)
 
     for _, r in df.iterrows():

@@ -358,7 +358,7 @@ KATALOG: list[dict] = [
                "am groessten. In-sample gefunden -> Bestaetigung Pflicht.",
         quelle_typ="eigene_messung+literatur", veroeffentlicht=2017,
         operationalisierung="22_ --vola-ziel auf Projektcache 2018-2026 und S&P 2016-2026; dann Engine: "
-                            "RisikoDach liefert target_invested dynamisch, Replay 31_ mit und ohne. "
+                            "das Risiko-Dach (risiko.py) liefert target_invested dynamisch, Replay 31_ mit und ohne. "
                             "Bestehen: MaxDD <= 0,7 x ohne UND CAGR >= ohne - 1 Punkt, in beiden Panels.",
         erwartung="MaxDD -30 bis -40 % relativ, CAGR +-1 Punkt, Sharpe +0,05 bis +0,15.",
         skript="scripts/22_labor_portfolio.py --vola-ziel 0.15",

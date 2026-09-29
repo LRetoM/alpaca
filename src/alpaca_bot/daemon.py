@@ -41,6 +41,25 @@ from .journal import Journal
 from .state import Store
 
 
+# `_handelstage` ist am 23.08.2026 nach `lifecycle.py` gewandert
+# (BEFUNDE §G21): Der Intraday-Stop in `live.py` braucht dieselbe
+# Rechnung, und `live` darf `daemon` nicht importieren - `daemon`
+# importiert `live`. Der Name bleibt hier als Import erhalten, damit
+# bestehende Aufrufe unveraendert weiterlaufen.
+from .lifecycle import handelstage as _handelstage
+
+# Welche Vorwaertshorizonte der Live-Bot je Entscheidung nachtraegt.
+# Frueher stand die Zahlenreihe direkt am Aufruf - dann kann die
+# Symbolauswahl nicht wissen, welche Horizonte sie offenhalten muss.
+HORIZONTE_LIVE: tuple[int, ...] = (1, 3, 5)
+
+# Sicherheitsnetz gegen einen Datenabruf, der alles laden will. Greift
+# erst, wenn wirklich so viele Symbole offene Horizonte haben - der
+# Normalfall liegt weit darunter, weil ein Symbol nach dem laengsten
+# Horizont fertig ist und herausfaellt.
+MAX_SYMBOLE_JE_LAUF = 1_500
+
+
 @dataclass
 class DaemonConfig:
     symbols: list[str] = field(default_factory=list)
@@ -81,6 +100,7 @@ class Daemon:
         self._stop = False
         self._errors = 0
         self._last_evaluation: dt.date | None = None
+        self._last_fluss_check: dt.date | None = None
 
         # Auf Beendigungssignale sauber reagieren, damit der Zustand
         # konsistent bleibt und der Dienst nicht in einer Schleife haengt.
@@ -161,31 +181,25 @@ class Daemon:
     def _record_lifecycle(self, decision, meta: dict) -> None:
         """Legt den Lebenslauf eines geschlossenen Trades an.
 
-        MAE, MFE und der Nachlauf werden hier noch nicht gefuellt - der
-        Kursverlauf NACH dem Ausstieg existiert schlicht noch nicht.
-        Das ergaenzt `_analyse_closed_trades()` in den Folgetagen.
+        Die eigentliche Arbeit macht seit dem 23.08.2026
+        `lifecycle.eintrag_anlegen` - dort steht auch, warum es eine
+        gemeinsame Funktion sein MUSS: Der Intraday-Stop in `live.py`
+        ging an dieser Methode vorbei, und damit fehlten dem Lernbericht
+        genau die Verlusttrades (BEFUNDE §G21).
         """
         try:
-            import uuid
+            from .lifecycle import eintrag_anlegen
 
-            from .lifecycle import Lifecycle
-
-            entry = meta.get("entry_price")
-            Lifecycle().record({
-                "trade_id": uuid.uuid4().hex,
-                "symbol": decision.symbol,
-                "entry_date": str(meta.get("entry_date") or ""),
-                "entry_price": entry,
-                "entry_score": meta.get("entry_score"),
-                "entry_reasons": meta.get("reasons"),
-                "planned_stop": meta.get("stop_price"),
-                "planned_target": meta.get("target_price"),
-                "exit_date": pd.Timestamp.now(tz="UTC").isoformat(),
-                "exit_price": decision.price,
-                "exit_reason": str(decision.reasons.get("ausstiegsgrund", "")),
-                "return_pct": decision.reasons.get("gewinn_pct"),
-                "bars_held": meta.get("bars_held"),
-            })
+            exit_ts = pd.Timestamp.now(tz="UTC")
+            eintrag_anlegen(
+                symbol=decision.symbol,
+                meta=meta,
+                exit_price=decision.price,
+                exit_reason=str(decision.reasons.get("ausstiegsgrund", "")),
+                return_pct=decision.reasons.get("gewinn_pct"),
+                exit_ts=exit_ts,
+                bars_held=_handelstage(meta.get("entry_date"), exit_ts),
+            )
         except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
             print(f"      Lebenslauf nicht erfasst: {type(e).__name__}: {e}")
 
@@ -238,6 +252,106 @@ class Daemon:
         except Exception as e:  # noqa: BLE001
             print(f"      Lebenslauf-Analyse fehlgeschlagen: {type(e).__name__}: {e}")
 
+    def _maybe_stops_intraday(self) -> None:
+        """Prueft die Stop-Marken gegen den aktuellen Kurs - jeden Zyklus.
+
+        Kostet einen einzigen Quote-Abruf je gehaltener Position und ist
+        damit um Groessenordnungen billiger als der volle Entscheidungslauf
+        (1.200 Symbole). Deshalb laeuft er bei JEDEM Zyklus mit, waehrend
+        die Kandidatensuche weiterhin nur im Handelsfenster stattfindet.
+
+        Ein Fehler hier darf den Lauf nicht abbrechen, aber er muss
+        sichtbar sein: Faellt der Stop-Schutz still aus, merkt es sonst
+        niemand - und genau das waere der gefaehrlichste Zustand.
+        """
+        try:
+            clock = account.market_clock()
+        except Exception as e:  # noqa: BLE001
+            print(f"      Boersenzeit nicht abrufbar ({type(e).__name__}) - "
+                  "Intraday-Stops uebersprungen.")
+            return
+        if not clock.get("is_open"):
+            return
+        try:
+            verkauft = live.pruefe_stops_intraday(
+                dry_run=self.cfg.dry_run, verbose=True
+            )
+            if verkauft:
+                print(f"      {len(verkauft)} Position(en) per Intraday-Stop "
+                      f"geschlossen: {', '.join(verkauft)}")
+        except Exception as e:  # noqa: BLE001
+            print(f"      INTRADAY-STOP FEHLGESCHLAGEN: {type(e).__name__}: {e}")
+            try:
+                self.store.heartbeat(ok=True, error=f"stop_intraday: {e}")
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _maybe_kapitalfluesse(self) -> None:
+        """Traegt Ein-/Auszahlungen nach - einmal je Kalendertag.
+
+        Nicht je Zyklus: Der Abruf kostet zwei API-Aufrufe, und Fluesse
+        aendern sich nicht minuetlich. Der eigene Tageszaehler ist bewusst
+        getrennt von dem der Ergebnisbewertung - faellt einer aus, laeuft
+        der andere weiter.
+        """
+        today = dt.date.today()
+        if getattr(self, "_last_fluss_check", None) == today:
+            return
+        try:
+            from . import kapital
+
+            n = kapital.fluesse_nachtragen(self.store, verbose=True)
+            if n:
+                print(f"      {n} Kapitalfluss/-fluesse neu gebucht")
+            self._last_fluss_check = today
+        except Exception as e:  # noqa: BLE001 - darf den Handel nie stoppen
+            print(f"      Kapitalfluss-Abgleich fehlgeschlagen: "
+                  f"{type(e).__name__}: {e}")
+
+    @staticmethod
+    def _symbole_mit_offenen_horizonten(
+        decisions: pd.DataFrame,
+        outcomes: pd.DataFrame,
+        horizonte: tuple[int, ...],
+    ) -> list[str]:
+        """Welche Symbole brauchen noch Kurse - gemessen am PAAR aus
+        Entscheidung und Horizont.
+
+        Der Fehler, gegen den diese Methode existiert (BEFUNDE §G55):
+        Wer nur `decision_id` vergleicht, haelt eine Entscheidung fuer
+        fertig, sobald irgendein Horizont gefuellt ist. Der lange
+        Horizont ist aber genau der, der am Tag der Bewertung noch nicht
+        verfuegbar war - er bleibt dann fuer immer leer.
+
+        Reihenfolge: Symbole mit offenen Horizonten zuerst, danach der
+        Rest. Schneidet die Obergrenze doch einmal, trifft sie die
+        bereits fertigen Symbole - nie die offenen.
+        """
+        if decisions.empty:
+            return []
+
+        alle = decisions["symbol"].dropna()
+        if outcomes.empty:
+            offen_syms = list(dict.fromkeys(alle))
+        else:
+            # Ein Paar (decision_id, horizon) ist erledigt, wenn es in
+            # `outcomes` steht. Alles andere ist offen.
+            erledigt = set(
+                zip(outcomes["decision_id"], outcomes["horizon"].astype(int))
+            )
+            offen_syms = list(
+                dict.fromkeys(
+                    d["symbol"]
+                    for _, d in decisions.iterrows()
+                    if pd.notna(d["symbol"])
+                    and any((d["decision_id"], int(h)) not in erledigt
+                            for h in horizonte)
+                )
+            )
+
+        rest = [x for x in sorted(set(alle)) if x not in set(offen_syms)]
+        return (offen_syms + rest)[:MAX_SYMBOLE_JE_LAUF]
+
     def _maybe_evaluate_outcomes(self) -> None:
         """Ordnet einmal taeglich jeder Entscheidung ihr Ergebnis zu.
 
@@ -258,10 +372,35 @@ class Daemon:
             if decisions.empty:
                 self._last_evaluation = today
                 return
-            symbols = sorted(decisions["symbol"].dropna().unique())[:200]
+
+            # Symbole mit NOCH OFFENEN Ergebnissen zuerst. Frueher stand
+            # hier `sorted(...)[:200]` - eine rein alphabetische Auswahl.
+            # Solange weniger als 200 Symbole zusammenkommen, faellt das
+            # nicht auf; darueber hinaus wuerde alles ab etwa "T"
+            # systematisch NIE ausgewertet, ohne dass es jemand bemerkt.
+            #
+            # **Der zweite Anlauf war auch falsch (BEFUNDE §G55, 11.09.2026).**
+            # Die Vorrangliste verglich ueber `decision_id` allein. Eine
+            # Entscheidung, deren 1- und 3-Tage-Ergebnis schon steht und
+            # der nur der 5-Tage-Wert fehlt, galt damit als erledigt -
+            # und genau das ist der Normalfall, weil am Tag der Bewertung
+            # die kurzen Horizonte verfuegbar sind und der lange nicht.
+            # Am Folgetag fiel das Symbol durch das alphabetische Raster.
+            # Gemessen: 277 von 685 Live-Entscheidungen ohne 5-Tage-Wert,
+            # 128 davon dauerhaft unerreichbar, `vorrang` hatte 18 statt
+            # mehrerer hundert Eintraege.
+            #
+            # Jetzt zaehlt das Paar (decision_id, horizon), und die Grenze
+            # richtet sich nach der Zahl der Symbole mit offenen
+            # Horizonten - nicht nach einer festen Zahl, die die
+            # Symbolmenge ein zweites Mal ueberholt.
+            offen = self.journal.table("outcomes")
+            symbols = self._symbole_mit_offenen_horizonten(
+                decisions, offen, HORIZONTE_LIVE
+            )
             bars = data.get_bars(symbols, "1D", lookback_days=120)
             n = self.journal.evaluate_outcomes(
-                make_price_lookup(bars), horizons=(1, 3, 5)
+                make_price_lookup(bars), horizons=HORIZONTE_LIVE
             )
             print(f"      {n} Ergebnis(se) zu Entscheidungen nachgetragen")
             self._analyse_closed_trades()
@@ -295,17 +434,48 @@ class Daemon:
     # --- Ein Durchgang -----------------------------------------------------
     def step(self) -> bool:
         """Ein Entscheidungslauf. Gibt zurueck, ob er erfolgreich war."""
+        # --- Intraday-Stops ZUERST, und unabhaengig vom Handelsfenster ---
+        # Die uebrigen Fensterregeln schuetzen vor TEUREN Einstiegen: Die
+        # Eroeffnungsspanne hat die weitesten Spreads, kurz vor Schluss
+        # duenner Handel. Fuer eine Notbremse gilt das Gegenteil - genau
+        # dann, wenn eine Aktie nach einer Meldung 30 % verliert, waere
+        # Warten der teuerste Fehler. Ein Stop ist kein Einstieg.
+        #
+        # `close_buffer_minutes` und `open_delay_minutes` bleiben deshalb
+        # bewusst unberuecksichtigt; nur eine geschlossene Boerse haelt die
+        # Pruefung auf, weil dort schlicht nichts ausgefuehrt werden kann.
+        self._maybe_stops_intraday()
+
         can_trade, reason = self.trading_window()
         if not can_trade:
             print(f"  [{dt.datetime.now():%H:%M:%S}] kein Handel: {reason}")
             self.store.heartbeat(ok=True)
+            # Fuellpreise AUCH bei geschlossener Boerse nachtragen. Eine
+            # Order, die Freitag 15:45 ET fuellt, waere sonst bis zum
+            # ersten Montags-Zyklus ohne Fuellpreis - und der
+            # Datenintegritaets-Check meldet ab 6 h ROT (beobachtet
+            # 07.09.2026, TCOM/NIO ueber das Wochenende). Der Aufruf ist
+            # billig: ohne offene Order kehrt er sofort zurueck.
+            try:
+                nach = live.reconcile_fills(lookback_hours=120)
+                if nach:
+                    print(f"      {nach} Fuellpreis(e) nachgetragen (Boerse zu)")
+            except Exception as e:  # noqa: BLE001 - darf den Lauf nicht stoppen
+                print(f"      Fuellpreis-Abgleich (zu) fehlgeschlagen: {type(e).__name__}")
+            # Auch das ist ein vollstaendiger Zyklus: Der Bot hat geprueft
+            # und entschieden, nicht zu handeln. Die Meldung muss HIER
+            # stehen und nicht nur in `live.run_once` - der Daemon kehrt
+            # bei geschlossener Boerse zurueck, bevor `run_once` ueberhaupt
+            # gerufen wird. Ohne sie saehe der Nutzungsnachweis jedes
+            # Wochenende einen ausgefallenen Handelsbot (§G15).
+            live._melde_zyklus(0, 0, f"kein_handel:{reason[:24]}")
             return True
 
         # Ausfuehrungspreise der letzten Orders nachtragen. Muss VOR dem
         # Entscheiden passieren, damit die Slippage-Auswertung vollstaendig
         # bleibt, auch wenn der Prozess zwischendurch neu gestartet wurde.
         try:
-            filled = live.reconcile_fills()
+            filled = live.reconcile_fills(lookback_hours=120)
             if filled:
                 print(f"      {filled} Ausfuehrungspreis(e) nachgetragen")
         except Exception as e:  # noqa: BLE001 - darf den Lauf nicht stoppen
@@ -313,26 +483,44 @@ class Daemon:
 
         self._maybe_evaluate_outcomes()
 
+        # Kapitalfluesse VOR der Risikopruefung nachtragen: Der
+        # einzahlungsbereinigte Hoechststand haengt davon ab. Wuerde eine
+        # Einzahlung erst nach der Pruefung gebucht, sähe der Zuwachs fuer
+        # genau einen Zyklus wie ein Gewinn aus - und nach einer AUSZAHLUNG
+        # wuerde faelschlich ein Drawdown gemeldet, der nur eine Entnahme war.
+        self._maybe_kapitalfluesse()
+
+        # --- Risiko-Dach: steht ueber allem, auch ueber der Strategie ---
+        try:
+            from . import risiko
+
+            frei = risiko.pruefe_konto()
+            if not frei.ok:
+                print(f"  [{dt.datetime.now():%H:%M:%S}] RISIKO-DACH BLOCKIERT:")
+                for g in frei.gruende:
+                    print(f"      {g}")
+                # Bewusst `ok=True`: Das ist kein Fehler, sondern eine
+                # bewusste Entscheidung des Systems. Ein Fehlerzaehler wuerde
+                # sonst hochlaufen und nach `max_consecutive_errors` den
+                # Prozess beenden - eine Sperre wuerde damit zum Absturz.
+                self.store.heartbeat(ok=True, error="risiko_dach_blockiert")
+                return True
+        except Exception as e:  # noqa: BLE001
+            # Faellt die Pruefung selbst aus, wird NICHT gehandelt. Ein
+            # Risiko-Dach, das im Zweifel durchlaesst, ist keines.
+            print(f"  [{dt.datetime.now():%H:%M:%S}] Risikopruefung "
+                  f"fehlgeschlagen ({type(e).__name__}: {e}) - kein Handel.")
+            self.store.heartbeat(ok=True, error=f"risiko_pruefung_fehler: {e}")
+            return True
+
         state = self.recover()
         print(f"  [{dt.datetime.now():%H:%M:%S}] Kapital "
               f"${state['kapital']:,.2f} | {state['positionen_broker']} Positionen")
 
-        # --- Risiko-Dach: ueber der Engine, vor jeder Entscheidung ---
-        # Drawdown-Sperre und Tagesverlust-Bremse blockieren NEUE Kaeufe;
-        # Verkaeufe (Stops, Rangverlust, Zeit) laufen immer weiter.
+        # Risiko-Dach: siehe oben (risiko.pruefe_konto, vor recover()). Eine zweite
+        # Pruefung an dieser Stelle (RisikoDach aus der Session vom 2026-09-29) wurde
+        # beim Zusammenfuehren mit develop entfernt - sie war die schwaechere Doppelung.
         max_new = self.cfg.max_new_positions
-        try:
-            from .risiko import RisikoDach
-
-            frei = RisikoDach().pruefe_konto(
-                float(state["kapital"]), n_positionen=int(state["positionen_broker"]))
-            print("      " + str(frei).replace("\n", "\n      "))
-            if not frei.ok:
-                max_new = 0
-        except Exception as e:  # noqa: BLE001 - das Dach darf den Lauf nie stoppen ...
-            # ... aber ein kaputtes Dach ist selbst ein Risiko: dann keine Kaeufe.
-            print(f"      Risiko-Dach nicht pruefbar ({type(e).__name__}: {e}) - keine neuen Kaeufe")
-            max_new = 0
         if state["verwaist_entfernt"]:
             print(f"      verwaiste Metadaten entfernt: "
                   f"{', '.join(state['verwaist_entfernt'])}")

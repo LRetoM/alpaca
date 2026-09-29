@@ -456,7 +456,7 @@ src/alpaca_bot/hypotheses.py    Hypothesenregister (externes Wissen)
 src/alpaca_bot/patterns.py      Musterspeicher mit Verfallsprüfung
 scripts/16_shadow_daemon.py     Dauerbetrieb des Schattensystems
 scripts/17_shadow_report.py     Berichte + Prüfungen (--pruefen)
-scripts/18_fleet.py             Bots anmelden, auflisten, stilllegen
+scripts/21_fleet.py             Bots anmelden, auflisten, stilllegen
 data/shadow.sqlite              eigene Datenbank
 data/shadow_raw/                JSONL-Rohprotokoll je Lauf
 ```
@@ -676,8 +676,8 @@ der 32 von 98 Ausstiegen auslöste). `B06_ohne_regime` bleibt, muss aber
 bis zur ersten Abwärtsphase als „nicht entscheidbar" geführt werden.
 
 ```bash
-python scripts/18_fleet.py --divergenz     # findet solche Doubletten
-python scripts/18_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos bei hold=5"
+python scripts/21_fleet.py --divergenz     # findet solche Doubletten
+python scripts/21_fleet.py --stilllegen B03_ziel_weit --grund "wirkungslos bei hold=5"
 ```
 
 Das ist genau die Vorabprüfung, die §12.2 verlangt — hier vorwärts auf den
@@ -744,7 +744,7 @@ Die Flotte umfasst damit **9 Bots**, die Zufallsschwelle steigt auf
 ### 5.4 Voranmeldung — der Schutz gegen nachträgliche Erzählungen
 
 Jeder Bot muss **vor seinem ersten Lauf** mit Hypothese und Quelle
-registriert werden (`scripts/18_fleet.py --anmelden`). Das Feld
+registriert werden (`scripts/21_fleet.py --anmelden`). Das Feld
 `hypothese` ist Pflicht und beantwortet: *Warum sollte das besser sein,
 und woher stammt die Vermutung?*
 
@@ -1531,7 +1531,7 @@ gefiltert.
 → Maschinerie steht; belastbare Diagnosen weiterhin erst nach 2–4 Wochen.
 
 **Phase 4 — Flotte** ✅ **ERLEDIGT 2026-07-29**
-`fleet.py` + `scripts/18_fleet.py`: Voranmeldung mit Pflicht-Hypothese
+`fleet.py` + `scripts/21_fleet.py`: Voranmeldung mit Pflicht-Hypothese
 (mind. 20 Zeichen) und Pflicht-Achse, Versuchszähler der stillgelegte
 Bots weiterzählt, Zufallsschwelle `sqrt(2·ln N) + 0,5`, gepaarter
 Vergleich über Tagesdifferenzen, Attribution, Divergenz-Diagnose.

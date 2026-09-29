@@ -50,6 +50,7 @@ CHARTER = {
         "Jede Strategie wird gegen Buy & Hold UND gegen die Basisrate gemessen.",
         "Jede RL-Politik wird gegen den Timing-Test gemessen, nicht gegen die Rendite.",
         "Live-Handel und Simulation nutzen DIESELBE Engine.decide().",
+        "Der Schattenbetrieb ruft keine Order-Funktion auf.",
         "Jede Entscheidung wird mit Begruendung protokolliert - auch die blockierten.",
         "Kosten werden immer mitgerechnet, nie nachtraeglich abgezogen.",
         "Keine Zugangsdaten im Code oder im Repository.",
@@ -155,12 +156,24 @@ def check_dry_run_defaults(report: CheckReport) -> None:
 
 
 def check_rate_limiting(report: CheckReport) -> None:
-    """Jedes Modul mit API-Zugriff muss den Rate-Limiter einbinden."""
+    """Jedes Modul mit API-Zugriff muss den Rate-Limiter einbinden.
+
+    Reine Textsuche, kein AST - trifft deshalb auch Marker, die nur als
+    STRING in der Datei stehen, nicht als echter Aufruf. `selfcheck.py`
+    ist deshalb selbst ausgenommen: `api_markers` unten enthaelt die
+    Marker woertlich als Daten. `23_mutationstest.py` ist aus demselben
+    Grund ausgenommen (§G46, 27.08.2026) - eine seiner Mutationen
+    beschreibt den historischen Fehler "`requests.get` statt einer
+    geteilten Session" und zitiert dafuer `requests.get` als TEXT in der
+    Mutation, nicht als Aufruf. Ohne diese Ausnahme meldet die Pruefung
+    hier bei jedem Lauf einen Verstoss, der keiner ist.
+    """
     report.checks_run += 1
     api_markers = ("trading_client()", "stock_data_client()", "crypto_data_client()",
                    "requests.get", "requests.post", "client.get_news")
     for path in _py_files():
-        if path.name in {"ratelimit.py", "clients.py", "selfcheck.py"}:
+        if path.name in {"ratelimit.py", "clients.py", "selfcheck.py",
+                         "23_mutationstest.py"}:
             continue
         text = path.read_text()
         uses_api = any(m in text for m in api_markers)
@@ -213,6 +226,92 @@ def check_single_decision_path(report: CheckReport) -> None:
                 "statt der Engine. Simulation und Live wuerden auseinanderlaufen.",
                 path.name,
             )
+
+
+SCHATTEN_ZUSATZ = ("fleet.py", "patterns.py")
+"""Schattenmodule, deren Name nicht mit `shadow` beginnt."""
+
+
+def schatten_module() -> list[str]:
+    """Alle Module des Schattenbetriebs - per Suchmuster, nicht per Liste.
+
+    **Warum ein Glob und keine aufgezaehlte Liste (23.08.2026, §G20).**
+    Hier stand zuerst genau so eine Liste:
+
+        SCHATTEN_MODULE = ("shadow.py", "shadow_eval.py", "fleet.py",
+                           "patterns.py")
+
+    Am selben Tag wurde `shadow.py` in fuenf Module aufgeteilt. Der Code,
+    um den es geht, wanderte nach `shadow_schritte.py` - und die Regel
+    bewachte ab da die **Fassade** statt des Codes. Sie meldete weiter
+    gruen. Gefunden hat das nicht ein Test, sondern der Mutationstest:
+    Er baute `from . import trading` in `shadow_schritte.py` ein, und
+    niemand schlug an.
+
+    Das ist die Fehlerklasse aus §G15 in ihrer unangenehmsten Form - eine
+    Sicherung, die vom Aufraeumen selbst blind gemacht wird. Ein
+    Suchmuster hat sie nicht: Ein neues `shadow_*.py` ist automatisch
+    abgedeckt, ohne dass jemand daran denken muss.
+    """
+    return sorted({p.name for p in SRC.glob("shadow*.py")} | set(SCHATTEN_ZUSATZ))
+
+
+def check_schatten_handelt_nicht(report: CheckReport) -> None:
+    """Kein Schattenmodul darf `trading` erreichen.
+
+    **Warum das eine eigene Regel bekommt (23.08.2026, §G19).** Diese
+    Zusicherung steht an drei prominenten Stellen - `CLAUDE.md`,
+    `README.md` und `BETRIEBSPLAN` §6 - und war bis heute an keiner
+    einzigen geprueft:
+
+        "Der Schattenbetrieb importiert trading.py bewusst NICHT -
+         er *kann* keine Order senden, nicht nur 'darf nicht'."
+
+    Nachgemessen: Sie stimmt. Kein Schattenmodul referenziert `trading`.
+    Das ist genau die Lage aus §G17 (der RL-Docstring behauptete, der
+    Timing-Test sei nicht abschaltbar - er stimmte auch, war aber
+    ungeprueft). Eine Zusicherung, die dieses Projekt sonst durch Tests
+    deckt, blieb hier eine Behauptung.
+
+    **Was diese Regel NICHT leistet - und das gehoert dazu.** Sie prueft
+    den Quelltext, nicht den Prozess. Zur Laufzeit ist
+    `alpaca_bot.trading` sehr wohl geladen: `import alpaca_bot.shadow`
+    fuehrt `__init__.py` aus, und das importiert `trading` mit. Aus
+    "kann nicht" wird damit streng genommen "tut nicht". Ein Import
+    allein sendet keine Order, und `trading` haelt zusaetzlich
+    `dry_run=True` als Standard und `_check_risk()` vor jedem Senden -
+    die Trennung ist also mehrfach abgesichert. Aber die staerkere
+    Formulierung ("kann nicht") traegt nur so weit, wie diese Pruefung
+    reicht: bis zum Quelltext.
+
+    Geprueft werden alle `shadow*.py` plus `SCHATTEN_ZUSATZ` - siehe
+    `schatten_module()`, warum das ein Suchmuster und keine Liste ist.
+    """
+    report.checks_run += 1
+    for name in schatten_module():
+        path = SRC / name
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            treffer = False
+            if isinstance(node, ast.ImportFrom):
+                treffer = (node.module or "").split(".")[-1] == "trading" or any(
+                    a.name == "trading" for a in node.names)
+            elif isinstance(node, ast.Import):
+                treffer = any(a.name.split(".")[-1] == "trading"
+                              for a in node.names)
+            if treffer:
+                report.add(
+                    "verstoss", "Der Schattenbetrieb ruft keine Order-Funktion auf",
+                    f"{name} importiert `trading`. Der Schattenbetrieb darf "
+                    f"Orders nicht einmal erreichen koennen - das ist der "
+                    f"Grund, warum er ohne Kapitalrisiko messen darf.",
+                    f"{name}:{node.lineno}",
+                )
 
 
 def check_no_shuffle_split(report: CheckReport) -> None:
@@ -387,6 +486,7 @@ def run_all() -> CheckReport:
     for check in (
         check_dry_run_defaults,
         check_single_decision_path,
+        check_schatten_handelt_nicht,
         check_rate_limiting,
         check_no_shuffle_split,
         check_no_secrets,

@@ -175,7 +175,19 @@ def get_history(
     if not syms:
         return pd.DataFrame()
 
-    key = f"{len(syms)}_{abs(hash('|'.join(syms))) % 10**10}"
+    # hashlib statt Pythons eingebautem hash(): Der ist pro Prozessstart
+    # zufaellig gesalzen (Hash-Randomisierung seit Python 3.3) - ein zweiter
+    # Skriptlauf mit demselben Symbolset haette einen ANDEREN Schluessel
+    # bekommen, den Cache faelschlich als leer angesehen und alles neu
+    # abgerufen. Genau das hat am 04.08.2026 das yfinance-Tageskontingent
+    # (1800/Tag) durch einen zweiten Lauf von scripts/19_faktor_tests.py
+    # vollstaendig aufgebraucht, obwohl alle Daten schon im Cache lagen.
+    # `shadow.lade_bars` umgeht das Problem bereits mit hashlib - hier
+    # nachgezogen, statt es fuer jeden weiteren Aufrufer offen zu lassen.
+    import hashlib
+
+    digest = hashlib.sha256("|".join(syms).encode()).hexdigest()[:10]
+    key = f"{len(syms)}_{digest}"
     cache = _cache_path(source, key, years)
     if use_cache and cache.exists():
         if verbose:

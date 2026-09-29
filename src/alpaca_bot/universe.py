@@ -74,6 +74,36 @@ def all_tradable_assets(
     return df.sort_values("symbol").reset_index(drop=True)
 
 
+def nasdaq_universum(nur_shortable: bool = False) -> list[str]:
+    """Alle heute an der NASDAQ handelbaren Symbole (Stand 11.09.2026: 5.568).
+
+    **Der Vorbehalt, der hier groesser ist als sonst irgendwo.** Diese
+    Liste ist "heute handelbar" - also genau die Survivorship-Falle
+    (§G11). Fuer eine AUSBRUCH-Strategie wirkt sie besonders stark: Ein
+    Wert, der +40 % machte und danach verschwand, fehlt vollstaendig;
+    uebrig bleiben die Ausbrueche, die ueberlebt haben.
+
+    **Und ein zweiter, der oft uebersehen wird.** Von den 5.568 haben
+    die meisten fast keinen Umsatz. Bei denen ist die Annahme von
+    12,2 bps Spanne (§G54, gemessen am LIQUIDEN Universum) nicht
+    optimistisch, sondern falsch - dort sind 200 bps und mehr normal.
+    Ein Backtest ueber die volle Liste sieht deshalb besser aus als die
+    Wirklichkeit, nicht schlechter.
+
+    Gegenmittel ist der Umsatzfilter der Strategie selbst
+    (`AusbruchConfig.min_dollar_volumen`), nicht diese Liste.
+
+    Args:
+        nur_shortable: nur Werte, die Alpaca auch leerverkaufen laesst -
+            ein grober, aber brauchbarer Liquiditaetshinweis (2.171 von
+            5.568).
+    """
+    df = all_tradable_assets(exchanges=("NASDAQ",))
+    if nur_shortable and "shortable" in df.columns:
+        df = df[df["shortable"]]
+    return df["symbol"].dropna().astype(str).tolist()
+
+
 UNIVERSE_FILE = PROJECT_ROOT / "results" / "factor_lab" / "universum.csv"
 
 
@@ -176,13 +206,20 @@ def build_universe(
 
 def fetch_history(
     symbols: list[str], years: float = 5.0, batch_size: int = 300,
-    verbose: bool = True
+    verbose: bool = True, use_cache: bool = False
 ) -> pd.DataFrame:
     """Laedt die volle Historie fuer viele Symbole in Batches.
 
     Ein einzelner Request ueber tausende Symbole laeuft in Zeitueberschreitungen.
     Batches sind langsamer zu schreiben, aber die einzige Variante, die bei
     dieser Groessenordnung durchlaeuft.
+
+    `use_cache=True` legt jeden Batch als CSV ab. Bei einem Lauf ueber
+    Hunderte Symbole und Jahre ist das der Unterschied zwischen Minuten
+    und Stunden - und die API-Quote teilen sich Live-Bot, Schattenbetrieb
+    und jede Auswertung. Die Batch-Grenzen muessen dafuer stabil bleiben:
+    dieselbe Symbolliste bei gleicher `batch_size` ergibt dieselben
+    Schluessel, eine andere `batch_size` verwirft den Cache.
     """
     from .data import get_bars
 
@@ -191,7 +228,8 @@ def fetch_history(
     for i in range(0, len(symbols), batch_size):
         chunk = symbols[i : i + batch_size]
         try:
-            b = get_bars(chunk, "1D", lookback_days=int(years * 365))
+            b = get_bars(chunk, "1D", lookback_days=int(years * 365),
+                         use_cache=use_cache)
             if not b.empty:
                 frames.append(b)
         except Exception as e:  # noqa: BLE001
@@ -344,3 +382,93 @@ BENCHMARK_SETS: dict[str, list[str]] = {
         "NEE", "DUK", "SO", "D", "AEP", "AMT", "PLD", "EQIX", "CCI", "SPG",
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Sektoren - Grundlage der Klumpenkontrolle im Risiko-Dach
+# ---------------------------------------------------------------------------
+SEKTOR_CACHE = PROJECT_ROOT / "results" / "factor_lab" / "sektoren.csv"
+
+
+def sektoren(symbols: list[str], *, use_cache: bool = True,
+             verbose: bool = False) -> dict[str, str]:
+    """Symbol -> Sektor, dauerhaft gecacht.
+
+    **Wofuer:** `risiko.pruefe_order` kann ohne diese Zuordnung das
+    Klumpenrisiko nicht pruefen. Fuenfzehn Halbleiterwerte sind EINE Wette,
+    keine fuenfzehn - im Crash verhalten sie sich auch so. Ohne Sektordaten
+    saehe ein solches Depot wie ein perfekt gestreutes aus.
+
+    Der Cache ist bewusst OHNE Datum im Namen: Der Sektor eines
+    Unternehmens aendert sich praktisch nie. Ein taegliches Neuladen waere
+    bei 1.200 Symbolen ein Vielfaches des yfinance-Tageskontingents - und
+    genau dieses Kontingent wird fuer die Forschung gebraucht.
+
+    Nur FEHLENDE Symbole werden nachgeladen. Faellt der Abruf aus, bleibt
+    das Symbol unbekannt; `risiko.sektor_anteile` zaehlt es dann unter
+    'unbekannt', statt es stillschweigend zu ignorieren.
+    """
+    import csv
+
+    bekannt: dict[str, str] = {}
+    if use_cache and SEKTOR_CACHE.exists():
+        with SEKTOR_CACHE.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("symbol"):
+                    bekannt[row["symbol"]] = row.get("sektor") or "unbekannt"
+
+    fehlend = [s for s in symbols if s not in bekannt]
+    if not fehlend:
+        return {s: bekannt.get(s, "unbekannt") for s in symbols}
+
+    import yfinance as yf
+
+    limiter = RateLimiter("yfinance")
+    for i, sym in enumerate(fehlend, 1):
+        try:
+            limiter.acquire()
+            info = yf.Ticker(sym).info
+            bekannt[sym] = (info or {}).get("sector") or "unbekannt"
+        except Exception:  # noqa: BLE001 - einzelne Ausfaelle sind normal
+            bekannt[sym] = "unbekannt"
+        if verbose and i % 25 == 0:
+            print(f"      Sektoren: {i}/{len(fehlend)}")
+
+    SEKTOR_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with SEKTOR_CACHE.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["symbol", "sektor"])
+        for s, sek in sorted(bekannt.items()):
+            w.writerow([s, sek])
+    return {s: bekannt.get(s, "unbekannt") for s in symbols}
+
+
+def liquiditaets_dezile(symbols: list[str]) -> dict[str, int]:
+    """Symbol -> Liquiditaetsdezil (1 = liquideste 10 %, 10 = duennste).
+
+    **Wofuer:** Beantwortet die offene Frage aus `load_universe`: Die
+    Umkehr-Faktoren waren auf 2.162 Symbolen stabil, auf den 150
+    liquidesten dagegen NICHT (`rsi2` dort nur 29 % positive Jahre). Ob
+    das live genauso ist, laesst sich nur beantworten, wenn jede
+    Entscheidung ihr Dezil mitfuehrt.
+
+    **Survivorship-Warnung:** Bei duennen Werten ist der Bias am
+    groessten (micro_cap 18 %/Jahr Delisting gegen large_cap 2 %). Ein
+    Vorsprung im untersten Dezil ist deshalb zuerst ein Verdacht, kein
+    Befund - siehe `bias_probe`.
+    """
+    try:
+        df = pd.read_csv(UNIVERSE_FILE)
+    except (FileNotFoundError, OSError):
+        return {}
+    if "dollar_volume" not in df.columns:
+        return {}
+    df = df.dropna(subset=["symbol", "dollar_volume"]).copy()
+    if df.empty:
+        return {}
+    # qcut mit duplicates="drop": Bei vielen gleichen Umsaetzen koennen
+    # Dezilgrenzen zusammenfallen - ohne das Flag wirft pandas.
+    df["dezil"] = pd.qcut(df["dollar_volume"].rank(ascending=False, method="first"),
+                          10, labels=False, duplicates="drop") + 1
+    zuordnung = dict(zip(df["symbol"].astype(str), df["dezil"].astype(int)))
+    return {s: zuordnung[s] for s in symbols if s in zuordnung}

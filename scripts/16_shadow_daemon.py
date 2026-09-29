@@ -37,8 +37,10 @@ import sys
 import time
 import traceback
 
+from alpaca_bot import nutzung
 from alpaca_bot.engine import EngineConfig
-from alpaca_bot.shadow import ShadowConfig, ShadowStore, einbuchen, entscheiden, verifizieren
+from alpaca_bot.shadow import (ShadowConfig, ShadowStore, einbuchen, entscheiden,
+                               lernen, verifizieren)
 
 _stop = False
 
@@ -86,21 +88,69 @@ def alle_schritte(cfg: ShadowConfig, store: ShadowStore, *, verbose: bool = True
     ihren Einstiegskurs), dann verifizieren, dann neu entscheiden. Andersherum
     wuerde die frische Entscheidung sofort mit-eingebucht - zum Kurs desselben
     Tages, auf dem sie beruht. Das waere ein Datenleck.
+
+    **`lernen` steht am Ende und nicht am Anfang.** Es wertet aus, was die
+    drei Schritte davor erzeugt haben. Liefe es zuerst, saehe es immer den
+    Stand von gestern - eine ganze Runde Verzoegerung, die niemandem
+    auffiele.
+
+    Alle vier Schritte sind **idempotent**: Ohne neuen Handelstag tun sie
+    nichts und kosten Sekundenbruchteile. Das ist die Voraussetzung
+    dafuer, den Durchgang haeufig laufen zu lassen, ohne Rechenzeit und
+    API-Kontingent zu verbrennen (§G14).
     """
     ergebnis = {}
-    for name, fn in (("eingebucht", einbuchen),
-                     ("verifiziert", verifizieren),
-                     ("entschieden", entscheiden)):
+    for name, fn, baustein in (("eingebucht", einbuchen, "schatten.einbuchen"),
+                               ("verifiziert", verifizieren, "schatten.verifizieren"),
+                               ("entschieden", entscheiden, "schatten.entscheiden"),
+                               ("gelernt", lernen, "schatten.lernen")):
         if _stop:
             break
+        t0 = time.time()
         try:
             print(f"  [{dt.datetime.now():%H:%M:%S}] {name} ...")
             ergebnis[name] = fn(cfg, store, verbose=verbose)
+            # Die Signatur kennzeichnet das ERGEBNIS, nicht den Lauf: Zahl
+            # plus juengster Stichtag. Bleibt sie ueber viele Runden gleich,
+            # wurde zwar gerechnet, aber nichts Neues gefunden - genau der
+            # Zustand, den der Dauerbetrieb monatelang hatte (§G14).
+            nutzung.melden(baustein, ergebnis[name],
+                           signatur=f"{ergebnis[name]}@{_stichtag(store)}",
+                           dauer_s=round(time.time() - t0, 2))
         except Exception as e:  # noqa: BLE001 - ein Schritt darf die anderen nicht stoppen
             print(f"      FEHLER in '{name}': {type(e).__name__}: {e}")
             traceback.print_exc()
             ergebnis[name] = -1
+            nutzung.melden(baustein, -1, signatur="fehler",
+                           dauer_s=round(time.time() - t0, 2),
+                           hinweis=f"{type(e).__name__}: {e}")
+
+    # Sicherung NACH den Schritten, nicht davor: Gesichert wird der
+    # Stand, den dieser Durchgang erzeugt hat. Und nur, wenn etwas
+    # entstanden ist - die vier Schritte sind idempotent (§G14), am
+    # Wochenende liefern sie alle 0. Eine Kopie je Leerlauf waere reine
+    # Plattenarbeit und wuerde die sieben aufbewahrten Staende binnen
+    # Stunden mit identischen Kopien fuellen, sodass am Montag kein
+    # einziger Stand von vor dem Wochenende mehr da waere.
+    # (BEFUNDE §G19 Fund 7)
+    if any(v > 0 for v in ergebnis.values() if isinstance(v, int)):
+        t0 = time.time()
+        ziel = store.sichern()
+        if verbose and ziel:
+            print(f"      Sicherung: {ziel.name} "
+                  f"({ziel.stat().st_size / 1e6:.1f} MB, "
+                  f"{time.time() - t0:.1f}s)")
     return ergebnis
+
+
+def _stichtag(store: ShadowStore) -> str:
+    """Juengster Stichtag im Buch - Teil der Nutzungssignatur."""
+    try:
+        with store._conn() as c:
+            return (c.execute("SELECT MAX(as_of) FROM predictions").fetchone()[0]
+                    or "")[:10]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def main() -> int:
@@ -119,7 +169,8 @@ def main() -> int:
                    help="Sekunden zwischen zwei Durchgaengen im Dauerbetrieb")
     p.add_argument("--einmal", action="store_true", help="Nur ein Durchgang")
     p.add_argument("--status", action="store_true", help="Nur Zustand anzeigen")
-    p.add_argument("--schritt", choices=["entscheiden", "einbuchen", "verifizieren"],
+    p.add_argument("--schritt",
+                   choices=["entscheiden", "einbuchen", "verifizieren", "lernen"],
                    help="Nur diesen einen Schritt ausfuehren")
     p.add_argument("--bot-id", default="B00_basis")
     args = p.parse_args()
@@ -155,7 +206,7 @@ def main() -> int:
 
     if args.schritt:
         fn = {"entscheiden": entscheiden, "einbuchen": einbuchen,
-              "verifizieren": verifizieren}[args.schritt]
+              "verifizieren": verifizieren, "lernen": lernen}[args.schritt]
         n = fn(cfg, store)
         print(f"\n  {args.schritt}: {n}")
         print()

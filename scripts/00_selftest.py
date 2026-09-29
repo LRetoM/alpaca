@@ -262,16 +262,30 @@ def main() -> int:
         for i in range(20):
             d = run.decision("TEST", "buy", ts=df.index[100 + i * 5],
                              reasons={"grund_a": True}, price=float(df["close"].iloc[100 + i * 5]))
+            # `referenz_quelle="quote"` ist seit dem 23.08.2026 Pflicht,
+            # damit die Zeile in der Slippage-Auswertung mitzaehlt: Die
+            # Bereinigung nimmt nur noch Zeilen mit VERIFIZIERTER Referenz
+            # (§G19 Fund 3). Ohne dieses Argument bildet der Selbsttest
+            # den echten Schreibpfad nicht mehr ab - `live.py` setzt es
+            # bei jeder Order.
             run.order(d, symbol="TEST", side="buy", status="filled", qty=1,
-                      dry_run=False, expected_price=100.0, fill_price=100.05)
+                      dry_run=False, expected_price=100.0, fill_price=100.05,
+                      referenz_quelle="quote")
     check("Lauf, Entscheidungen und Orders gespeichert",
           len(j.table("runs")) == 1 and len(j.table("decisions")) == 20
           and len(j.table("orders")) == 20)
     n_out = j.evaluate_outcomes(make_price_lookup(bars), horizons=(1, 5))
     check("Ergebnisse werden Entscheidungen zugeordnet", n_out > 0,
           f"{n_out} Bewertungen")
+    # `script` ausdruecklich mitgeben: Seit dem 22.08.2026 liefert
+    # `decision_quality` per Vorgabe NUR den Live-Bot (§G13). Dass dieser
+    # Lauf hier unter "selbsttest" laeuft und ohne das Argument leer
+    # zurueckkaeme, ist genau die gewollte Wirkung - die Zeile darunter
+    # prueft beide Richtungen.
     check("Entscheidungsqualitaet je Begruendung auswertbar",
-          not j.decision_quality(5).empty)
+          not j.decision_quality(5, script="selbsttest").empty)
+    check("Fremde Laeufe bleiben aus der Auswertung",
+          j.decision_quality(5).empty and j.decision_quality(5, script=None).shape[0] > 0)
     check("Slippage wird gemessen", not j.slippage_report().empty,
           f"{j.slippage_report()['mittel'].iloc[0]:.1f} bps")
     check("Integritaetspruefung meldet keine Luecke", len(j.integrity_check()) == 0)
@@ -376,7 +390,7 @@ def main() -> int:
                   len(gek) > 0 and gek != set(sorted(fr_h)[-len(gek):]) and not eng_h._modell_phase)
 
     print("\n[14] Risiko-Dach (Drawdown-Sperre, Tagesverlust, Einzahlungen)")
-    from alpaca_bot import risiko
+    from alpaca_bot import risiko_dach as risiko   # Archiv-Fassung der Session vom 2026-09-29
 
     with tempfile.TemporaryDirectory() as tmp:
         import datetime as _dt

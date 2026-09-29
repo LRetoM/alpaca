@@ -77,7 +77,8 @@ def main() -> int:
         from alpaca_bot import costs
 
         print()
-        print(costs.reconcile(args.expected_slippage, slip))
+        print(costs.reconcile(args.expected_slippage, slip,
+                              werte=j.slippage_werte()))
 
     # --- Blockierte Entscheidungen ---
     blocked = dec[dec["blocked_by"].notna()]

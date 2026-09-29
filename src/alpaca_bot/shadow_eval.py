@@ -31,10 +31,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
 
 import numpy as np
 import pandas as pd
 
+from . import statistik
 from .shadow import ShadowStore
 
 SPERRZONE_ANTEIL = 0.20
@@ -87,6 +89,19 @@ def datensatz(store: ShadowStore | None = None, *, buch: str = "rangliste",
 # ---------------------------------------------------------------------------
 # Signalguete
 # ---------------------------------------------------------------------------
+def _horizont_tage(spalte: str) -> int:
+    """Liest die Fensterlaenge aus einem Spaltennamen wie 'fwd_5d'.
+
+    Der Horizont steckt im Namen und nirgends sonst. Ihn zu raten waere
+    gefaehrlich: zu klein gewaehlt bleibt die Ueberlappung teilweise
+    stehen, zu gross wird der Test unnoetig streng. Ist nichts lesbar,
+    wird 1 zurueckgegeben - also KEINE Korrektur, und das faellt in der
+    Ausgabe als `aufblaehung 1.0` auf.
+    """
+    m = re.search(r"(\d+)", spalte or "")
+    return int(m.group(1)) if m else 1
+
+
 def ic(df: pd.DataFrame, horizont: str = "fwd_5d") -> dict:
     """Information Coefficient: sortiert der Score die Kandidaten richtig?
 
@@ -94,25 +109,58 @@ def ic(df: pd.DataFrame, horizont: str = "fwd_5d") -> dict:
     wie `research.py` es fuer die Historie tut. Ein globaler IC ueber alle
     Zeilen wuerde zu grossen Teilen messen, ob ein Monat besser war als ein
     anderer (also den Markt), nicht ob der Faktor an EINEM Tag trennt.
+
+    **Der zurueckgegebene `t` ist um die Ueberlappung korrigiert** (§G12).
+    Bei `fwd_5d` teilen benachbarte Tage vier Fuenftel ihres
+    Renditefensters; der unkorrigierte Wert faellt dadurch systematisch
+    zu hoch aus (gemessen: Fehlalarmquote 39,5 % statt 5 %). Der rohe
+    Wert steht als `t_roh` daneben - er ist zum Vergleich da, nicht zum
+    Zitieren.
+
+    Der korrigierte Wert liegt bewusst unter dem eingefuehrten Schluessel
+    `t`: Jeder bestehende Verbraucher (Schattenbericht, Musterspeicher)
+    bekommt damit automatisch den richtigen, ohne selbst daran zu denken.
     """
     if df.empty or horizont not in df:
         return {"n_tage": 0, "ic": np.nan, "t": np.nan}
 
-    tages_ic = []
+    paare = []
     for tag, g in df.groupby("tag"):
         g = g.dropna(subset=["score", horizont])
         if len(g) < 5 or g["score"].nunique() < 2:
             continue
-        tages_ic.append(g["score"].corr(g[horizont], method="spearman"))
+        paare.append((tag, g["score"].corr(g[horizont], method="spearman")))
 
-    tages_ic = pd.Series([x for x in tages_ic if np.isfinite(x)])
+    # Chronologisch: Newey-West liest die Autokorrelation aus der
+    # Reihenfolge. `groupby` sortiert zwar, aber die Zusicherung gehoert
+    # sichtbar hierher, nicht in eine Annahme ueber pandas.
+    paare.sort(key=lambda x: x[0])
+    tages_ic = pd.Series([x for _, x in paare if np.isfinite(x)])
     if len(tages_ic) < 2:
         return {"n_tage": len(tages_ic), "ic": np.nan, "t": np.nan}
 
     mittel = float(tages_ic.mean())
-    t = mittel / (tages_ic.std(ddof=1) / math.sqrt(len(tages_ic)))
-    return {"n_tage": int(len(tages_ic)), "ic": round(mittel, 5),
-            "t": round(float(t), 2), "ic_std": round(float(tages_ic.std(ddof=1)), 4)}
+    t_roh = mittel / (tages_ic.std(ddof=1) / math.sqrt(len(tages_ic)))
+    h = _horizont_tage(horizont)
+    if h > 1:
+        t_korr, aufbl = statistik.newey_west_t(tages_ic.to_numpy(), lag=h - 1)
+    else:
+        t_korr, aufbl = float(t_roh), 1.0
+    # Nicht berechenbar heisst NICHT "dann eben der rohe Wert". Bei einem
+    # 10-Tage-Fenster ueber 8 Handelstage gibt es keinen gueltigen t-Wert -
+    # der rohe waere die optimistischste aller Antworten und saehe wie ein
+    # Ergebnis aus. `nan` ist hier die einzige ehrliche Zahl.
+    ergebnis = {"n_tage": int(len(tages_ic)), "ic": round(mittel, 5),
+                "t_roh": round(float(t_roh), 2), "horizont": h}
+    if np.isfinite(t_korr):
+        ergebnis |= {"t": round(float(t_korr), 2),
+                     "aufblaehung": round(float(aufbl), 2)}
+    else:
+        ergebnis |= {"t": np.nan, "aufblaehung": np.nan,
+                     "hinweis": f"{len(tages_ic)} Tage sind fuer einen "
+                                f"{h}-Tage-Horizont zu wenig - kein t-Wert"}
+    ergebnis["ic_std"] = round(float(tages_ic.std(ddof=1)), 4)
+    return ergebnis
 
 
 def kalibrierung(df: pd.DataFrame, horizont: str = "fwd_5d",
@@ -230,19 +278,65 @@ def _monotonie(g: pd.DataFrame) -> float | None:
 # Flotte: gepaarter Vergleich
 # ---------------------------------------------------------------------------
 def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
-                      *, buch: str = "spiegel", schreiben: bool = True,
+                      *, schreiben: bool = True,
                       sperrzone_oeffnen: bool = False) -> dict:
     """Bot A gegen Bot B - ueber die TAGESDIFFERENZ, nicht ueber Gesamtrenditen.
 
+    **Immer auf dem Spiegelbuch.** Bis zum 22.08.2026 nahm diese Funktion
+    einen Parameter `buch="spiegel"` entgegen und benutzte ihn nirgends -
+    gerechnet wurde stets auf `equity_kurve`. `scripts/21_fleet.py` bot
+    ihn als `--buch {spiegel,rangliste}` an und reichte ihn durch: Wer
+    `--buch rangliste` waehlte, bekam still das Spiegelbuch-Ergebnis
+    (§G16).
+
+    Der Parameter ist ersatzlos entfallen, weil er konzeptionell nicht
+    erfuellbar ist: Verglichen werden Equity-Kurven, und ein Depot hat
+    nur das Spiegelbuch. Das Ranglisten-Buch zeichnet Kandidaten ohne
+    Kapitalgrenze auf - es gibt dort keine Kurve, die man vergleichen
+    koennte. Ein Parameter, dessen zweiter Wert unmoeglich ist, gehoert
+    nicht in die Signatur.
+
     Beide Bots sehen dieselben Tage, Symbole und Kurse. Verglichen wird
     deshalb d_t = rendite_A(t) - rendite_B(t); der Marktfaktor kuerzt sich
-    heraus. Die Streuung von d ist typisch 3-5x kleiner als die der
-    Einzelrenditen, und weil die noetige Tageszahl quadratisch davon
-    abhaengt, sinkt sie um den Faktor 10-25.
+    heraus.
 
-    Praktische Folge: "A schlaegt B" ist nach 6-10 Wochen entscheidbar,
-    nicht erst nach 9 Monaten. Das ist der Grund, warum die Flotte der
-    schnellere Erkenntnisweg ist.
+    **Wie stark das hilft, haengt vom Bot ab - und der Docstring hat das
+    lange zu optimistisch behauptet (23.08.2026, §G22).** Hier stand:
+    *"Die Streuung von d ist typisch 3-5x kleiner ... 'A schlaegt B' ist
+    nach 6-10 Wochen entscheidbar."* An den echten Kurven nachgemessen:
+
+        B08 gegen B00    3,6x     wie behauptet
+        B04 gegen B00    2,4x     schwaecher
+        B11 gegen B09    1,1x     praktisch KEINE Reduktion
+        B07 gegen B00    0,8x     die Differenz streut STAERKER
+
+    Die Reduktion entsteht durch UEBERLAPPUNG der Depots. Bots, die sich
+    nur im Kapitaleinsatz unterscheiden (B08), halten fast dieselben
+    Positionen - dort greift sie. Bots, die andere Positionen anders lange
+    halten (B11), haben wenig Ueberlappung, und die Differenz ist fast so
+    volatil wie die Rendite selbst. Weil der Zeitbedarf QUADRATISCH mit
+    der Streuung waechst, macht das aus "6-10 Wochen" schnell Monate.
+
+    **Was am Verfahren dagegen stimmt.** Die Fehlalarmquote wurde am
+    23.08.2026 erstmals gemessen - 600 Laeufe auf reinem Rauschen, beide
+    Depots mit identischer Rangliste und ueberlappenden Positionen:
+
+        Perzentil     gemessen   t-Verteilung
+            90 %         1,71         1,69
+            95 %         2,04         2,03
+          97,5 %         2,42         2,35
+            99 %         2,70         2,73
+
+    Kolmogorow-Smirnow gegen t(34): p = 0,16. Der t-Wert ist also NICHT
+    aufgeblaeht - anders als bei den ueberlappenden Renditefenstern in
+    §G12. Der Grund: d_t ist eine EINTAGES-Differenz; es gibt kein
+    Mehrtages-Fenster, das sich mit dem Nachbartag teilt. Gemessene
+    Autokorrelation von d: nicht von 0 unterscheidbar.
+
+    **Wie viel Effekt noetig ist, beantwortet `trennschaerfe()`.** Sie
+    gehoert zu jeder Auswertung dazu: Ein durchgefallenes Kriterium 1
+    ohne diese Zahl laesst "nicht besser" und "nicht zeigbar" gleich
+    aussehen.
     """
     from . import fleet
 
@@ -290,6 +384,333 @@ def vergleich_gepaart(bot_a: str, bot_b: str, store: ShadowStore | None = None,
                  dt.datetime.now(dt.UTC).isoformat()),
             )
     return erg
+
+
+# Bandbreite fuer die Verlaengerungsquote aus BETRIEBSPLAN §3.3 Kriterium 3.
+VERLAENGERUNG_MIN = 0.10
+VERLAENGERUNG_MAX = 0.60
+KRITERIUM_MIN_TAGE = 20
+
+Z_GUETE_80 = 0.84
+"""Normalquantil fuer 80 % Trefferwahrscheinlichkeit (einseitig)."""
+
+
+def trennschaerfe(bot_id: str, basis_bot: str | None = None,
+                  store: ShadowStore | None = None,
+                  n_tage: int | None = None) -> dict:
+    """Welchen Effekt koennte dieser Vergleich ueberhaupt nachweisen?
+
+    **Warum es diese Funktion gibt (23.08.2026, BEFUNDE §G22).** Ein
+    Kriterium, das "DURCHGEFALLEN" meldet, ohne dazuzusagen, was
+    nachweisbar gewesen waere, ist eine irrefuehrende Auswertung. Es gibt
+    zwei voellig verschiedene Gruende fuer ein durchgefallenes
+    Kriterium 1:
+
+        (a) Der Bot ist nicht besser.
+        (b) Der Bot ist besser, aber die Datenlage kann es nicht zeigen.
+
+    Beide sehen in der Ausgabe identisch aus. Wer sie verwechselt, verwirft
+    eine funktionierende Idee - oder haelt eine tote fuer "noch offen".
+
+    **Der Anlass war eine widerlegte Behauptung.** `vergleich_gepaart`
+    versprach: *"Die Streuung von d ist typisch 3-5x kleiner als die der
+    Einzelrenditen ... 'A schlaegt B' ist nach 6-10 Wochen entscheidbar."*
+    Am 23.08.2026 an den echten Kurven nachgemessen:
+
+        B08 gegen B00    3,6x     wie behauptet
+        B04 gegen B00    2,4x     schwaecher
+        B11 gegen B09    1,1x     praktisch KEINE Reduktion
+        B07 gegen B00    0,8x     die Differenz streut STAERKER
+
+    Die Behauptung gilt fuer Bots, die sich im Kapitaleinsatz
+    unterscheiden (ihre Depots sind fast gleich). Fuer Bots, die andere
+    Positionen anders lange halten - also genau fuer `B11` -, gilt sie
+    nicht. Dort ist die Differenz fast so volatil wie die Rendite selbst,
+    und der Zeitbedarf steigt quadratisch damit.
+
+    **Die Rechnung.** Bei n Tagen und Streuung s der Tagesdifferenz ist
+    der kleinste nachweisbare mittlere Unterschied
+
+        gerade_noch  = schwelle * s / sqrt(n)          (t genau auf der Schwelle)
+        mit_80_prozent = (schwelle + 0.84) * s / sqrt(n)
+
+    Das Zweite ist die ehrlichere Zahl: Ein Effekt exakt in Hoehe von
+    `gerade_noch` wird nur in der HAELFTE der Faelle auch gefunden.
+
+    `n_tage=None` nimmt die heute vorhandenen Tage. Fuer eine Vorschau
+    auf einen kuenftigen Termin die erwartete Zahl uebergeben.
+    """
+    from . import fleet
+
+    s = store or ShadowStore()
+    if basis_bot is None:
+        basis_bot = referenz_bot(bot_id, s)
+
+    eq = s.table("equity_kurve")
+    erg: dict = {"bot": bot_id, "basis": basis_bot, "streuung": None,
+                 "n_tage": 0, "gerade_noch": None, "mit_80_prozent": None,
+                 "hinweis": ""}
+    if eq.empty:
+        erg["hinweis"] = "keine Equity-Kurve"
+        return erg
+
+    piv = eq.pivot(index="tag", columns="bot_id", values="equity")
+    if bot_id not in piv or basis_bot not in piv:
+        erg["hinweis"] = f"{bot_id} oder {basis_bot} hat keine Kurve"
+        return erg
+
+    d = (piv[bot_id].astype(float).pct_change()
+         - piv[basis_bot].astype(float).pct_change()).dropna()
+    if len(d) < 3:
+        erg["hinweis"] = f"nur {len(d)} Tage - keine Streuungsschaetzung"
+        return erg
+
+    streuung = float(d.std(ddof=1))
+    erg["streuung"] = round(streuung, 6)
+    erg["n_streuung"] = len(d)
+    # Die Streuung wird auf ALLEN Tagen geschaetzt, auch denen in der
+    # Sperrzone: Sie ist eine Eigenschaft des Verfahrens, kein Ergebnis.
+    # Ein Ergebnis waere der Mittelwert - der bleibt aussen vor.
+    n = int(n_tage if n_tage is not None else
+            (len(d) if len(d) < 5 else len(d) - int(len(d) * SPERRZONE_ANTEIL)))
+    erg["n_tage"] = n
+    if n < 2 or streuung <= 0:
+        erg["hinweis"] = ("Streuung 0 - die Bots sind bitgleich, ein "
+                          "Unterschied ist grundsaetzlich nicht messbar")
+        return erg
+
+    schwelle = fleet.schwelle_sigma(s)
+    erg["schwelle"] = schwelle
+    erg["gerade_noch"] = round(schwelle * streuung / math.sqrt(n), 6)
+    erg["mit_80_prozent"] = round(
+        (schwelle + Z_GUETE_80) * streuung / math.sqrt(n), 6)
+    erg["kumuliert_80"] = round(erg["mit_80_prozent"] * n, 6)
+    return erg
+
+
+def referenz_bot(bot_id: str, store: ShadowStore | None = None) -> str:
+    """Die bei der ANMELDUNG hinterlegte Vergleichsbasis eines Bots.
+
+    **Auslöser (23.08.2026, BEFUNDE §G19 Fund 1).** Diese Funktion gibt es,
+    weil dieselbe Frage vier Antworten hatte:
+
+        BETRIEBSPLAN §3.3 (Vertragstext)  ->  B00_basis
+        Flottenregistrierung in der DB    ->  B09_nachkauf
+        `21_fleet.py --basis` (Standard)  ->  B00_basis
+        `fokus.offene_fragen`             ->  B09_nachkauf
+
+    Gemessen an B11_dyn_ausstieg_live am 23.08.2026: t = 0,99 gegen B00,
+    t = 1,24 gegen B09. Es ist also KEINE Formalie, welche Referenz das
+    Abnahmekommando nimmt - beide Zahlen tragen denselben Namen und
+    entscheiden ueber denselben Vertrag.
+
+    **Warum die Registrierung gewinnt und nicht der Dokumenttext.**
+    BEFUNDE §G6 hat `B00_basis` am 16.08.2026 als Live-Referenz
+    widerlegt: Der Live-Bot laeuft seit dem 30.07.2026 mit
+    `deploy_to_target=True` und `allow_topup=True`, `B00_basis` steht bei
+    `False`/`False`. `B11_dyn_ausstieg_live` wurde daraufhin eigens gegen
+    `B09_nachkauf` angemeldet - genau deshalb traegt er den Zusatz "gegen
+    echte Live-Basis" im Namen. Eine Registrierung ist unveraenderlich;
+    ein Dokumentsatz ist es nicht. Maszgeblich ist deshalb, was bei der
+    Anmeldung festgelegt wurde, nie eine spaeter abgeschriebene Zahl -
+    dasselbe Prinzip, das BETRIEBSPLAN §3.2 fuer `schwelle_sigma()`
+    aufstellt.
+
+    Faellt auf `B00_basis` zurueck, wenn ein Bot ohne `basis_bot`
+    registriert ist (`B00_basis` selbst ist der einzige solche Fall).
+    """
+    from . import fleet
+
+    b = fleet.bot(bot_id, store or ShadowStore())
+    return (b.basis_bot if b and b.basis_bot else "B00_basis")
+
+
+def kriterien_pruefen(bot_id: str, basis_bot: str | None = None,
+                      store: ShadowStore | None = None) -> dict:
+    """Prueft die vier vorab festgelegten Kriterien aus BETRIEBSPLAN §3.3.
+
+    Diese vier Kriterien sind der ENTSCHEIDUNGSVERTRAG - so am 21.08.2026
+    festgelegt (siehe BEFUNDE §G10). `MIN_TAGE` (60) ist eine davon
+    getrennte, strengere Hausmarke von `vergleich_gepaart`; sie ist ein
+    Hinweis, kein Veto. Ohne diese Trennung waere der Termin nicht
+    einhaltbar: 60 nutzbare Tage erreicht ein am 18.08. gestarteter Bot
+    erst Ende November.
+
+    `basis_bot=None` (Standard) nimmt die bei der Anmeldung hinterlegte
+    Referenz (`referenz_bot`). Bis zum 23.08.2026 stand hier fest
+    `"B00_basis"` - eine hartkodierte Vorgabe, die der Registrierung von
+    B11 widersprach und damit den Entscheidungsvertrag auf eine bereits
+    widerlegte Referenz stellte (BEFUNDE §G19 Fund 1). Ein ausdruecklich
+    uebergebener Wert gewinnt weiterhin, damit sich eine Gegenprobe
+    ("was saehe man gegen B00?") von Hand rechnen laesst.
+
+    Ein Kriterium hat drei moegliche Zustaende, nicht zwei:
+
+        True   erfuellt
+        False  durchgefallen -> laut §3.3 bleibt es beim Zeitausstieg
+        None   noch nicht entscheidbar (zu wenig Daten)
+
+    `None` darf NIE als Bestehen durchgehen. Genau diese Verwechslung
+    macht aus einem unfertigen Versuch ein Ergebnis.
+
+    Kriterium 3 und 4 fragen nach "verlaengerten" Positionen. Die Engine
+    fuehrt `verlaengert` nur als lokale Variable; sie protokolliert das
+    Merkmal zwar abgeleitet als `nach_verlaengerung` in den
+    Entscheidungsgruenden (`engine.py:815`), aber `shadow_exits` hat gar
+    keine Spalte fuer Gruende. Hier wird deshalb dieselbe Formel noch
+    einmal gebildet - `bars_held > max_hold_days`, wortgleich zur Engine.
+    Der Nenner ist bewusst NICHT die Zahl aller Ausstiege, sondern nur
+    derer, die die Frist ueberhaupt erreicht haben: eine nach zwei Tagen
+    ausgestoppte Position hatte nie die Gelegenheit, verlaengert zu
+    werden, und wuerde die Quote sonst kuenstlich druecken.
+    """
+    from . import fleet
+
+    s = store or ShadowStore()
+    if basis_bot is None:
+        basis_bot = referenz_bot(bot_id, s)
+    erg: dict = {"bot": bot_id, "basis": basis_bot}
+
+    v = vergleich_gepaart(bot_id, basis_bot, s, schreiben=False)
+    t = v.get("t_wert")
+    schwelle = fleet.schwelle_sigma(s)
+    n_tage = int(v.get("n_tage", 0))
+
+    erg["1_t_ueber_schwelle"] = {
+        "wert": t, "soll": f"> {schwelle}",
+        "erfuellt": None if t is None else bool(t > schwelle),
+    }
+    erg["2_genug_tage"] = {
+        # Nicht schlicht "nach Sperrzone": `vergleich_gepaart` zieht die
+        # Sperrzone erst ab 5 Tagen ab (sonst bliebe von einer
+        # Dreitagesreihe nichts uebrig). Unter 5 Tagen ist `n_tage` also
+        # roh - eine Beschriftung, die das verschweigt, behauptet eine
+        # Bereinigung, die nicht stattgefunden hat.
+        "wert": n_tage,
+        "soll": f">= {KRITERIUM_MIN_TAGE} (Sperrzone ab 5 Tagen abgezogen)",
+        "erfuellt": n_tage >= KRITERIUM_MIN_TAGE,
+    }
+
+    b = fleet.bot(bot_id, s)
+    frist = b.config.max_hold_days if b else None
+    # §3.3 nimmt den DYNAMISCHEN Ausstieg ab. Ein Bot mit
+    # `zeitausstieg_dynamisch=False` verkauft exakt bei `max_hold_days` und
+    # kann konstruktionsbedingt nie verlaengern - fuer ihn ist die Quote
+    # nicht "0 % und damit durchgefallen", sondern gar keine Frage. Ohne
+    # diese Trennung meldete die Pruefung am 21.08.2026 fuer
+    # B04_halten_lang "DURCHGEFALLEN, ist: 0.0". Falsche Aussage, und die
+    # gefaehrliche Richtung: sie sieht nach Messergebnis aus.
+    dynamisch = bool(b.config.zeitausstieg_dynamisch) if b else False
+    ex = s.table("shadow_exits")
+    ex = ex[ex["bot_id"] == bot_id] if not ex.empty else ex
+
+    if b is None or not dynamisch or ex.empty:
+        erreicht = verlaengert = pd.DataFrame()
+    else:
+        erreicht = ex[ex["bars_held"] >= frist]
+        verlaengert = ex[ex["bars_held"] > frist]
+
+    nicht_anwendbar = "entfaellt: Bot hat keinen dynamischen Ausstieg"
+    quote = len(verlaengert) / len(erreicht) if len(erreicht) else None
+    erg["3_verlaengerungsquote"] = {
+        "wert": round(quote, 3) if quote is not None else None,
+        "soll": (f"{VERLAENGERUNG_MIN:.0%} - {VERLAENGERUNG_MAX:.0%}"
+                 if dynamisch else nicht_anwendbar),
+        "n_erreicht_frist": len(erreicht), "n_verlaengert": len(verlaengert),
+        "erfuellt": None if quote is None
+        else bool(VERLAENGERUNG_MIN <= quote <= VERLAENGERUNG_MAX),
+    }
+
+    # Kriterium 4 haengt an Kriterium 3: ohne verlaengerte Trades gibt es
+    # keinen Median, und "kein Median" ist nicht dasselbe wie "negativ".
+    median = (float(verlaengert["return_pct"].median())
+              if len(verlaengert) else None)
+    erg["4_median_positiv"] = {
+        "wert": round(median, 5) if median is not None else None,
+        "soll": "> 0" if dynamisch else nicht_anwendbar,
+        "n": len(verlaengert),
+        "erfuellt": None if median is None else bool(median > 0),
+    }
+
+    zustaende = [erg[k]["erfuellt"] for k in erg if k[0].isdigit()]
+    erg["bestanden"] = all(z is True for z in zustaende)
+    erg["entscheidbar"] = None not in zustaende
+    erg["hinweis_min_tage"] = (
+        f"{n_tage} von {MIN_TAGE} Tagen der strengeren Hausmarke "
+        f"(`MIN_TAGE`) - laut §3.3 kein Veto."
+        if n_tage < MIN_TAGE else ""
+    )
+    return erg
+
+
+def kriterien_text(bot_id: str, basis_bot: str | None = None,
+                   store: ShadowStore | None = None) -> str:
+    """Die vier Kriterien als lesbare Abnahmeliste.
+
+    `basis_bot=None` nimmt die registrierte Referenz - siehe
+    `referenz_bot` fuer den Grund (BEFUNDE §G19 Fund 1).
+    """
+    k = kriterien_pruefen(bot_id, basis_bot, store)
+    zeichen = {True: "ERFUELLT   ", False: "DURCHGEFALLEN", None: "offen      "}
+    # Die Herkunft der Referenz steht im Kopf, nicht nur ihr Name. Vom
+    # 16.08. bis 23.08.2026 nannten Vertragstext und Abnahmekommando
+    # verschiedene Bots, ohne dass die Ausgabe das verraten haette
+    # (BEFUNDE §G19 Fund 1). Wer die Zahl zitiert, sieht jetzt mit,
+    # woher sie kommt.
+    registriert = referenz_bot(k["bot"], store)
+    herkunft = ("registrierte Basis dieses Bots"
+                if k["basis"] == registriert
+                else f"VON HAND GESETZT - registriert ist {registriert}")
+    L = ["=" * 78,
+         f"  KRITERIEN AUS BETRIEBSPLAN §3.3: {k['bot']} gegen {k['basis']}",
+         f"  Referenz: {herkunft}",
+         "=" * 78, ""]
+    titel = {
+        "1_t_ueber_schwelle": "1. t ueber Zufallsschwelle",
+        "2_genug_tage": "2. genug Handelstage",
+        "3_verlaengerungsquote": "3. Verlaengerungsquote in Bandbreite",
+        "4_median_positiv": "4. Median der verlaengerten Trades positiv",
+    }
+    for schluessel, name in titel.items():
+        f = k[schluessel]
+        L.append(f"  [{zeichen[f['erfuellt']]}] {name}")
+        L.append(f"        ist: {f['wert']}   soll: {f['soll']}")
+    L.append("")
+    if not k["entscheidbar"]:
+        L.append("  NOCH NICHT ENTSCHEIDBAR - mindestens ein Kriterium hat")
+        L.append("  keine Datengrundlage. 'offen' ist KEIN Bestehen.")
+    elif k["bestanden"]:
+        L.append("  ALLE VIER ERFUELLT - laut §3.3 bestanden.")
+    else:
+        L.append("  MINDESTENS EINES DURCHGEFALLEN - laut §3.3 bleibt es")
+        L.append("  beim Zeitausstieg nach `max_hold_days`.")
+    if k["hinweis_min_tage"]:
+        L += ["", "  " + k["hinweis_min_tage"]]
+
+    # Trennschaerfe IMMER mit ausgeben - besonders bei "durchgefallen".
+    # Ein Kriterium, das nicht dazusagt, was ueberhaupt nachweisbar war,
+    # laesst "nicht besser" und "nicht zeigbar" gleich aussehen. Das sind
+    # zwei verschiedene Befunde, und nur einer rechtfertigt, eine Idee zu
+    # verwerfen (BEFUNDE §G22).
+    ts = trennschaerfe(k["bot"], k["basis"], store)
+    L += ["", "-" * 78, "  TRENNSCHAERFE - was koennte dieser Vergleich zeigen?"]
+    if ts.get("hinweis"):
+        L.append(f"        {ts['hinweis']}")
+    else:
+        L += [
+            f"        Streuung der Tagesdifferenz : "
+            f"{ts['streuung'] * 100:.3f} %/Tag  (aus {ts['n_streuung']} Tagen)",
+            f"        Auswertbare Tage            : {ts['n_tage']}",
+            f"        Nachweisbar ab              : "
+            f"{ts['mit_80_prozent'] * 100:.3f} %/Tag fuer 80 % Trefferwahrscheinlichkeit",
+            f"                                      "
+            f"(kumuliert {ts['kumuliert_80'] * 100:.1f} % ueber {ts['n_tage']} Tage)",
+            "",
+            "        Liegt der WAHRE Unterschied darunter, faellt Kriterium 1",
+            "        auch dann durch, wenn der Bot besser ist. 'Durchgefallen'",
+            "        heisst dann NICHT WEISBAR, nicht WIDERLEGT.",
+        ]
+    return "\n".join(L)
 
 
 def divergenz(store: ShadowStore | None = None) -> pd.DataFrame:
@@ -414,8 +835,20 @@ def bericht(store: ShadowStore | None = None, *, buch: str = "rangliste",
             L.append("     IC(5T) nicht messbar - zu wenige Kandidaten je Tag."
                      + ("  (im Spiegelbuch normal, dafuer gibt es 'rangliste')"
                         if buch == "spiegel" else ""))
+        elif k.get("hinweis"):
+            # Kein t-Wert ist eine Aussage, kein Formatierungsproblem: Bei
+            # einem 5-Tage-Fenster ueber 13 Handelstage laesst sich die
+            # Ueberlappung nicht schaetzen (§G12). Ein "nan" waere hier das
+            # schlechteste Ergebnis - es sieht nach Panne aus und laedt
+            # dazu ein, ersatzweise den rohen Wert zu zitieren.
+            L.append(f"     IC(5T) {k['ic']}  ueber {k['n_tage']} Tage")
+            L.append(f"     kein t-Wert: {k['hinweis']}")
+            L.append(f"     (roh waere {k['t_roh']} - NICHT zitieren, "
+                     f"er unterstellt Unabhaengigkeit, die es nicht gibt)")
         else:
-            L.append(f"     IC(5T) {k['ic']}  t={k['t']}  ueber {k['n_tage']} Tage")
+            L.append(f"     IC(5T) {k['ic']}  t={k['t']}  ueber {k['n_tage']} Tage"
+                     + (f"  (roh {k['t_roh']}, {k['aufblaehung']}x)"
+                        if k.get("aufblaehung") and k["aufblaehung"] != 1.0 else ""))
         L.append(f"     Trefferquote {tq:.1%} gegen Basisrate {br:.1%}"
                  f"  ->  {tq - br:+.1%}")
         L.append(f"     UEBERSCHUSS {ue:+.3%}   <- gegen Universums-Median")
@@ -423,7 +856,9 @@ def bericht(store: ShadowStore | None = None, *, buch: str = "rangliste",
     L += ["", "-" * 78, f"  Zufallsschwelle bei {fleet.n_versuche(s)} Versuchen: "
           f"|t| > {fleet.schwelle_sigma(s)}"]
     if n_tage < MIN_TAGE:
-        L += [f"  ACHTUNG: {n_tage} von {MIN_TAGE} noetigen Handelstagen.",
-              "  Jeder Befund ist eine Momentaufnahme und rechtfertigt",
-              "  KEINE Regelaenderung."]
+        L += [f"  ACHTUNG: {n_tage} von {MIN_TAGE} Tagen der Hausmarke.",
+              "  Ein hier auffallender Befund ist eine Momentaufnahme und",
+              "  rechtfertigt KEINE Regelaenderung. Eine Regelaenderung wird",
+              "  ausschliesslich ueber BETRIEBSPLAN §3.3 abgenommen",
+              "  (`21_fleet.py --kriterien`), nie ueber diesen Bericht."]
     return "\n".join(L)

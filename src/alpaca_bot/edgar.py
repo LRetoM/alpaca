@@ -28,6 +28,7 @@ import datetime as dt
 import json
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -38,10 +39,57 @@ import requests
 from .config import CACHE_DIR, PROJECT_ROOT
 from .ratelimit import RateLimiter, with_retry
 
-_limit = RateLimiter("sec_edgar")
+_limit = RateLimiter("sec_edgar", safety=0.4)
+"""`safety=0.4` statt der Vorgabe 0.9 (§G48, 27.08.2026).
+
+**Der Fund, waehrend der Lauf bereits stundenlang lief.** Mit 8
+parallelen Workern (`PARALLEL_FILINGS`, §G47) nahe am dokumentierten
+Limit von 10/s gefahren, stiegen die `ReadTimeout`-Wiederholungen im
+Verlauf des Laufs steil an: 0 je 100 Symbole in den ersten beiden
+Bloecken, dann 3, 5, 9, 18, **140**, 110. Das ist keine zufaellige
+Streuung - SEC drosselt sichtbar HAERTER, je laenger eine hohe
+Anfragerate durchgehalten wird. Nirgends dokumentiert, aber empirisch
+eindeutig.
+
+Die Lehre: **Das dokumentierte "10/s" ist eine Obergrenze fuer kurze
+Bursts, keine sichere Dauerrate.** §G47 hat den Leerlauf zwischen den
+Anfragen beseitigt und ist damit zu nah an diese Grenze gefahren.
+`safety=0.4` zielt auf ~4/s Dauerlast - spuerbar langsamer als die
+~7-9/s aus §G47, aber ohne die eskalierende Drosselung, die am Ende
+teurer waere als der Umweg."""
 
 EDGAR_CACHE = CACHE_DIR / "edgar"
 EDGAR_CACHE.mkdir(parents=True, exist_ok=True)
+
+_SESSION = requests.Session()
+"""Eine wiederverwendete Verbindung statt einer neuen je Abruf (§G46).
+
+**Der eigentliche Grund fuer den Absturz vom 26./27.08.2026 - nicht das
+geschlossene Terminal.** Jeder Aufruf ging bis dahin ueber
+`requests.get(...)`, also einen frischen TCP+TLS-Handshake JE REQUEST.
+Ein Symbol mit 900 Meldungen kostet ~1.800 Requests (2 je Einreichung) -
+also 1.800 neue Verbindungen statt einer wiederverwendeten.
+
+Gemessen im Log: durchschnittlich 320-330s je Symbol bei staendigen
+`ReadTimeout`-Wiederholungen, hochgerechnet ~7-8 Tage fuer 2.168 Symbole.
+Mit `Session()` (Keep-Alive, Connection-Pooling) sinkt der
+Verbindungsaufwand auf einen Bruchteil - derselbe Mechanismus, den jeder
+Browser und jede professionelle EDGAR-Anbindung nutzt."""
+
+_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16)
+_SESSION.mount("https://", _ADAPTER)
+
+PARALLEL_FILINGS = 3
+"""Gleichzeitige Filing-Abrufe in `insider_trades()` (§G47, gesenkt in §G48).
+
+Erhoeht NICHT die erlaubte Rate - `RateLimiter("sec_edgar")` bleibt die
+einzige Bremse, egal aus wie vielen Threads. Stand urspruenglich auf 8,
+das jagte zusammen mit `safety=0.9` beinahe das volle SEC-Limit aus -
+und genau das loeste die in §G48 gemessene, im Verlauf eskalierende
+Drosselung aus. 3 statt 8: genug, um den urspruenglichen Fehler (§G47,
+NULL Parallelitaet) zu beheben, ohne SEC-Anfragen in dichten Buendeln
+statt gleichmaessig verteilt zu senden - ein Buendel loest anscheinend
+eher eine Schutzreaktion aus als dieselbe Anzahl ueber die Zeit verteilt."""
 
 # Kaufcodes, die tatsaechlich Information tragen.
 MEANINGFUL_BUY_CODES = {"P"}
@@ -51,6 +99,30 @@ NOISE_CODES = {"A", "M", "G", "F", "C", "J"}
 
 class EdgarError(RuntimeError):
     """EDGAR-Zugriff fehlgeschlagen."""
+
+
+class ZuVieleMeldungen(EdgarError):
+    """Ein Symbol hat mehr Form-4-Meldungen als die gesetzte Grenze.
+
+    **Warum das eine Ausnahme ist und kein stilles Abschneiden** (§G41).
+    Bis zum 26.08.2026 schnitt `insider_trades` bei Ueberschreitung
+    einfach ab - mit `f.tail(max_filings)`, also den NEUESTEN N. Das
+    Ergebnis war ein Panel, das in den frueheren Jahren praktisch leer
+    und in den spaeteren voll war: Bei `max_filings=150` und einem
+    Median von 436 Meldungen je Symbol fehlten dem mittleren Symbol
+    zwei Drittel seiner Historie, immer die aeltere Haelfte.
+
+    Gemessen am laufenden Kandidatentest: von 344 Symbolen mit
+    ueberhaupt einem Insiderkauf begannen 13 vor 2022 und 314 ab 2023.
+    Die Jahresstabilitaetspruefung haette dann Jahre bewertet, in denen
+    zwei Symbole Daten haben - und den Faktor aus einem Grund verworfen,
+    der nichts mit Insiderhandel zu tun hat.
+
+    Ein Symbol, dessen Historie nicht vollstaendig geladen werden kann,
+    gehoert deshalb AUSGESCHLOSSEN, nicht halbiert. Der Aufrufer muss
+    das entscheiden und zaehlen - darum eine Ausnahme statt einer
+    stillen Kuerzung.
+    """
 
 
 def _user_agent() -> str:
@@ -89,7 +161,7 @@ def _get(url: str, *, as_json: bool = True, cache_key: str | None = None):
 
     _limit.acquire()
     resp = with_retry(
-        lambda: requests.get(
+        lambda: _SESSION.get(
             url,
             headers={
                 "User-Agent": _user_agent(),
@@ -120,7 +192,7 @@ def ticker_map(refresh: bool = False) -> dict[str, str]:
     if refresh or not path.exists():
         _limit.acquire()
         resp = with_retry(
-            lambda: requests.get(
+            lambda: _SESSION.get(
                 "https://www.sec.gov/files/company_tickers.json",
                 headers={"User-Agent": _user_agent()},
                 timeout=30,
@@ -299,21 +371,48 @@ def insider_trades(
 
     ACHTUNG Laufzeit: Jede Einreichung braucht 2 Requests (Verzeichnis +
     XML). Ein Symbol mit 400 Form-4-Meldungen kostet also 800 Requests -
-    bei 8/s rund 100 Sekunden. Der Plattencache macht Wiederholungslaeufe
-    praktisch kostenlos, der erste Lauf dauert.
+    bei 8-9/s Drossel rund 90-100 Sekunden PLATTENGEBUNDEN. Der
+    Plattencache macht Wiederholungslaeufe praktisch kostenlos, der
+    erste Lauf dauert.
+
+    **Warum die Einreichungen parallel geholt werden (§G47, 27.08.2026).**
+    Bis dahin lief das hier als einfache `for`-Schleife: ein Filing nach
+    dem anderen, und jedes wartet erst die volle Netzwerkantwort ab,
+    bevor das naechste beginnt. Gemessen im laufenden EDGAR-Lauf: die
+    Drossel erlaubt 9 Requests/Sekunde, tatsaechlich ankamen **1,66**.
+    Der Engpass war nie das SEC-Limit, sondern die reine Wartezeit auf
+    die Antwort - das Budget lag die meiste Zeit brach.
+
+    Der `ThreadPoolExecutor` aendert daran NICHTS an der erlaubten Rate:
+    `_limit` (`RateLimiter`) ist threadsicher und bleibt die EINZIGE
+    Instanz, die das SEC-Limit durchsetzt (`_get()` ruft `_limit.acquire()`
+    unabhaengig vom aufrufenden Thread). Parallelitaet sorgt nur dafuer,
+    dass ein Thread, der auf eine Antwort wartet, das Budget nicht fuer
+    alle anderen blockiert.
+
+    `max_filings` ist eine LAUFZEITBREMSE, keine Kuerzung: Wird sie
+    ueberschritten, fliegt `ZuVieleMeldungen`. Der Aufrufer entscheidet
+    dann, ob er das Symbol ausschliesst oder die Grenze anhebt. Bis zum
+    26.08.2026 wurde hier still auf die neuesten N gekuerzt - siehe
+    `ZuVieleMeldungen` fuer den Schaden, den das angerichtet hat (§G41).
     """
     syms = [tickers] if isinstance(tickers, str) else list(tickers)
     rows: list[InsiderTrade] = []
 
     for sym in syms:
         f = filings(sym, "4", since=since)
-        if max_filings:
-            f = f.tail(max_filings)
-        for _, r in f.iterrows():
-            rows.extend(
-                parse_form4(r["cik"], r["accession"], r["accessionNumber"],
-                            r["ticker"], r["filing_date"])
-            )
+        if max_filings and len(f) > max_filings:
+            raise ZuVieleMeldungen(
+                f"{sym}: {len(f)} Form-4-Meldungen seit {since}, Grenze ist "
+                f"{max_filings}. Symbol ausschliessen oder Grenze anheben - "
+                f"Abschneiden erzeugt ein Panel mit Zeitverzerrung (§G41).")
+        with ThreadPoolExecutor(max_workers=PARALLEL_FILINGS) as pool:
+            for teil in pool.map(
+                lambda r: parse_form4(r["cik"], r["accession"], r["accessionNumber"],
+                                      r["ticker"], r["filing_date"]),
+                [row for _, row in f.iterrows()],
+            ):
+                rows.extend(teil)
 
     if not rows:
         return pd.DataFrame(

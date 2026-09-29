@@ -111,6 +111,9 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 ```
 
 Arbeitsweise für jede Aufgabe:
+0. **Stand abgleichen:** `git branch -a`, `git log --oneline -5 origin/develop`, dann
+   `docs/BEFUNDE.md` §A–§C und `docs/zusammenfuehrung-develop.md` lesen — bevor
+   gemessen wird (Lehre §2.17: zwei Stränge ohne Abgleich haben doppelt gekostet).
 1. Hypothese im Katalog nachschlagen oder neu eintragen (Regel 2).
 2. Auf den Labor-Panels messen (Regel 1), Jahrestabelle lesen, nicht nur
    Mittelwerte.
@@ -220,6 +223,155 @@ Aktienbuch außerhalb des ORB-Tests (dort ≤ 4× intraday, 0 über Nacht), kein
 Chartformationen, kein Sentiment-Modell ohne gemessenen IC, keine
 Parameteroptimierung auf der Gesamthistorie, keine Regeländerung aus einem
 einzelnen guten Monat.
+
+## 9. Erbe aus dem Branch develop (bis 13.09.2026) — gilt unverändert weiter
+
+Am 2026-09-29 wurden zwei Arbeitsstränge zusammengeführt: die Labor-Session
+dieses Dokuments (Teile 1–8, ab 29.09., Basis `main` vom 04.08.) und der
+Strang `develop` (91 Commits, 04.08.–13.09.: Schattenflotte, Trendbot,
+Querschnitt, Ausbruch-Suche, Lernkern, 64 Tests). Beide sind **ergänzend**:
+
+- **Gedächtnis:** zwei Register, beide führen. `docs/BEFUNDE.md` (von Hand,
+  G-Nummern, Stichprobengröße, Quelle) hält gemessene Tatsachen und behobene
+  Fehler; `docs/befunde-2027.md` (automatisch, `scripts/32_`) hält jeden
+  Laborlauf und den Versuchszähler. Regel: **Vor jeder Idee beide lesen**, nach
+  einer Entscheidung den Eintrag in `BEFUNDE.md` von Hand ergänzen.
+- **Überschneidung Risiko-Dach:** Kanonisch ist `src/alpaca_bot/risiko.py`
+  (develop, 15.08.). Die Klasse `RisikoDach` dieser Session liegt als Archiv in
+  `risiko_dach.py` und ist nicht im Daemon eingehängt.
+- **Bei Widerspruch gilt die neuere Messung** (heutige Labor-Ergebnisse vor
+  älteren develop-Ergebnissen), aber nur mit Zahl, Panel und Stichprobe — der
+  Abgleich steht in `docs/zusammenfuehrung-develop.md`.
+- **Test-Pflicht aus develop gilt zusätzlich:** nach jeder Codeänderung
+  `scripts/22_tests.py` (enthält `00_selftest` als Forschungsschicht; braucht `pytest` und `.venv/bin/python`).
+
+Der Wortlaut der develop-Projektanweisungen, unverändert:
+
+cd ~/Documents/alpaca
+
+# Jederzeit reinschauen (stört nichts):
+.venv/bin/python scripts/51_ausbruch_status.py
+
+# Auswerten, wann immer du willst (auch während es läuft):
+.venv/bin/python scripts/52_ausbruch_auswertung.py
+
+# Die Ausbruch-Flotte ist seit 13.09.2026 GESTOPPT (§G98): 1,1 Mio. Versuche,
+# kein Befund. Plists liegen in ~/Library/LaunchAgents/deaktiviert/.
+# Der Trendbot-Schatten laeuft weiter (Mo-Fr 22:20):
+.venv/bin/python scripts/45_trend_schatten.py --bericht
+
+# Projektanweisungen
+
+## Vor jeder Änderung
+
+**Zwei Dokumente lesen:**
+
+- **`docs/BEFUNDE.md`** — was bereits gemessen, widerlegt oder als Fehler
+  behoben wurde. Mehrere Fehler in diesem Projekt sind entstanden, weil
+  eine bereits beantwortete Frage erneut beantwortet wurde — oder weil
+  ein Befund ohne Blick auf seine Stichprobengröße übernommen wurde.
+- **`docs/BETRIEBSPLAN.md`** — was gerade läuft, wie lange, und welche
+  Kriterien vorab festgelegt wurden. **Eine laufende Messung darf nicht
+  durch eine Änderung an der Handelslogik unterbrochen werden**, sonst
+  ist die Vergleichsbasis zerstört.
+
+Nach einer Messung oder einem behobenen Fehler: **Eintrag in
+`docs/BEFUNDE.md` ergänzen.** Mit Zahl, Datum und Quelle.
+
+## Sprache
+
+Antworten auf Deutsch. Code-Kommentare und Docstrings auf Deutsch, in
+Quelltextdateien ohne Umlaute (`ae`, `oe`, `ue`, `ss`) — Markdown-Dateien
+dagegen mit korrekten Umlauten.
+
+## Antworten im Chat — kurz
+
+Stichpunkte, keine Fließtext-Herleitung — auch bei fachlichen/statistischen
+Befunden. Keine Codezitate im Chat. Nur Ergebnis, Zahl, Konsequenz,
+Entscheidung. Details gehören in `docs/BEFUNDE.md` bzw. `docs/UEBERGABE.md`.
+
+## Statistik — die wichtigste Regel
+
+Vorhersagen und Trades desselben Handelstages sind **nicht unabhängig**.
+Immer `statistik.gruppierter_test` verwenden; maßgeblich ist die Zahl der
+**Handelstage**, nie die Zahl der Einzelwerte. Der naive t-Wert ist
+bedeutungslos, nicht bloß ungenau.
+
+**Zwei Ebenen, nicht eine.** Mitteln je Handelstag löst nur die
+Überlappung *innerhalb* eines Tages. Reicht das Renditefenster über
+mehrere Tage, überlappen auch die *benachbarten* Tage — dagegen hilft
+Mitteln nicht. Deshalb bei jedem Mehrtages-Horizont `horizont=` mit
+übergeben:
+
+```python
+statistik.gruppierter_test(werte, tage, horizont=5)   # 5-Tage-Fenster
+```
+
+Ohne dieses Argument liegt die Fehlalarmquote nicht bei 5 %, sondern bei
+**39,5 %** (gemessen, `docs/BEFUNDE.md` §G12). Maßgeblich ist dann
+`t_ueberlappung`, nicht `t`.
+
+Aktuelle Signifikanzschwelle: `fleet.schwelle_sigma()` (steigt mit jedem
+weiteren Versuch). Ein t-Wert darunter ist der Normalfall, kein Befund.
+
+## Was NICHT ohne Messung geändert wird
+
+- Parameter der Handelslogik (`EngineConfig`) — erst im Schatten messen
+- `max_hold_days`, `stop_atr`, `target_atr`, `min_score`
+- Die Sperrfrist nach einem Verkauf (`reenter_cooldown_days`)
+
+Neue Ideen laufen als eigener Bot in der Flotte (`fleet.anmelden`) mit
+**genau einer** geänderten Achse, nicht direkt live.
+
+## Sicherheitsgrundsätze
+
+- `dry_run=True` ist der Standard; echtes Senden muss explizit sein.
+- Der Schattenbetrieb importiert `trading.py` bewusst **nicht**. Seit
+  23.08.2026 ist das eine geprüfte Regel der Projektverfassung
+  (`selfcheck.check_schatten_handelt_nicht`, §G19) und keine Behauptung
+  mehr. **Genauer Geltungsbereich:** Die Prüfung deckt den Quelltext ab.
+  Zur Laufzeit ist `alpaca_bot.trading` sehr wohl geladen — das
+  Paket-`__init__.py` importiert es. „Kann nicht" gilt also für den
+  Quelltext, für den Prozess gilt „tut nicht" plus `dry_run=True` als
+  Standard und `_check_risk()` vor jedem Senden.
+- Datenbanken und Logs gehören **nicht** unter `~/Documents` (macOS-TCC
+  blockiert Hintergrunddienste dort).
+- Jede neue externe API zuerst in `ratelimit.QUOTAS` eintragen.
+
+## Tests — nicht verhandelbar
+
+**Nach JEDER Codeänderung, vor jedem Neustart:**
+
+```
+python scripts/22_tests.py        # beide Schichten
+python scripts/18_health_check.py
+```
+
+Schlägt etwas fehl: **nicht neu starten**, erst beheben.
+
+**Jeder gefundene Fehler bekommt einen Regressionstest** in `tests/`,
+benannt nach dem konkreten Vorfall. Ein Fehler, der einmal auftrat, darf
+nie unbemerkt zurückkommen. Details: `docs/TESTPLAN.md`.
+
+Warum das streng ist: Bis zum 16.08.2026 prüfte nur
+`scripts/00_selftest.py` — und der deckt die **Forschungsschicht** ab
+(Indikatoren, Backtest, ML). Handelslogik, Risiko-Dach, Protokollierung
+und Live/Schatten-Konsistenz waren ungetestet. Genau dort lagen dann auch
+alle gefundenen Fehler: `bars_held` immer 0, `after_10d` nie gefüllt,
+`code_version` zwei Monate kaputt, Flotten-Referenz zwei Wochen falsch.
+
+## Nach Codeänderungen an der Handelslogik
+
+1. `python scripts/22_tests.py` (Tests, beide Schichten)
+2. `python scripts/18_health_check.py`
+3. Dienste **vollständig** neu starten, sonst läuft weiter der alte Code:
+   ```
+   launchctl bootout gui/$(id -u)/de.local.alpacabot
+   launchctl bootout gui/$(id -u)/de.local.alpacaschatten
+   # auf Prozessende warten, dann:
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacabot.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/de.local.alpacaschatten.plist
+   ```
 
 ---
 *Dokumentation zu einem Softwareprojekt, keine Anlageberatung.*
