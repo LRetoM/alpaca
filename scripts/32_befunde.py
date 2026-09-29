@@ -63,17 +63,46 @@ def rueckfuellen() -> int:
     return n
 
 
+def muster() -> str:
+    """Meta-Lehre aus dem Register: mittlerer Vorsprung gegen SPY (CAGR-Differenz) und
+    Drawdown-Verhaeltnis je Parameterstufe - ueber ALLE Laeufe, nicht je Variante.
+    Das ist kein Beweis, sondern die Landkarte, wo das Labor bisher Ertrag fand."""
+    df = befunde.laden()
+    if df.empty or "k_cagr" not in df.columns:
+        return "  (keine Befunde)"
+    d = df.copy()
+    d["vorsprung"] = pd.to_numeric(d["k_cagr"], errors="coerce") - pd.to_numeric(d.get("k_bench_cagr"), errors="coerce")
+    d["dd_quote"] = pd.to_numeric(d.get("k_max_drawdown"), errors="coerce") / pd.to_numeric(d.get("k_bench_maxdd"), errors="coerce")
+    d = d[d["vorsprung"].notna()]
+    L = [f"  MUSTER IM REGISTER ({len(d)} Befunde mit CAGR und SPY)",
+         f"  {'Parameter':<16}{'Stufe':<22}{'n':>5}{'Vorsprung Ø':>13}{'Median':>9}{'DD/SPY Ø':>10}{'bestanden':>11}"]
+    for spalte in ("panel", "p_regime", "p_haltedauer", "p_kosten_bps", "p_vola_ziel", "p_top_n", "skript", "p_score_quelle", "p_stop_atr", "p_exit_rank"):
+        if spalte not in d.columns:
+            continue
+        g = d.groupby(d[spalte].astype(str).replace({"nan": "-", "None": "-"}))
+        for stufe, t in g:
+            if len(t) < 3:
+                continue
+            L.append(f"  {spalte:<16}{stufe:<22}{len(t):>5}{t['vorsprung'].mean():>+13.1%}{t['vorsprung'].median():>+9.1%}"
+                     f"{t['dd_quote'].mean():>10.2f}{(t['urteil'] == 'bestanden').mean():>11.0%}")
+        L.append("")
+    return "\n".join(L)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bericht", action="store_true")
     ap.add_argument("--rueckfuellen", action="store_true")
     ap.add_argument("--zaehler", action="store_true")
+    ap.add_argument("--muster", action="store_true", help="Muster im Register: welche Parameter gehen mit Erfolg einher?")
     args = ap.parse_args()
     if args.rueckfuellen:
         print(f"  {rueckfuellen()} Befunde rueckgefuellt")
     if args.zaehler or not (args.bericht or args.rueckfuellen):
         print(f"  Versuchszaehler: {befunde.versuchszaehler()}")
+    if args.muster:
+        print(muster())
     if args.bericht:
         text = befunde.bericht(schreiben=True)
         print(f"  {befunde.BERICHT} geschrieben ({len(text.splitlines())} Zeilen)")

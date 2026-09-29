@@ -30,6 +30,14 @@ Drei Zahlen halten den Kreislauf ehrlich:
 | Unterschiedliche Varianten | 68 | so oft wurde „etwas probiert“ |
 | Zufallsschwelle | 3,4 σ | ein t-Wert darunter ist bei 68 Versuchen kein Fund |
 
+Und eine vierte Zahl, die das Register selbst liefert (`32_befunde.py
+--muster`, Masterplan §6.13): über alle 232 Läufe ist der mittlere Vorsprung
+gegen SPY bei 5 Tagen Haltedauer −13 Punkte, bei 42 Tagen −3; bei Top 20
+−12, bei Top 50 −5; mit Prognose-Score +1 bis +4. Das Register weiß damit
+mehr als jeder einzelne Lauf — es ist die Landkarte, auf der neue Ideen
+zuerst geprüft werden: *Liegt die Idee in einer Ecke, die 50 Läufe schon
+verworfen haben?*
+
 Ein „Fund“, der die Schwelle nicht schafft, wird als *kandidat* geführt und
 muss auf einem zweiten, nicht benutzten Panel bestehen (qlib 2006–2020 ↔
 S&P 2016–2026 ↔ Projektcache 2018–2026), bevor er in die Engine darf.

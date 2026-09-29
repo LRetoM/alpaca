@@ -918,6 +918,31 @@ Alles andere verworfen oder zu dünn — und das ist der Zustand, den ein
 ehrliches Labor nach 72 Versuchen zeigen muss. Die Lehren daraus, als
 Regeln: `docs/lehren-2027.md`.
 
+**Die Landkarte aus 232 Befunden** (`32_befunde.py --muster`: mittlerer
+Vorsprung gegen SPY in CAGR-Punkten und Drawdown im Verhältnis zu SPY, je
+Parameterstufe, über alle Läufe — keine Beweise, aber die Richtung, in der
+das Labor bisher Ertrag fand):
+
+| Parameter | Stufe | n | Vorsprung Ø | DD/SPY |
+|---|---|---|---|---|
+| Haltedauer | 5 Tage | 49 | −13,3 | 1,24 |
+| | 21 Tage | 78 | −6,0 | 0,89 |
+| | **42 Tage** | 75 | **−2,8** | 0,80 |
+| Top N | 20 | 60 | −12,1 | 1,07 |
+| | 50 | 165 | −4,9 | 0,85 |
+| Regime | kein | 65 | −2,1 | 1,09 |
+| | trend_ok | 68 | −6,7 | **0,81** |
+| Kosten | 10 / 20 / 40 bps | 60 / 116 / 56 | −5,6 / −4,8 / −10,8 | |
+| Vola-Ziel | 0,15 / 0,20 / 0,25 | 4 / 4 / 8 | −3,7 / −2,3 / −2,5 | **0,49 / 0,57 / 0,78** |
+| Score | Handmix (22_) | 198 | −7,1 | 0,92 |
+| | **ML (23_, 29_)** | 10 | **+0,8 / +3,9** | 1,13 / 0,87 |
+| Panel | qlib / S&P | 154 / 78 | −8,5 / −2,5 | |
+
+Lesart in einem Satz: **länger halten, breiter streuen, das Tor für den
+Drawdown, das Vola-Ziel für den Rest — und Ertrag über SPY nur mit
+Prognose.** Und die Panel-Zeile ist die Erinnerung, dass S&P-Zahlen sechs
+Punkte zu schön sind.
+
 ### 6.14 Selbsttests
 
 - `scripts/00_selftest.py`: 61/61 bestanden (Ranking-Strategie, Risiko-Dach, Befundregister).
