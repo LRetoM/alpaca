@@ -395,10 +395,134 @@ Drawdown (−69 % → −39 % bei Momentum) und kostet in Erholungsjahren
 (2009: 0 % gegen +26 % SPY). Das ist der Preis des Filters, und er ist es
 wert — 2008 hätte er den Momentum-Drawdown von −61 % auf −38 % begrenzt.
 
-### 6.7 Korrigierte Läufe: liquides Universum, Top 50, kurze Horizonte
+### 6.7 Korrigierte Läufe: liquides Universum (≥ 25 Mio. $/Tag), Top 50, kurze Horizonte
 
-*(Läufe gestartet; Ergebnisse werden hier nachgetragen, Logs unter
-`results/labor/logs/`.)*
+Universum je Tag: ~700–1.100 Aktien (2006–2020). Drei Maßstäbe: SPY (kapital-
+gewichtet), **Univ.EW** (gleichgewichtetes Universum ohne Kosten) und die
+Jahrestabelle.
+
+**Spur „kurz“, H = 5 Tage** (Umkehr + RSI2 + Momentum-Konsistenz + ruhiges
+Volumen + Volumenschock), Top 50:
+
+| Regime | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Umschlag/J | Kosten/J |
+|---|---|---|---|---|---|---|---|---|
+| kein | 10 bps | **7,7 %** | 9,2 % | 8,7 % | 0,42 | −52 % | **100×** | 5,0 % |
+| kein | 20 bps | 2,4 % | 9,2 % | 8,7 % | 0,22 | −63 % | 100× | 10,0 % |
+| kein | 40 bps | −7,3 % | 9,2 % | 8,7 % | −0,17 | −85 % | 100× | 20,0 % |
+| SPY > SMA200 | 10 bps | 1,0 % | 9,2 % | 8,7 % | 0,14 | −34 % | 75× | 3,7 % |
+| SPY > SMA200 | 20 bps | −2,7 % | 9,2 % | 8,7 % | −0,13 | −49 % | 75× | 7,5 % |
+
+Lesart: **Brutto** (7,7 % + 5,0 % Kosten ≈ 12,7 %) liegt die kurze Spur rund
+**4 Prozentpunkte über dem Universum** — der Mehrfaktor-Score sortiert auf
+5 Tagen also wirklich. Aber 100 Rundläufe im Jahr kosten selbst bei
+optimistischen 10 bps mehr als den ganzen Vorsprung. **Das ist die Antwort auf
+„kürzere Zeiträume“: Der Vorsprung existiert, die Kosten fressen ihn — bei
+5 Tagen Haltedauer genauso wie beim heutigen Umkehr-Bot.** Auffällig: Der
+Trendfilter schadet hier (Umkehr verdient in unruhigen Märkten), im
+Gegensatz zu Momentum.
+
+**Spur „kurz10“, H = 10 Tage**, gleicher Score, Top 50:
+
+| Regime | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Umschlag/J | Kosten/J |
+|---|---|---|---|---|---|---|---|---|
+| kein | 10 bps | 7,3 % | 9,3 % | 8,7 % | 0,41 | −51 % | 50× | 2,5 % |
+| kein | 20 bps | **4,6 %** | 9,3 % | 8,7 % | 0,31 | −53 % | 50× | 5,0 % |
+| kein | 40 bps | −0,5 % | 9,3 % | 8,7 % | 0,11 | −58 % | 50× | 10,0 % |
+| SPY > SMA200 | 10 bps | 4,0 % | 9,3 % | 8,7 % | 0,35 | **−30 %** | 37× | 1,9 % |
+| SPY > SMA200 | 20 bps | 2,0 % | 9,3 % | 8,7 % | 0,21 | −32 % | 37× | 3,8 % |
+
+Brutto (7,3 % + 2,5 %) ≈ 9,8 %: mit 10 Tagen ist der Bruttovorsprung über
+dem Universum auf ~1 Prozentpunkt geschrumpft, dafür halbieren sich die
+Kosten. **Weder 5 noch 10 Tage schlagen SPY netto** in diesem Universum und
+Zeitraum. Die Faktoren sortieren (IC positiv, brutto über dem Universum),
+aber die Rangspitze eines Umkehr-lastigen Scores ist teuer zu handeln.
+
+**Spur „mittel“ = kombi2** (Momentum-Konsistenz + ruhiges Volumen + vola-
+skaliertes Momentum), H = 21, Top 50, liquides Universum:
+
+| Regime | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | 2008 | Umschlag/J |
+|---|---|---|---|---|---|---|---|---|
+| kein | 20 bps | 5,1 % | 9,4 % | 8,7 % | 0,35 | −53 % | | 24× |
+| **SPY > SMA200** | 20 bps | **5,9 %** | 9,4 % | 8,7 % | **0,48** | **−24 %** | **−4,5 % (SPY −36,8 %)** | 18× |
+| beides | 20 bps | 3,8 % | 9,4 % | 8,7 % | 0,36 | −21 % | | 16× |
+
+**Das ehrliche Fazit aus 2006–2020 auf ~1.000 liquiden Aktien:** Keine
+Faktor-Auswahl schlägt SPY in der CAGR — weder kurz noch mittel. Die
+Auswahl liegt sogar unter dem gleichgewichteten Universum. Was robust
+gewinnt, ist der **Trendfilter**: Drawdown von −53 % auf −24 %, 2008 fast
+ohne Verlust, bei ähnlicher CAGR. Auf dem S&P-Panel 2016–2026 sehen
+dieselben Faktoren glänzend aus (§6.3) — der Unterschied ist zu einem
+großen Teil der Index-Aufnahme-Bias und die Themen-Rally 2023–2024.
+
+Die Wahrheit für *unsere* Zeit (2018–2026) liegt dazwischen und steht in
+deinem Projektcache. Deshalb ist §8 Schritt 0 nicht verhandelbar: Erst wenn
+`22_` auf dem Cache mit Univ.EW-Spalte gelaufen ist, wissen wir, ob die
+Auswahl Alpha hat oder nur Beta.
+
+Weitere Läufe (momentum Top 50, reversal_rein, Haltedauer-Kurve, S&P-Läufe)
+liefen beim Schreiben noch; ihre Logs liegen unter `results/labor/logs/`
+und sind mit denselben Befehlen auf deinem Mac reproduzierbar.
+
+### 6.8 Dynamische Haltedauer (Skript 29) — Mechanik geprüft, Zahlen folgen
+
+`scripts/29_labor_dynamisch.py` sagt je Aktie Renditen über 5/10/21/42/63
+Tage voraus (ein LightGBM je Horizont, walk-forward jährlich, Embargo) und
+lässt das System selbst wählen: Kauf nach höchster **erwarteter Netto-
+Rendite je Tag** `(E[r_h] − Kosten)/h`, Halten, solange die beste
+verbleibende Erwartung über den Ausstiegskosten liegt, Wechsel, wenn ein
+Kandidat je Tag mehr verspricht als die schwächste Position plus
+Wechselkosten. Verglichen wird gegen dieselben Vorhersagen mit festem
+Horizont.
+
+Selbsttest (synthetische Aktien mit eingebauten schnellen und langsamen
+Bewegungen, nahezu perfekte Prognose): Die Dynamik wählt zu 88 % den
+5-Tage-Horizont für schnelle Bewegungen und schlägt die feste 21-Tage-Fassung
+— geprüft wird nur die Mechanik.
+
+**Echter Lauf, S&P-Panel 2019–2026 (Training ab 2016), Top 30, 20 bps,
+Einzelaktien:**
+
+| Horizont | OOS-IC | t (roh) | t (deflationiert) |
+|---|---|---|---|
+| 5 | +0,010 | 3,6 | 1,6 |
+| 10 | +0,013 | 4,7 | 1,5 |
+| 21 | +0,016 | 5,5 | 1,2 |
+| 42 | +0,017 | 6,1 | 0,9 |
+| 63 | **+0,031** | 10,0 | 1,3 |
+
+| Fassung | CAGR | SPY | Sharpe | MaxDD | Trades | Haltedauer Median | Treffer |
+|---|---|---|---|---|---|---|---|
+| **dynamisch** | 26,9 % | 15,2 % | 0,99 | −44 % | 1.990 | 15 Tage | 56 % |
+| fest 5 | 9,4 % | 15,2 % | 0,76 | −21 % | 4.654 | 6 | 51 % |
+| fest 10 | 21,9 % | 15,2 % | 0,98 | −35 % | 5.577 | 11 | 53 % |
+| **fest 21** | **29,2 %** | 15,2 % | **1,12** | −45 % | 2.820 | 22 | 56 % |
+| fest 42 | 25,7 % | 15,2 % | 0,97 | −48 % | 1.481 | 43 | 57 % |
+| fest 63 | 26,7 % | 15,2 % | 0,99 | −47 % | 988 | 64 | 59 % |
+
+Horizontwahl der Dynamik: 56 % h=5, 19 % h=10, 12 % h=21, 13 % länger.
+Jahre: 2020 +72 %, 2021 +55 %, **2022 −22 % (SPY −18 %)**, 2023 +48 %,
+2024 +35 %, 2025 +41 %.
+
+Drei Lehren:
+
+1. **Das Mehr-Horizont-Modell sortiert out-of-sample auf jedem Horizont**
+   (alle ICs positiv, roh hoch signifikant), am stärksten auf 63 Tagen. Das
+   ist die Grundlage für „die Prognose entscheidet“ — sie existiert.
+2. **Die erste Dynamik-Regel wählt zu oft kurz.** `rate = E[r_h]/h` bevorzugt
+   den 5-Tage-Horizont, obwohl dessen Prognose die *unsicherste* ist
+   (IC 0,010 gegen 0,031). Ergebnis: mehr Umschlag, Sharpe 0,99 statt 1,12
+   der festen 21-Tage-Fassung. Die Korrektur ist klar und steht als
+   nächster Schritt in HYP-19: **jede Horizont-Prognose mit ihrer eigenen
+   Verlässlichkeit gewichten** (`rate_h = IC_h · E[r_h] / h`, IC aus dem
+   Trainingsfenster) und kurze Horizonte nur wählen, wenn sie *deutlich*
+   mehr je Tag versprechen als der Kostenaufschlag.
+3. **Alle Zahlen hier sind Obergrenzen** (heutige S&P-Mitglieder, Bullenjahre
+   2019–2026 mit SPY 15 % p.a.). Die 2022-Zeile zeigt, was ein Bärenjahr
+   ohne Regime-Tor kostet.
+
+**Auf deinem Mac ist das Schritt 0.5** (§8): `29_` auf dem Projektcache mit
+liquidem Universum, Bestehensgrenze wie in HYP-19 (dynamisch ≥ beste feste
+Fassung auf denselben Vorhersagen, OOS-IC je Horizont > 0,01).
 
 ### 6.6 Selbsttests
 
@@ -460,6 +584,61 @@ von denen die bessere (netto, gepaart, ≥ 60 Tage) das Kapital bekommt:
   Top 20 aus 3.000 verliert); voll investiert bei Regime an; kein Hebel im
   Aktienbuch. Mehr Rendite kommt aus mehr Vorsprung je Trade, nicht aus
   mehr Trades.
+
+### 7.1 Das „smarte“ System: Prognose statt Uhr
+
+Die Spuren „kurz“ und „mittel“ sind die **Messfassungen** (fester Horizont,
+damit die Zahlen vergleichbar sind). Die **Betriebsfassung** hält nichts nach
+Kalender, sondern nach Prognose — genau die Forderung „dynamisch je Aktie“:
+
+```
+           ┌────────────────────────────────────────────────────────┐
+           │  Merkmale je Aktie (Faktorzoo: Umkehr, Konsistenz-       │
+           │  Momentum, ruhiges Volumen, Volumenschock, Vola, ...)    │
+           └───────────────┬────────────────────────────────────────┘
+                           ▼
+   ┌────────────┬────────────┬────────────┬────────────┬────────────┐
+   │ Modell h=5 │ Modell h=10│ Modell h=21│ Modell h=42│ Modell h=63│   LightGBM je Horizont,
+   │ E[r_5]     │ E[r_10]    │ E[r_21]    │ E[r_42]    │ E[r_63]    │   walk-forward, Embargo
+   └─────┬──────┴─────┬──────┴─────┬──────┴─────┬──────┴─────┬──────┘
+         └────────────┴────────────┼────────────┴────────────┘
+                                   ▼
+        rate_h = (E[r_h] − Rundlaufkosten) / h     → erwartete Nettorendite JE TAG
+        h* = argmax_h rate_h                        → der Horizont, den DIESE Aktie heute verspricht
+                                   ▼
+   KAUFEN   Top-N nach rate_h*, nur wenn E[r_h*] > Mindestvorsprung und Regime-Tor offen
+   HALTEN   jeden Tag neu: solange max_h E[r_h] > Ausstiegskosten
+   WECHSELN wenn Kandidat: rate > rate(schwächste Position) + Kosten/h
+   SICHERN  Stop 2–3 ATR, Sicherheitsgrenze 126 Tage, Risiko-Dach
+```
+
+Warum das besser ist als „max 10 Tage“ oder „max 21 Tage“: Eine Aktie, die
+in 10 Tagen 3 % verspricht (0,30 %/Tag), wird der Aktie vorgezogen, die in
+63 Tagen 8 % verspricht (0,13 %/Tag) — es sei denn, die Kosten des
+schnelleren Umschlags drehen die Rechnung; das steht in `rate_h` schon
+drin. Und eine Position wird nicht verkauft, weil ein Zähler abgelaufen
+ist, sondern weil die Prognose für *diese* Aktie nichts mehr hergibt.
+
+Was es **nicht** ist: ein Reinforcement-Learning-Agent. Das DQN im Projekt
+existiert und hat einen ehrlichen Timing-Test — aber die Evidenz für RL auf
+Tagesdaten ist dünn (2.500 Schritte je Aktie, nichtstationär, Belohnung
+= Kursverlauf auswendig gelernt; `rl/__init__.py` beschreibt es selbst).
+Baum-Modelle je Horizont mit Walk-Forward sind das, was in der Literatur
+(Gu/Kelly/Xiu 2020 und Nachfolger) out-of-sample trägt. RL bleibt für die
+Positionsgröße als Experiment im Schatten, nicht als Kern.
+
+Was es kostet: fünf Modelle statt eines = fünfmal so viele Wege, Rauschen
+zu lernen. Deshalb gilt die Bestehensgrenze aus §6.8 (dynamisch ≥ beste
+feste Fassung auf denselben Vorhersagen, OOS-IC je Horizont > 0,01), und
+deshalb läuft die dynamische Fassung als eigener Schattenbot gegen die
+festen Spuren, bevor sie Kapital bekommt.
+
+In der Engine ist der Mechanismus fast da: `exit_score` verkauft heute
+schon, wenn „die These nicht mehr trägt“. Neu sind (a) `E[r_h]` je Horizont
+als Score statt des linearen Umkehr-Scores, (b) `rate_h` als Rangkriterium,
+(c) der Wechsel mit Opportunitätskosten. Alles drei in `signals.py`/
+`engine.py` als Strategie `dynamisch`, Konfiguration
+`EngineConfig.for_dynamisch()`.
 
 **Buch B (ORB auf Einzelaktien) ist die Daytrading-Spur** — mit
 Kapitaldeckel, eigener Buchführung (`bot_id`) und der Bestehensgrenze aus
@@ -561,6 +740,17 @@ den Fehler vom Frühjahr (Strategie gebaut, dann gemessen).
 In Zahlen bei 12 % SPY-Jahr: 15–19 % netto. In einem Jahr wie 2022 (SPY −18 %):
 −5 bis −12 % (Regime dämpft), nicht +20 %. **Das ist realistisch. Mehr
 verspricht kein Datensatz, den wir ehrlich prüfen können.**
+
+Und die Gegenrechnung aus §6.7 gehört daneben: Auf 2006–2020 im liquiden
+Universum hat **keine** der Auswahlregeln SPY in der CAGR geschlagen; der
+verlässliche Gewinn dort war die Halbierung des Drawdowns durch das
+Regime-Tor. Sollte der Projektcache (2018–2026) dasselbe zeigen, ist die
+richtige Antwort nicht „mehr handeln“, sondern: Regime-gesteuerter
+Einzelaktien-Kern mit dem Mehr-Horizont-Modell als Auswahl (§7.1), niedriger
+Umschlag, und die Daytrading-Spur nur, wenn HYP-04 besteht. Ein System, das
+SPY um 2 Punkte schlägt und 2008/2020/2022 mit −20 % statt −35/−55 %
+übersteht, ist über zehn Jahre der bessere Bot als eines, das im
+Backtest 30 % zeigt und im ersten Bärenjahr abgeschaltet wird.
 
 ### 9.2 Abbruchkriterien (jetzt aufschreiben, nicht wenn es soweit ist)
 

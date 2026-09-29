@@ -128,7 +128,59 @@ Arbeitsweise für jede Aufgabe:
 - **SEC-Gebühr** 20,60 $/Mio. seit 04.04.2026 (`costs.FeeSchedule.verified`
   jährlich prüfen).
 
-## 6. Was dieses Projekt bewusst NICHT tut
+## 6. Zielfunktion — was „das Beste“ heißt und was nicht
+
+Das Ziel ist die **höchste durchschnittliche Netto-Rendite pro Jahr, die
+man überlebt**. In Zahlen wird eine Variante nach genau dieser Reihenfolge
+beurteilt, und die Reihenfolge ist nicht verhandelbar:
+
+1. **Netto-CAGR minus SPY** über ≥ 8 Jahre inklusive 2018, 2020, 2022 —
+   und minus gleichgewichtetes Universum (Auswahl-Alpha).
+2. **Maximaler Drawdown** ≤ 30 % (Konto-Sperre bei 20 % im Betrieb). Eine
+   Variante mit 25 % CAGR und −60 % Drawdown wird in der Praxis nie
+   durchgehalten; sie ist wertlos.
+3. **Sharpe nach Kosten** ≥ 0,8; Deflated Sharpe (gegen die Zahl der
+   Versuche) > 0.
+4. **Robustheit**: Effekt hält in ≥ 75 % der Jahre und ≥ 2 von 3 Regimen;
+   Parameter ±30 % ändern das Vorzeichen nicht.
+5. **Kostenreserve**: bei 40 bps je Rundlauf noch positiv gegen SPY.
+
+**Trefferquote ist kein Ziel.** 25 % Treffer mit +80 %/−10 % ist exzellent,
+70 % mit +3 %/−12 % ist Ruin (strategie-analyse.md G.1). „Gewinnrate pro
+Woche“ wird protokolliert (Journal), aber nie optimiert.
+
+Und die Regel gegen Selbstbetrug bei „vielen, vielen Tests“: Jede getestete
+Variante zählt im Versuchszähler. Bei 30 Versuchen ist das erwartete
+Maximum durch Zufall 3,1 Sigma. Was darunter liegt, ist kein Fund. Optimiert
+wird deshalb **grob** (Gewichte 0,5/1/2, Horizonte 5/10/21/42/63, Stops
+2/3 ATR) und **vorwärts bestätigt** — nie mit Rastersuche auf der Historie.
+
+## 7. Session-Vorlagen — so wird der Auftrag formuliert
+
+**Forschungs-Session** („teste Idee X“):
+> Trage X als HYP-2027-NN in `hypothesen_2027.py` ein (Behauptung, Quelle,
+> Messvorschrift, Erwartung, Bestehensgrenze). Baue den Faktor in
+> `labor.faktorzoo`, prüfe ihn mit `pit.audit_feature_function`, miss ihn
+> mit `21_` (IC je Horizont/Jahr) und `22_` (Portfolio, 4 Regime, 3
+> Kostenstufen, SPY und Univ.EW). Trage das Ergebnis — auch ein negatives —
+> in `docs/masterplan-2027.md` §6 ein. Ändere nichts am Live-Pfad.
+
+**Bau-Session** („bring Y in die Engine“):
+> Nur, wenn Y in §6 bestanden hat. Implementiere als eigene Strategie in
+> `signals.py`/`engine.py` (`EngineConfig.for_...`), reproduziere das
+> `22_`-Ergebnis mit `10_simulate.py` (± 2 %-Punkte CAGR), melde einen
+> Schattenbot mit genau einer Achse an (`18_fleet.py --anmelden`), lasse
+> `00_selftest.py` und `09_selfcheck.py` laufen. Kein Livegang.
+
+**Betriebs-Session** („was macht der Bot?“):
+> `13_tagesbericht.py`, `17_shadow_report.py --pruefen`, `18_health_check.py`,
+> `15_lernbericht.py`. Gepaarte Vergleiche lesen, Schwelle beachten, keine
+> Regel aus einem guten Monat ableiten.
+
+**Was jede Session am Ende liefert:** die Zahl (mit Jahrestabelle), die
+Entscheidung (bestanden / verworfen / zu dünn), den Commit.
+
+## 8. Was dieses Projekt bewusst NICHT tut
 
 Kein Sekunden-/HFT-Handel, kein Optionsverkauf, kein Hebel über 1,0 im
 Aktienbuch außerhalb des ORB-Tests (dort ≤ 4× intraday, 0 über Nacht), keine

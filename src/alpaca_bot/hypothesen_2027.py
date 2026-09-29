@@ -275,6 +275,28 @@ KATALOG: list[dict] = [
                   "H=10 wahrscheinlich der Kompromiss zwischen Signalstaerke und Kosten.",
         skript="scripts/22_labor_portfolio.py --variante kurz; scripts/24_labor_haltedauer.py --variante kurz",
     ),
+    dict(
+        hyp_id="HYP-2027-19",
+        prio=1,
+        behauptung="Eine dynamische Haltedauer je Aktie - Kauf nach hoechster erwarteter "
+                   "Netto-Rendite je Tag ueber Horizonte 5/10/21/42/63, Halten solange die beste "
+                   "verbleibende Erwartung ueber den Ausstiegskosten liegt, Wechsel mit "
+                   "Opportunitaetskosten - schlaegt jede feste Haltedauer auf DENSELBEN Vorhersagen "
+                   "netto (Sharpe und CAGR), weil sie Umschlag nur dort bezahlt, wo die Prognose ihn "
+                   "rechtfertigt.",
+        quelle="Eigene Konstruktion (scripts/29); Literatur zu horizontabhaengiger Prognose: "
+               "Gu/Kelly/Xiu 2020; Lopez de Prado 2018 (Triple-Barrier, Meta-Labeling) als "
+               "Alternative fuer den Ausstieg",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="scripts/29_labor_dynamisch.py: LightGBM je Horizont, walk-forward jaehrlich, "
+                            "Embargo 1,5x(63+5) Tage, Ziel = winsorisierte Vorwaertsrendite; Simulation dynamisch "
+                            "gegen fest_h5/10/21/42/63, Top 30, 20 bps. Bestehen: dynamisch >= beste feste Fassung "
+                            "in Sharpe UND CAGR, OOS-IC je Horizont > 0,01, in >= 2 von 3 Regimen.",
+        erwartung="Dynamik gewinnt 1-3 %-Punkte CAGR gegen die beste feste Fassung bei gleichem Drawdown; "
+                  "Median-Haltedauer 10-21 Tage; Horizontwahl verschiebt sich in ruhigen Maerkten zu lang, "
+                  "in unruhigen zu kurz.",
+        skript="scripts/29_labor_dynamisch.py --panel projekt --min-dollar-volume 25000000 --top-n 30",
+    ),
 ]
 
 
