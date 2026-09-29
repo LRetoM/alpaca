@@ -365,6 +365,12 @@ def main() -> int:
         if phase == "modell":
             check("Hybrid unter SMA200: Modell entscheidet, Tor sperrt nicht",
                   len(gek) > 0 and gek == set(sorted(fr_h)[-len(gek):]) and eng_h._modell_phase)
+            eng_s = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, score_quelle="hybrid",
+                                                    stop_atr=3.0, stop_atr_modellphase=99.0))
+            dec_s = eng_s.decide(MarketSnapshot(as_of=idx[-1], bars=bars, market=spy_x, signals=fr_h),
+                                 PortfolioState(cash=100_000, equity=100_000))
+            check("Phasen-Stop: in der Modell-Phase liegt der Stop 99 ATR tief (praktisch aus)",
+                  len(dec_s) > 0 and all(d.stop_price < d.price * 0.5 for d in dec_s))
         else:
             check("Hybrid ueber SMA200: Handmix entscheidet",
                   len(gek) > 0 and gek != set(sorted(fr_h)[-len(gek):]) and not eng_h._modell_phase)

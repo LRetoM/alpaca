@@ -136,6 +136,9 @@ Betriebsregeln für Läufe (aus Verlusten gelernt, `docs/lehren-2027.md` §2.12)
   einen Start, dessen Text auf das Muster passt — die Shell tötet sich selbst.
 - Ergebnisdateien tragen alle Parameter im Namen (31_: `_stop{}_h{}-{}_x{}`).
   Zwei Varianten, eine Datei = eine verlorene Messung.
+- Kein Code-Wechsel, während eine Kette läuft, deren spätere Läufe den Code
+  erst laden — sonst vergleicht man zwei Fassungen und glaubt, es sei eine
+  (2026-09-29: Stop gegen Gewichte verwechselt, Kette 7 musste nachrechnen).
 - Ein Ergebnis ohne Register-Zeile existiert nicht.
 - Warteketten (`until … pgrep …; do sleep; done; python …`) als **Datei** schreiben
   (Write-Tool, dann `nohup bash kette.sh`), nie als Heredoc im selben

@@ -346,7 +346,7 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 | HYP-24 | Schnellerer Wiedereinstieg | 22_ --regimes trend_hyst | CAGR ≥ +1, MaxDD ≤ +5 — S&P verfehlt (+0,1), qlib läuft |
 | HYP-17 | Ruhiges Volumen hält auf 2016–2026 | 21_ projekt | ≥ 75 % positive Jahre |
 | HYP-06 | ML-Ranker schlägt Handmix OOS | 23_ auf projekt | CAGR ≥ Handmix + 2 — qlib ohne Tor +3,6/+5 ✓, mit Tor ✗, S&P ✗ (kein Volumen) → Projektcache entscheidet |
-| HYP-26 | Im Hybrid Stop nur in der Trendphase | 31_ --hybrid --stop-modell 99 | CAGR ≥ stoplos − 1 UND MaxDD ≤ stoplos — Engine qlib: mit Stop 10,5 %, ohne 15,5 % |
+| HYP-26 | Im Hybrid Stop nur in der Trendphase | 31_ --hybrid --stop-modell 99 | CAGR ≥ stoplos − 1 UND MaxDD ≤ stoplos — Engine qlib: mit Stop (alte Gewichte) 10,5 %, ohne Stop (momentum) 15,5 %; Kette 7 trennt beides |
 | HYP-25 | Hybrid: Momentum über SMA200, Modell darunter, Vola-Ziel 0,25 | 35_ auf projekt | ≥ SPY − 1 UND ≥ momentum_trend + 2 UND MaxDD ≤ 0,9 × SPY — qlib bestanden (in-sample entworfen) |
 
 ---

@@ -80,6 +80,8 @@ def main() -> int:
     ap.add_argument("--variante", choices=["momentum", "ranking", "ranking_v2"], default="momentum",
                     help="Handmix-Gewichte wie in scripts/22 (Standard momentum = Engine-Standard seit 2026-09-29)")
     ap.add_argument("--hybrid", action="store_true", help="mit --ml-pred: ueber SMA200 Handmix, darunter Modell (HYP-25)")
+    ap.add_argument("--stop-modell", type=float, default=None,
+                    help="Stop (ATR) fuer Kaeufe in der Modell-Phase des Hybrids; Standard = --stop-atr (HYP-26)")
     ap.add_argument("--ml-pred", default=None,
                     help="Parquet mit OOS-Vorhersagen (tag, symbol, pred) aus scripts/23 -> Score-Quelle ml")
     ap.add_argument("--sizing", choices=["vola", "gleich"], default="vola",
@@ -124,6 +126,7 @@ def main() -> int:
         reenter_cooldown_days=args.cooldown, sizing=args.sizing,
         score_quelle=(("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), renew_rank_pct=args.verlaengern,
         max_new_per_day=args.max_new,
+        stop_atr_modellphase=args.stop_modell,
     )
     print(f"  Engine: Stop {args.stop_atr} ATR, Haltedauer {args.min_hold}-{args.max_hold}, "
           f"Kauf ab Perzentil {args.min_rank}, Ausstieg unter {args.exit_rank}, "
@@ -166,7 +169,7 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     tag = (f"simulate_ranking_{args.panel}_{args.variante}_stop{args.stop_atr:g}"
            f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}_c{args.cooldown}_{args.sizing}"
-           + (("_hybrid" if args.hybrid else "_ml") if args.ml_pred else "") + (f"_v{args.verlaengern:g}" if args.verlaengern is not None else "") + (f"_n{args.max_new}" if args.max_new else ""))
+           + (("_hybrid" if args.hybrid else "_ml") if args.ml_pred else "") + (f"_v{args.verlaengern:g}" if args.verlaengern is not None else "") + (f"_n{args.max_new}" if args.max_new else "") + (f"_m{args.stop_modell:g}" if args.stop_modell is not None else ""))
     res.trades.to_csv(OUT_DIR / f"{tag}.csv", index=False)
     eq.rename("kapital").to_csv(OUT_DIR / f"{tag}_kapital.csv")
     print(f"  gespeichert: {OUT_DIR / tag}.csv (+ _kapital.csv)")
@@ -183,7 +186,7 @@ def main() -> int:
                       parameter={"regime": "kein" if args.ohne_regime else "trend_ok", "haltedauer": f"{args.min_hold}-{args.max_hold}",
                                  "kosten_bps": args.spread_bps * 2 + args.slippage_bps * 2, "top_n": args.positions,
                                  "stop_atr": args.stop_atr, "symbole": len(symbole), "min_rank": args.min_rank,
-                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new, "gewichte": args.variante},
+                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new, "gewichte": args.variante, "stop_modell": args.stop_modell},
                       kennzahlen=kz, urteil=urteil,
                       lehre=lehre + f"; Ausstiege {res.trades['exit_reason'].value_counts().to_dict() if not res.trades.empty else {}}",
                       hypothese="HYP-2027-20" if args.stop_atr >= 5 else None)

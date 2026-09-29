@@ -57,8 +57,8 @@
    darunter Modell, immer investiert, Drawdown über Vola-Ziel 0,25 — auf
    qlib 2009–2020 **18,4 % ohne / 14,0 % mit Vola-Ziel bei −30 % MaxDD**
    (SPY 14,5 % bei −34 %) — und **durch den echten Engine-Pfad mit allen
-   Kosten 15,5 % gegen 14,3 %** (ohne Stop; mit 3-ATR-Stop nur 10,5 %:
-   HYP-26, Stop nur in der Trendphase). Erste Fassung, die eine vorab
+   Kosten 15,5 % gegen 14,3 %** (ohne Stop, momentum-Gewichte; mit 3-ATR-Stop
+   und alten Gewichten 10,5 % — HYP-26 trennt Stop und Gewichte). Erste Fassung, die eine vorab
    registrierte Regel besteht; in-sample entworfen, 2008/2022 ungemessen,
    deshalb entscheidet der Projektcache.
 7. Der Engine-Pfad rechnet dasselbe wie das Labor — sobald man weiß, dass
@@ -796,6 +796,10 @@ ranking (Konsistenz + ruhiges Volumen + vola-skaliertes 12-1):
 | qlib trend_ok 2009–2020 (22_ liq25) | **7,5 %** | — | 6,7 % |
 | S&P trend_ok, 42 T (22_, *_preis) | **16,2 %** | (= momentum) | 12,9 % |
 
+Und durch den Engine-Pfad (qlib, Stop 3, Rangverlust 0,20, Deckel 3, Tor):
+`momentum` 8,0 % gegen `ranking` 6,1 % über 2009–2020 (+1,9), MaxDD −24 %
+gegen −27 % — gleiche Richtung, Kohorten-Rauschen inklusive.
+
 Das ruhige Volumen hat den besten IC im Zoo (§6.5) und macht jedes
 Portfolio schlechter, in das es kommt — es kippt die Auswahl zu
 unbeachteten Namen mit weniger Momentum. Das ist Lehre §2.3 in Reinform
@@ -858,6 +862,12 @@ minus bester Handmix +3,6 Punkte** — dasselbe Bild wie auf 21 Tagen (+5),
 mit halbem Umschlag. Bester Einzelfaktor auf denselben Tagen:
 `abstand_52w_tief` (+0,037) — noch ein Hinweis auf den Erholungs-Charakter.
 
+**qlib, Horizont 10 Tage (ohne Tor):** ML 11,6 % gegen momentum 8,3 %
+(+3,4), Umschlag 40/Jahr, MaxDD −44 %. Auf 10, 21 und 42 Tagen also
+dasselbe Vorzeichen (+3,4 / +5 / +3,6) — die Prognose trägt, der Horizont
+entscheidet nur über Umschlag und Drawdown; 42 Tage ist die ruhigste
+Fassung.
+
 **qlib MIT Regime-Tor (trend_ok), gleiche Vorhersagen, gleiches
 Universum:** ML 7,8 % gegen momentum 10,2 %, ranking_v2 8,5 %, ranking
 6,1 % (SPY 14,5 %, Univ.EW 13,9 %). **Mit Tor verliert der ML-Ranker
@@ -918,13 +928,19 @@ Punkte allein durch die Modell-Phase**, im echten Pfad mit allen Kosten.
 MaxDD −35 % (SPY −34 %), Sharpe 0,80, 1.463 Trades, jedes Jahr außer 2018
 (−5,8 %) positiv, 2020 +21,5 %, 6 von 12 Jahren über SPY. Das ist der
 erste Engine-Replay mit allen Kosten, der SPY auf dem breiten Panel
-schlägt. Der Stop kostet im Hybrid 5 Punkte: In der Modell-Phase (SPY
-unter SMA200, hohe Vola, V-Erholungen) reißt der 3-ATR-Stop die
-Erholungskäufe am Tief raus — 820 Stops. Daraus **HYP-2027-26**: Stop nur
-in der Trendphase (`stop_atr_modellphase`, gebaut), Schutz in der
-Modell-Phase über das Vola-Ziel. Was noch offen ist: die alten
-`ranking`-Gewichte in der Trendphase (`momentum` bringt dort +4, §6.9,
-Kette 6) und — die Warnung, die über allem steht — **2008 und 2022 sind
+schlägt. **Aber: die beiden Läufe unterscheiden sich in ZWEI Dingen** —
+der stoplose lief (nach der Gewichtsänderung von 14:46 UTC) mit den neuen
+`momentum`-Gewichten in der Trendphase, der mit Stop noch mit den alten
+`ranking`-Gewichten (Dateinamen im Register). Die 5 Punkte sind also Stop
+UND Gewichte zusammen; die Referenz (§6.9) legt für die Gewichte allein
++4 nahe. Die Vermutung „Stop reißt in der Modell-Phase die Erholungskäufe
+raus“ (820 Stops) ist deshalb **HYP-2027-26** mit eigenem Lauf, nicht ein
+Befund: Kette 7 rechnet Hybrid mit `momentum`-Gewichten dreimal — Stop 3
+fest, kein Stop, Stop 3 nur in der Trendphase (`stop_atr_modellphase`,
+gebaut). Lehre über die Lehre, gleich mitgeschrieben: **Ein Lauf, der
+während einer Code-Änderung startet, ist zwei Läufe** — Dateiname und
+Register tragen jetzt die Gewichtsvariante. Und die Warnung, die über
+allem steht — **2008 und 2022 sind
 für den Hybrid nicht gemessen** (keine Vorhersagen vor 2009; qlib endet
 2020). Ein langer Bär ohne V-Erholung ist der Fall, in dem der
 Erholungs-Ranker ohne Stop am meisten verlieren kann. Der Projektcache

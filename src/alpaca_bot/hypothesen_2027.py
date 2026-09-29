@@ -429,6 +429,28 @@ KATALOG: list[dict] = [
                   "Erholungs-Ranker zerlegt - dann bleibt Momentum + Tor.",
         skript="scripts/35_labor_ml_varianten.py --panel projekt",
     ),
+    dict(
+        hyp_id="HYP-2027-26",
+        prio=1,
+        behauptung="Im Hybrid (HYP-25) gehoert der Einzel-Stop nur in die Trendphase. In der "
+                   "Modell-Phase (SPY unter SMA200: hohe Vola, V-foermige Erholungen) reisst ein "
+                   "3-ATR-Stop die Erholungskaeufe am Tief raus; dort schuetzt das Vola-Ziel des "
+                   "Portfolios, nicht der Einzelstop. Phasenabhaengiger Stop (3 ATR im Trend, keiner "
+                   "im Modell) liefert die CAGR der stoplosen Fassung bei hoechstens 5 Punkten mehr "
+                   "Drawdown als die Fassung mit Stop.",
+        quelle="Eigene Messung 31_ qlib 2009-2020, Hybrid, Rangverlust 0,20, Deckel 3: mit Stop 3 ATR "
+               "10,5 % (820 Stops, MaxDD -34 %), ohne Stop 15,5 % (MaxDD -35 %, Sharpe 0,80, SPY "
+               "14,3 %). Handmix-Fassungen dagegen: Stop CAGR-neutral, halbiert Drawdown (HYP-20).",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="EngineConfig.stop_atr_modellphase (None = wie stop_atr); 31_ --stop-modell 99 "
+                            "gegen --stop-atr 3 fest und --stop-atr 99 fest, Hybrid, qlib und Projektcache. "
+                            "Bestehen: CAGR >= stoplose Fassung - 1 UND MaxDD <= stoplose Fassung + 0 "
+                            "(also besser als beide Extreme in mindestens einer Groesse, schlechter in keiner). "
+                            "VOR dem Lauf registriert (2026-09-29 14:05 UTC).",
+        erwartung="14-15 % CAGR bei -30 bis -33 % MaxDD auf qlib; auf dem Projektcache entscheidet 2022 "
+                  "(langer Baer ohne V): dort koennte auch die Modell-Phase Stops brauchen.",
+        skript="scripts/31_simulate_ranking.py --hybrid --stop-atr 3 --stop-modell 99",
+    ),
 ]
 
 

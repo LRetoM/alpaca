@@ -293,6 +293,10 @@ class EngineConfig:
     Mit Deckel 3-5 baut sich die Engine diese Staffelung selbst. None = kein Deckel.
     Gilt in Simulation UND Live (dort zusaetzlich der Deckel des Laufs)."""
 
+    stop_atr_modellphase: float | None = None
+    """Stop-Abstand (in ATR) fuer Kaeufe in der Modell-Phase des Hybrids (SPY unter SMA200).
+    None = wie `stop_atr`. HYP-2027-26: Dort reisst der enge Stop die Erholungskaeufe am
+    Tief raus (qlib: 10,5 % mit gegen 15,5 % ohne Stop); 99 = praktisch kein Stop."""
     renew_rank_pct: float | None = None
     """Verlaengerung (Strategie 'ranking'): Nach `max_hold_days` wird NUR verkauft, wenn
     das Rangperzentil der Position UNTER diesem Wert liegt. None = klassischer
@@ -390,6 +394,7 @@ class EngineConfig:
             "sizing": self.sizing,
             "score_quelle": self.score_quelle,
             "renew_rank_pct": self.renew_rank_pct,
+            "stop_atr_modellphase": self.stop_atr_modellphase,
             "ml_modell": self.ml_modell,
             "max_new_per_day": self.max_new_per_day,
             "min_hold_days": self.min_hold_days,
@@ -1017,7 +1022,10 @@ class Engine:
                 if size < mindest:
                     continue
 
-            stop = price - cfg.stop_atr * atr if atr > 0 else price * 0.90
+            stop_abstand = cfg.stop_atr
+            if cfg.stop_atr_modellphase is not None and self.__dict__.get("_modell_phase"):
+                stop_abstand = cfg.stop_atr_modellphase
+            stop = price - stop_abstand * atr if atr > 0 else price * 0.90
             target = price + cfg.target_atr * atr if atr > 0 else price * 1.25
 
             if cfg.strategy == "reversal":
