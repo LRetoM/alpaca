@@ -132,7 +132,29 @@ def main() -> int:
     if not res.trades.empty:
         print("  Ausstiegsgruende:", res.trades["exit_reason"].value_counts().to_dict())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    res.trades.to_csv(OUT_DIR / f"simulate_ranking_{args.panel}_stop{args.stop_atr:g}.csv", index=False)
+    tag = (f"simulate_ranking_{args.panel}_stop{args.stop_atr:g}"
+           f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}")
+    res.trades.to_csv(OUT_DIR / f"{tag}.csv", index=False)
+    eq.rename("kapital").to_csv(OUT_DIR / f"{tag}_kapital.csv")
+    print(f"  gespeichert: {OUT_DIR / tag}.csv (+ _kapital.csv)")
+    from alpaca_bot import befunde
+
+    kz = {"cagr": m.get("cagr"), "sharpe": m.get("sharpe"), "max_drawdown": m.get("max_drawdown"),
+          "n_trades": m.get("n_trades"), "trefferquote": m.get("trefferquote"),
+          "erwartungswert_pro_trade": m.get("erwartungswert_pro_trade"),
+          "mittlere_haltedauer": m.get("mittlere_haltedauer"), "kosten_gesamt": m.get("kosten_gesamt")}
+    if spy is not None:
+        kz["bench_cagr"], kz["bench_maxdd"] = kb["cagr"], kb["max_drawdown"]
+    urteil, lehre = befunde.urteil_portfolio(kz)
+    befunde.eintragen(skript="31", panel=args.panel, variante="ranking_engine", zeitraum=f"{eq.index[0].year}-{eq.index[-1].year}",
+                      parameter={"regime": "kein" if args.ohne_regime else "trend_ok", "haltedauer": f"{args.min_hold}-{args.max_hold}",
+                                 "kosten_bps": args.spread_bps * 2 + args.slippage_bps * 2, "top_n": args.positions,
+                                 "stop_atr": args.stop_atr, "symbole": len(symbole), "min_rank": args.min_rank,
+                                 "exit_rank": args.exit_rank},
+                      kennzahlen=kz, urteil=urteil,
+                      lehre=lehre + f"; Ausstiege {res.trades['exit_reason'].value_counts().to_dict() if not res.trades.empty else {}}",
+                      hypothese="HYP-2027-20" if args.stop_atr >= 5 else None)
+    print("  Befund ins Register geschrieben")
     print(f"\n  ({time.time() - t0:.0f} s)")
     return 0
 

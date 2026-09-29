@@ -107,6 +107,17 @@ def main() -> int:
               + "".join(f"{sh.loc[H, c]:>12.2f}" for c in sh.columns))
     print("\n  Lesart: Steigt die Netto-CAGR mit H, frisst der Umschlag den Vorsprung -")
     print("  dann ist laenger halten der Hebel, nicht ein besseres Signal.")
+    from alpaca_bot import befunde
+
+    zeitraum = f"{panel.close.index[0].year}-{panel.close.index[-1].year}"
+    for _, r in df.iterrows():
+        k = {c: r[c] for c in ("cagr", "bench_cagr", "univ_cagr", "sharpe", "max_drawdown", "bench_maxdd", "umschlag_pa") if c in r}
+        urteil, lehre = befunde.urteil_portfolio(k)
+        befunde.eintragen(skript="24", panel=args.panel, variante=args.variante, zeitraum=zeitraum,
+                          parameter={"regime": args.regime or "kein", "haltedauer": int(r["H"]),
+                                     "kosten_bps": float(r["kosten_bps"]), "top_n": args.top_n},
+                          kennzahlen=k, urteil=urteil, lehre=lehre, quelle_lauf=str(out))
+    print(f"  {len(df)} Befunde ins Register geschrieben")
     print(f"\n  gespeichert: {out}   ({time.time() - t0:.0f} s)")
     return 0
 

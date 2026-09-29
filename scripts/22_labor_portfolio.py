@@ -180,6 +180,21 @@ def main() -> int:
         if key in tabellen:
             print(f"\n  JAHRESTABELLE  Regime={key[0]}, Kosten={key[1]:.0f} bps:")
             print(tabellen[key].round(3).to_string())
+    # --- Befundregister: jede Zeile ein Befund, mechanisch beurteilt ---
+    from alpaca_bot import befunde
+
+    zeitraum = f"{panel.close.index[0].year}-{panel.close.index[-1].year}"
+    for _, r in df.iterrows():
+        k = {c: r[c] for c in ("cagr", "bench_cagr", "univ_cagr", "sharpe", "max_drawdown",
+                               "bench_maxdd", "umschlag_pa", "kosten_pa", "exposure") if c in r}
+        urteil, lehre = befunde.urteil_portfolio(k)
+        befunde.eintragen(skript="22", panel=args.panel, variante=args.variante, zeitraum=zeitraum,
+                          parameter={"regime": r["regime"], "haltedauer": int(r["H"]),
+                                     "kosten_bps": float(r["kosten_bps"]), "top_n": int(r["top_n"]),
+                                     "min_dollar_volume": args.min_dollar_volume,
+                                     "vola_ziel": args.vola_ziel, "gewichte": str(var["gewichte"])},
+                          kennzahlen=k, urteil=urteil, lehre=lehre, quelle_lauf=str(out))
+    print(f"  {len(df)} Befunde ins Register geschrieben ({befunde.REGISTER.name})")
     print(f"\n  gespeichert: {out}   ({time.time() - t0:.0f} s)")
     return 0
 

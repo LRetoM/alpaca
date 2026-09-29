@@ -318,6 +318,90 @@ KATALOG: list[dict] = [
                   "den Rest). Stop bei 5 ATR dazwischen.",
         skript="scripts/31_simulate_ranking.py --stop-atr 99",
     ),
+    # --- 2026-09-29, nach der Trade-Autopsie der Engine-Replays (scripts/33) ---
+    dict(
+        hyp_id="HYP-2027-21",
+        prio=1,
+        behauptung="Der Rangverlust-Ausstieg (Rang unter dem 50. Perzentil nach >= 21 Tagen) "
+                   "schadet: Im Querschnitt liegt IMMER die Haelfte unter dem Median, und eine "
+                   "Aktie faellt genau dann darunter, wenn sie gerade gefallen ist - kurz gefallene "
+                   "Aktien haben aber positive Umkehrrendite (reversal_5d/21d IC > 0). Der "
+                   "Rangverlust ist damit ein verspaeteter Stop mit eingebauter Wette gegen die "
+                   "Umkehr. Fester Zeitausstieg (42 Tage wie die vektorisierte Referenz) oder "
+                   "Rangverlust erst unter dem 20. Perzentil liefert hoehere Netto-CAGR.",
+        quelle="Eigene Trade-Autopsie (scripts/33): S&P-Replay ohne Stop - 'rangverlust' 57 % "
+               "der Ausstiege, Oe -2,3 %, Treffer 39 %; 'zeitausstieg' Oe +8,7 %, Treffer 73 %. "
+               "qlib gleiches Bild (-2,1 % gegen +9,0 %). Vektorisierte Referenz mit exakt "
+               "demselben Score (22_ ranking_preis, trend_ok, 20 bps): 12,9 % CAGR gegen "
+               "Engine 7,5 %; Luecke konzentriert in V-Erholungsjahren 2020/2023/2026.",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="scripts/31 auf sp500_close und qlib, Stop 99, drei Fassungen: "
+                            "(a) --min-hold 42 --max-hold 42 --exit-rank 0.0 (reiner Zeitausstieg), "
+                            "(b) --min-hold 21 --max-hold 63 --exit-rank 0.2, (c) Basis exit-rank 0.5. "
+                            "Bestehen: (a) oder (b) CAGR >= 22_-Referenz (ranking_preis trend_ok 20 bps) "
+                            "minus 2 Punkte, d. h. >= 10,9 % auf S&P, >= 4,1 % auf qlib. VOR dem Ergebnis "
+                            "registriert (2026-09-29 12:15 UTC, Laeufe gestartet).",
+        erwartung="(a) schliesst die Luecke bis auf 1-2 Punkte (Rest: Sizing 1/Vola, 5-Tage-Sperre, "
+                  "Tagesdeckel neuer Positionen). (b) dazwischen. MaxDD bei (a) 2-4 Punkte hoeher.",
+        skript="scripts/31_simulate_ranking.py --stop-atr 99 --min-hold 42 --max-hold 42 --exit-rank 0.0",
+    ),
+    dict(
+        hyp_id="HYP-2027-22",
+        prio=2,
+        behauptung="Ein Volatilitaetsziel auf Portfolioebene (Investitionsgrad = min(1, Zielvola / "
+                   "realisierte 20-Tage-Vola des Depots)) halbiert den Maximaldrawdown des "
+                   "Rangportfolios bei gleicher CAGR - und ist damit dem Einzel-Stop ueberlegen, "
+                   "der auf S&P 0,8 Punkte CAGR kostet.",
+        quelle="Eigene Messung 22_ kombi2 qlib 2006-2020: ohne Regime -52,9 % -> -30,7 % MaxDD bei "
+               "5,1 % -> 5,2 % CAGR; mit Regime-Tor -23,8 % -> -18,3 % bei 5,9 % -> 5,2 %. "
+               "Moreira & Muir 2017 (Volatility-Managed Portfolios): Sharpe-Gewinn bei Momentum "
+               "am groessten. In-sample gefunden -> Bestaetigung Pflicht.",
+        quelle_typ="eigene_messung+literatur", veroeffentlicht=2017,
+        operationalisierung="22_ --vola-ziel auf Projektcache 2018-2026 und S&P 2016-2026; dann Engine: "
+                            "RisikoDach liefert target_invested dynamisch, Replay 31_ mit und ohne. "
+                            "Bestehen: MaxDD <= 0,7 x ohne UND CAGR >= ohne - 1 Punkt, in beiden Panels.",
+        erwartung="MaxDD -30 bis -40 % relativ, CAGR +-1 Punkt, Sharpe +0,05 bis +0,15.",
+        skript="scripts/22_labor_portfolio.py --vola-ziel 0.15",
+    ),
+    dict(
+        hyp_id="HYP-2027-23",
+        prio=2,
+        behauptung="Kursexplosionen (>= +50 % in 60 Tagen) sind vorhersagbar (Walk-forward-AUC 0,81), "
+                   "aber die Vorhersage IST die Volatilitaet plus Drawdown - Lotterie-Merkmale mit "
+                   "neutraler bis negativer erwarteter Rendite. Ein Portfolio aus den 10 % Aktien "
+                   "mit der hoechsten Explosionswahrscheinlichkeit erzielt KEINE hoehere mittlere "
+                   "60-Tage-Rendite als das Universum, weil die Crashwahrscheinlichkeit gleich mitsteigt.",
+        quelle="Eigene Messung 30_ Teil B qlib: Cohens d vol_10 1,08, atr_pct 1,07, drawdown -0,92, "
+               "rsi_14 -0,72; Faktorzoo 21_: vola_niedrig IC +0,02 auf 63 Tagen (hohe Vola = "
+               "schlechter). Bali/Cakici/Whitelaw 2011 (MAX-Effekt: Lotterieaktien verlieren).",
+        quelle_typ="eigene_messung+literatur", veroeffentlicht=2011,
+        operationalisierung="30_ um Teil C erweitern: GBM-Wahrscheinlichkeit je Tag und Aktie (walk-forward), "
+                            "Top-Dezil-Mittelrendite 60 Tage gegen Universum, dazu Anteil <= -30 %. "
+                            "Bestehen der Lotterie-These: Top-Dezil-Mittelrendite <= Universum + 1 Punkt.",
+        erwartung="Top-Dezil gleich oder schlechter als Universum; Crash-Anteil 2-3x hoeher. "
+                  "Nutzen der Studie: als AUSSCHLUSS-Filter (Lotterie-Dezil meiden), nicht als Kauf.",
+        skript="scripts/30_labor_muster.py --teil C",
+    ),
+    dict(
+        hyp_id="HYP-2027-24",
+        prio=2,
+        behauptung="Das Regime-Tor SPY > SMA200 kostet in V-foermigen Erholungen (2009, 2020, 2023) "
+                   "den Wiedereinstieg: Es oeffnet erst Monate nach dem Tief. Ein schnelleres "
+                   "Wiedereinstiegs-Signal (SPY > SMA50 UND SMA50 steigend, oder SPY 20 % ueber "
+                   "dem 60-Tage-Tief) bei unveraendertem Ausstiegssignal (SPY < SMA200) erhoeht "
+                   "die CAGR um 1-3 Punkte bei hoechstens 5 Punkten mehr Drawdown.",
+        quelle="Eigene Jahrestabellen: Engine/Referenz 2020 -3,5 %/+8,4 % gegen SPY +18 %; 2023 "
+               "+0,6 %/+13,4 % gegen SPY +26 %. Faber 2007/2013 (SMA200-Timing) und Zakamulin "
+               "2014 (Hysterese-Regeln) als Rahmen.",
+        quelle_typ="eigene_messung+literatur", veroeffentlicht=2014,
+        operationalisierung="labor.regime_serien um 'trend_hyst' erweitern (aus: SPY < SMA200; an: SPY > SMA50 "
+                            "und SMA50 > SMA50[-10]); 22_ ranking_preis/ranking auf sp500 und qlib, 20 bps. "
+                            "Bestehen: CAGR >= trend_ok + 1 Punkt UND MaxDD <= trend_ok-MaxDD + 5 Punkte, "
+                            "in beiden Panels.",
+        erwartung="+1 bis +3 Punkte CAGR, MaxDD +3 bis +5 Punkte. Scheitert, wenn Fehlsignale in "
+                  "Baerenmarkt-Rallyes (2008, 2022) den Gewinn auffressen.",
+        skript="scripts/22_labor_portfolio.py --regime trend_hyst",
+    ),
 ]
 
 
