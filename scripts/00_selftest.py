@@ -317,6 +317,35 @@ def main() -> int:
           not [d for d in eng.decide(snap, jung) if d.action == "sell"])
     check("Regeln der Strategie vollstaendig protokollierbar",
           {"min_hold_days", "min_rank_pct", "exit_rank_pct"} <= set(eng.cfg.as_dict()))
+    # Verlaengerung: am Zeitausstieg bleibt, wer noch im Kaufbereich steht
+    bester = max(eng._qs, key=lambda s: eng._qs[s]["pct"])
+    eng_v = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, renew_rank_pct=0.9))
+    reif = PortfolioState(cash=50_000, equity=100_000, positions={
+        bester: Position(bester, 100, 40.0, idx[-70], 30.0, 999.0, bars_held=63, high_water=40.0),
+        schlecht: Position(schlecht, 100, 40.0, idx[-70], 30.0, 999.0, bars_held=63, high_water=40.0)})
+    verk_v = {d.symbol: d.reasons["ausstiegsgrund"] for d in eng_v.decide(snap, reif) if d.action == "sell"}
+    check("Verlaengerung: Top-Position bleibt nach max_hold, schwache geht (zeitausstieg)",
+          bester not in verk_v and verk_v.get(schlecht) == "zeitausstieg", str(verk_v))
+    check("Ohne Verlaengerung: beide gehen am Zeitausstieg",
+          len([d for d in eng.decide(snap, reif) if d.action == "sell"]) == 2)
+    # Score-Quelle "ml": die Vorhersage IST der Rang - und ohne Spalte gibt es keine Kaeufe
+    from alpaca_bot.signals import build_ranking_frame
+    frames = {s: build_ranking_frame(df, spy, eng.cfg.ranking_weights) for s, df in bars.items()}
+    ml_rang = {s: float(i) for i, s in enumerate(sorted(frames))}     # S119 bekommt den hoechsten Wert
+    for s, fr in frames.items():
+        fr["ml_score"] = ml_rang[s]
+    snap_ml = MarketSnapshot(as_of=idx[-1], bars=bars, market=spy, signals=frames)
+    eng_ml = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, score_quelle="ml"))
+    dec_ml = eng_ml.decide(snap_ml, PortfolioState(cash=100_000, equity=100_000))
+    gekauft = {d.symbol for d in dec_ml}
+    erwartet = set(sorted(frames)[-len(gekauft):]) if gekauft else set()
+    check("Score-Quelle ml: Kaufliste folgt der Vorhersage, nicht dem Handmix",
+          len(gekauft) > 0 and gekauft == erwartet, f"{len(gekauft)} Kaeufe")
+    for fr in frames.values():
+        fr["ml_score"] = float("nan")
+    snap_leer = MarketSnapshot(as_of=idx[-1], bars=bars, market=spy, signals=frames)
+    check("Score-Quelle ml ohne Vorhersagen: keine Kaeufe (sicherer Ausfall)",
+          not eng_ml.decide(snap_leer, PortfolioState(cash=100_000, equity=100_000)))
 
     print("\n[14] Risiko-Dach (Drawdown-Sperre, Tagesverlust, Einzahlungen)")
     from alpaca_bot import risiko

@@ -154,6 +154,7 @@ def run(
     start: str | None = None,
     end: str | None = None,
     verbose: bool = True,
+    ml_scores: pd.DataFrame | None = None,
 ) -> SimResult:
     """Spielt die Historie Tag fuer Tag durch.
 
@@ -196,6 +197,17 @@ def run(
             sym: build_ranking_frame(df, market, ecfg.ranking_weights)
             for sym, df in per_symbol.items()
         }
+        if ecfg.score_quelle == "ml":
+            # Vorhersagen (Tag x Symbol, z. B. OOS aus scripts/23 oder modell.score_panel)
+            # als Spalte `ml_score` - nur der Wert des jeweiligen Tages, nichts danach.
+            if ml_scores is None:
+                raise ValueError("score_quelle='ml' braucht ml_scores (Tag x Symbol)")
+            ml = ml_scores.copy()
+            if ml.index.tz is None:
+                ml.index = ml.index.tz_localize("UTC")
+            for sym, fr in signal_frames.items():
+                col = ml[sym] if sym in ml.columns else pd.Series(index=ml.index, dtype="float64")
+                fr["ml_score"] = col.reindex(fr.index).astype(float)
     else:
         signal_frames = {
             sym: build_signal_frame(df, insider.get(sym), ecfg.weights)

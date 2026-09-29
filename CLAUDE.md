@@ -136,6 +136,11 @@ Betriebsregeln für Läufe (aus Verlusten gelernt, `docs/lehren-2027.md` §2.12)
 - Ergebnisdateien tragen alle Parameter im Namen (31_: `_stop{}_h{}-{}_x{}`).
   Zwei Varianten, eine Datei = eine verlorene Messung.
 - Ein Ergebnis ohne Register-Zeile existiert nicht.
+- Warteketten (`until … pgrep …; do sleep; done; python …`) als **Datei** schreiben
+  (Write-Tool, dann `nohup bash kette.sh`), nie als Heredoc im selben
+  Shell-Befehl: Die Elternshell trägt den ganzen Text in ihrer Kommandozeile,
+  `pgrep -f` findet darin die eigenen Skriptnamen und die Kette wartet ewig
+  auf sich selbst (passiert am 2026-09-29, 40 Minuten verloren).
 
 ## 5. Was regulatorisch neu ist (prüfen, bevor es handelt)
 

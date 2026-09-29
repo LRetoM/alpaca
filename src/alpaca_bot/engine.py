@@ -260,6 +260,19 @@ class EngineConfig:
 
     reenter_cooldown_days: int = 3
     sizing: str = "vola"
+    score_quelle: str = "mix"
+    renew_rank_pct: float | None = None
+    """Verlaengerung (Strategie 'ranking'): Nach `max_hold_days` wird NUR verkauft, wenn
+    das Rangperzentil der Position UNTER diesem Wert liegt - solange sie im Kaufbereich
+    steht, bleibt sie. None = klassischer Zeitausstieg. Keine Zaehlerpflege, deshalb in
+    Simulation und Live identisch (dort wird bars_held taeglich aus dem Einstiegsdatum
+    berechnet). Grund (masterplan §6.9): Beim Zeitausstieg darf die verkaufte Aktie am
+    selben Tag nicht zurueckgekauft werden, ihr Platz geht an Rang 51-100 - so verliert
+    die Engine systematisch ihre Dauer-Sieger, aus denen 40-90 % des Gewinns kommen."""
+    """Woher der Querschnitts-Score der Strategie 'ranking' kommt: "mix" =
+    Z-Score-Mix der RankingWeights (Handmix), "ml" = Spalte `ml_score` in den
+    Signalen (Vorhersage eines gespeicherten Modells, modell.py). Fehlt die
+    Spalte, gibt es keine Kandidaten - und damit keine Kaeufe (sicherer Ausfall)."""
     """Gewichtung bei `deploy_to_target`: "vola" = 1/ATR-Gewichte (Risikoparitaet),
     "gleich" = Gleichgewicht wie die vektorisierte Labor-Referenz (22_)."""
     """Sperrfrist, bevor ein gerade verkauftes Symbol neu gekauft werden darf.
@@ -357,6 +370,8 @@ class EngineConfig:
             "min_price": self.min_price,
             "reenter_cooldown_days": self.reenter_cooldown_days,
             "sizing": self.sizing,
+            "score_quelle": self.score_quelle,
+            "renew_rank_pct": self.renew_rank_pct,
             "min_hold_days": self.min_hold_days,
             "min_rank_pct": self.min_rank_pct,
             "exit_rank_pct": self.exit_rank_pct,
@@ -585,15 +600,23 @@ class Engine:
         dvol = pd.to_numeric(tab.get("dollar_volume"), errors="coerce").fillna(0.0)
         zul = (pd.to_numeric(tab.get("zulaessig"), errors="coerce").fillna(0.0) > 0) \
             & (dvol >= cfg.min_dollar_volume) & tab[list(gew)].notna().all(axis=1)
+        if cfg.score_quelle == "ml":
+            ml = pd.to_numeric(tab.get("ml_score"), errors="coerce")
+            tab["ml_score"] = ml
+            zul = zul & ml.notna()
         kand = tab[zul]
         out: dict[str, dict] = {}
         if len(kand) >= 30:
-            score = pd.Series(0.0, index=kand.index)
-            for k, w in gew.items():
-                s = kand[k].astype(float)
-                sd = s.std()
-                z = ((s - s.mean()) / sd).clip(-3, 3) if sd and np.isfinite(sd) and sd > 0 else s * 0.0
-                score = score + w * z
+            if cfg.score_quelle == "ml":
+                # Die Vorhersage IST der Querschnitts-Score - kein Mix, keine Kappung.
+                score = kand["ml_score"].astype(float)
+            else:
+                score = pd.Series(0.0, index=kand.index)
+                for k, w in gew.items():
+                    s = kand[k].astype(float)
+                    sd = s.std()
+                    z = ((s - s.mean()) / sd).clip(-3, 3) if sd and np.isfinite(sd) and sd > 0 else s * 0.0
+                    score = score + w * z
             pct = score.rank(pct=True)
             for sym in kand.index:
                 out[sym] = {"score": float(score[sym]), "pct": float(pct[sym]),
@@ -803,7 +826,12 @@ class Engine:
             elif price >= pos.target_price:
                 reason = "gewinnziel_erreicht"
             elif pos.bars_held >= cfg.max_hold_days:
-                reason = "zeitausstieg"
+                if (cfg.strategy == "ranking" and cfg.renew_rank_pct is not None
+                        and rang_pct is not None and rang_pct >= cfg.renew_rank_pct):
+                    # Verlaengerung statt Verkauf: die Aktie steht noch im Kaufbereich.
+                    self.__dict__.setdefault("verlaengert", []).append((sym, pos.bars_held))
+                else:
+                    reason = "zeitausstieg"
             elif cfg.strategy == "ranking":
                 # Rangverlust erst nach der Mindesthaltedauer - Hysterese
                 # gegen staendiges Tauschen (exit_rank_pct << min_rank_pct).

@@ -126,9 +126,26 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
   gefallene Kurse reagieren (Rangverlust, enge Stops), sind im
   Momentum-Rangportfolio verdächtig; der Zeitausstieg ist der Maßstab.
 - Verankert: HYP-2027-21 (registriert vor dem Test), `33_trade_autopsie.py`.
-- Status: **Gegen-Test läuft** (31_ mit `--exit-rank 0.0 --min-hold 42
-  --max-hold 42` und `--exit-rank 0.2`). Ergebnis → Masterplan §6.9 und
-  `for_ranking`-Standard.
+- Status: **Gegen-Test gelaufen (S&P):** reiner Zeitausstieg 42 Tage 6,5 %
+  (schlechter als die Basis 7,5 %), Rangverlust erst < 20. Perzentil
+  **8,5 % bei MaxDD −20 %** (Basis −31 %). HYP-21 in der Hauptaussage
+  widerlegt — der Rangverlust ist nicht die Lücke —, die weichere Schwelle
+  ist eine echte Teilverbesserung (qlib-Gegenlauf läuft). Was die Lücke
+  auch nicht ist: Signal (Rangkorrelation Engine/Labor 0,998), Investitions-
+  grad, Kosten, Tagesdeckel. Isolierende Läufe (S&P, 42 Tage fest):
+  Sperre 0 → **exakt gleich** (6,5 %), Gleichgewicht statt 1/Vola → +0,8
+  (7,3 %). **Der Täter**: Der Abgleich der Engine-Bestände mit der
+  Top-50-Liste der Referenz am selben Kauftag ergibt nur 33–46 von 50
+  gemeinsamen Namen — beim Zeitausstieg wird die verkaufte Aktie am
+  selben Tag nicht zurückgekauft, ihr Platz geht an Rang 51–100. Die
+  Dauer-Sieger (die nach 42/63 Tagen noch im Top-Dezil stehen) fliegen
+  systematisch raus, und aus ihnen kommen 40–90 % des Gewinns (§2.13).
+  Regel: **Verlängerung statt Zeitausstieg** — nach der Höchstfrist wird
+  nur verkauft, wer nicht mehr im Kaufbereich steht (`renew_rank_pct`,
+  Engine + 31_ `--verlaengern`, Selbsttest). Replays laufen. Lehre über
+  die Lehre: **Eine Autopsie zeigt Verdächtige, keine Täter** — jeder
+  Verdacht braucht den isolierenden Lauf, und der Täter war am Ende die
+  eine Regel, die niemand verdächtigt hatte, weil sie „nur die Uhr“ war.
 
 ### 2.5 Fester 3-ATR-Stop (HYP-2027-20) — Hauptaussage widerlegt
 - Messung: siehe 2.4. Ohne Stop: S&P +0,8 Punkte CAGR, qlib −0,5 Punkte;
@@ -171,12 +188,17 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 - Status: HYP-23 registriert, Test offen (30_ Teil C).
 
 ### 2.8 Dynamische Haltedauer (29_) schlägt feste Horizonte nicht
-- Messung S&P: dyn_ic 27,3 % gegen fest_h21 29,2 %; qlib läuft.
-- Warum: Bei IC ≈ 0,02 sind die Prognosen je Horizont zu ähnlich und zu
-  verrauscht, um eine Wahl zu tragen; die Wahl addiert Umschlag.
-- Regel: Dynamik erst, wenn ein Prognosemodell IC ≥ 0,05 OOS zeigt.
-- Verankert: Masterplan §6.8, §7.1.
-- Status: erledigt (qlib-Bestätigung ausstehend).
+- Messung S&P: dyn_ic 27,3 % gegen fest_h21 29,2 %. **qlib (breites
+  Universum): dyn_ic 22,3 % gegen bestes fest 17,3 % (2009–2020), alle
+  Fassungen über SPY 14,3 %.** Ein Panel dagegen, eins deutlich dafür.
+- Warum der Unterschied: Auf S&P wählt das Modell fast immer 63 Tage (75 %),
+  auf qlib einen echten Mix (21 T 36 %, 5 T 20 %, 42/63 je 19 %) — die Wahl
+  trägt nur, wo die Horizonte verschiedene Aktien bevorzugen.
+- Regel (korrigiert): Die Dynamik ist zweite Stufe. **Erste Stufe ist die
+  Prognose selbst**: Jede Fassung mit LightGBM-Score lag in beiden Panels
+  über dem Handmix (§3, Masterplan §6.10/§7.2).
+- Verankert: Masterplan §6.8 Nachtrag, §7.2 Architektur v2; HYP-19 kandidat.
+- Status: Bestätigung auf drittem Panel (Projektcache) offen.
 
 ### 2.9 Saisonalität nach Einstiegsmonat — zu dünn
 - Messung: In allen vier Replays Einstiege Mai/Juni Ø +4 bis +7 %,
@@ -198,7 +220,13 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
   halbiert aber den Drawdown 2008/2022.
 - Regel: Tor bleibt; schnelleres Wiedereinstiegssignal als HYP-24 testen
   (Hysterese: aus bei SPY < SMA200, an bei SPY > SMA50 steigend).
-- Status: HYP-24 registriert, Test offen.
+- Status: **S&P gemessen: +0,1 Punkt (13,0 % gegen 12,9 %), MaxDD gleich,
+  Exposure 77 % statt 74 %** — Bestehensregel (+1) verfehlt. Die
+  V-Erholungs-Lücke liegt also nicht am Wiedereinstiegszeitpunkt des Tors
+  (SMA50 kam 2020 nur sechs Wochen früher), sondern daran, WAS nach dem
+  Tief oben im Rang steht (Verlierer-Rallye: die Momentum-Liste ist nach
+  einem Crash voll mit defensiven Namen). qlib-Lauf in Kette 2; bei
+  gleichem Bild: verworfen.
 
 ### 2.12 Infrastruktur: OOM-Kills, sich selbst tötende Shells
 - Was scheiterte: fünf Läufe durch die 15-GB-Grenze verloren (ML h10, ML
@@ -212,6 +240,32 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 - Verankert: CLAUDE.md §Arbeitsweise, 31_ Dateinamen.
 - Status: erledigt.
 
+### 2.13 Die Gewinne sitzen in wenigen Namen — und die Regeln zwingen sie raus
+- Messung (Autopsie `33_`, Konzentration): S&P-Replay ohne Stop — die
+  besten 5 % der Trades liefern 44 % des Bruttogewinns, die 10 besten
+  Symbole 43 % des Netto-PnL; qlib: 10 Symbole = **87 %** des Netto-PnL.
+  Ohne die 10 besten Trades schrumpft der Netto-PnL um 37–58 %.
+- Warum: Momentum ist eine Rechtsschiefe-Strategie — der Erwartungswert
+  kommt aus dem Rand. Zeitausstieg nach 63 Tagen, 5-Tage-Sperre und jede
+  Gewinnmitnahme kappen genau diesen Rand; der Stop kappt den linken.
+- Regel: Kein Gewinnziel (schon so), Zeitausstieg nur, wenn die Aktie das
+  Top-Dezil verlassen hat (Verlängerung statt Verkauf — zu bauen, HYP-21
+  Folgeversuch), Sperre 0 Tage für Namen, die noch im Top-Dezil stehen.
+- Verankert: Autopsie-Kennzahl `konz_*` im Register; `EngineConfig.renew_rank_pct`
+  (Verlängerung), 31_ `--verlaengern`; Sperre 0 gemessen: ohne Wirkung
+  (die Sperre greift nie, weil der Platz am Verkaufstag selbst neu besetzt wird).
+- Status: Verlängerungs-Replays laufen (0,9 / 0,8 / mit Stop 3).
+
+### 2.14 Das Vola-Ziel braucht das richtige Niveau
+- Messung S&P `ranking_preis` trend_ok: ohne 12,9 % / −30,8 %; Ziel 0,15:
+  11,1 % / −15,7 %; 0,20: 12,3 % / −18,7 %; **0,25: 12,9 % / −20,8 %**.
+- Warum: 0,15 liegt unter der Normalvola eines 50-Aktien-Momentumkorbs
+  (~18–22 %) und bremst dauerhaft; 0,25 greift nur in Stressphasen.
+- Regel: Zielvola = leicht über der Medianvola des Korbs, nie darunter;
+  auf jedem Panel neu prüfen (qlib 0,25 in Kette 2).
+- Verankert: HYP-22 Register-Zeilen (0,15/0,20/0,25), Masterplan §6.12.
+- Status: S&P bestanden mit 0,25, qlib offen.
+
 ## 3. Was funktioniert hat — und warum (die Gegenseite)
 
 | Fund | Messung | Warum es trägt | Status |
@@ -221,16 +275,16 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 | Längere Haltedauer | Netto-CAGR steigt monoton H 2 → 42 | Kosten je Tag sinken, Signal hält | erledigt |
 | Regime-Tor SPY > SMA200 | MaxDD halbiert (−55 % → −24 %) | Momentum-Crashs passieren unter der 200er | erledigt |
 | Vola-Ziel | MaxDD −52,9 % → −30,7 % bei gleicher CAGR | Exposure sinkt, wenn Vola steigt — vor dem Crash, nicht danach | HYP-22 |
-| ML-Ranker (LightGBM, 21 T) | OOS IC +0,030, Top-50 15,7 % gegen SPY 14,5 % (qlib 2009–2020, ohne Regime) | Nichtlineare Kombination von Volumen, Vola, Momentum; Wichtigkeit: vol_schub_6m_neg > vola_niedrig > mom_12_1_vola | kandidat; 2. Panel offen |
+| **ML-Prognose (LightGBM auf dem Faktorzoo)** | 23_: Top-50 h21 **15,7 %** gegen SPY 14,3 % / Univ.EW 13,2 % / Handmix 9–10 % (qlib 2009–2020). 29_: jede Fassung mit ML-Score über SPY, dyn_ic 22,3 %. S&P: fest_h21 29,2 % gegen Handmix 23,2 % | Nichtlineare Kombination; Stärke im oberen Rand, nicht im IC (0,030 = bester Einzelfaktor); Wichtigkeit vol_schub_6m_neg > vola_niedrig > mom_12_1_vola | **kandidat — die Stellschraube**; Bestätigung S&P/Regime/H läuft (Kette ML); Architektur v2 in Masterplan §7.2 |
 
 ## 4. Offene Hypothesen mit registrierter Bestehensregel
 
 | ID | Behauptung (kurz) | Test | Bestehen |
 |---|---|---|---|
-| HYP-21 | Rangverlust-Ausstieg schadet | 31_ exit-rank 0.0/0.2 | CAGR ≥ Referenz − 2 |
-| HYP-22 | Vola-Ziel halbiert Drawdown | 22_ --vola-ziel, 2. Panel | MaxDD ≤ 0,7×, CAGR ≥ −1 |
+| HYP-21 | Rangverlust-Ausstieg schadet | 31_ exit-rank 0.0/0.2 | CAGR ≥ Referenz − 2 — widerlegt; exit 0,2 Teilverbesserung (qlib läuft) |
+| HYP-22 | Vola-Ziel halbiert Drawdown | 22_ --vola-ziel 0.25 | MaxDD ≤ 0,7×, CAGR ≥ −1 — S&P bestanden, qlib läuft |
 | HYP-23 | Explosionen = Lotterie | 30_ Teil C | Top-Dezil ≤ Universum + 1 |
-| HYP-24 | Schnellerer Wiedereinstieg | 22_ --regime trend_hyst | CAGR ≥ +1, MaxDD ≤ +5 |
+| HYP-24 | Schnellerer Wiedereinstieg | 22_ --regimes trend_hyst | CAGR ≥ +1, MaxDD ≤ +5 — S&P verfehlt (+0,1), qlib läuft |
 | HYP-17 | Ruhiges Volumen hält auf 2016–2026 | 21_ projekt | ≥ 75 % positive Jahre |
 | HYP-06 | ML-Ranker schlägt Handmix OOS | 23_ auf projekt | CAGR ≥ Handmix + 2 |
 

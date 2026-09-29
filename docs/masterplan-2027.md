@@ -583,6 +583,36 @@ Drei Lehren:
 liquidem Universum, Bestehensgrenze wie in HYP-19 (dynamisch ≥ beste feste
 Fassung auf denselben Vorhersagen, OOS-IC je Horizont > 0,01).
 
+**Nachtrag qlib (2026-09-29, liquides Universum, Top 30, 20 bps, ohne
+Regime; Walk-forward ab 2009, die CAGR-Spalte enthält deshalb drei
+Nulljahre 2006–2008 — umgerechnet auf 2009–2020 in Klammern):**
+
+| Fassung | CAGR 2006–2020 (2009–2020) | Sharpe | MaxDD | Trades | Ø Halt |
+|---|---|---|---|---|---|
+| **dyn_ic** (IC-gewichtete Horizontwahl) | **17,5 % (22,3 %)** | 0,66 | −50 % | 3.531 | 25 T |
+| dyn_roh | 16,6 % (21,2 %) | 0,62 | −54 % | 3.753 | 24 T |
+| fest_h5 | 13,5 % (17,2 %) | 0,64 | −38 % | 6.256 | 5 T |
+| fest_h10 | 13,6 % (17,3 %) | 0,58 | −45 % | 8.735 | 9 T |
+| fest_h21 | 11,8 % (15,0 %) | 0,53 | −53 % | 5.897 | 15 T |
+| fest_h42 | 8,3 % (10,5 %) | 0,43 | −50 % | 3.728 | 23 T |
+| fest_h63 | 11,4 % (14,4 %) | 0,55 | −48 % | 3.271 | 26 T |
+| SPY | 9,3 % (14,3 %) | | −55 % (−34 %) | | |
+
+Zwei Dinge sind hier neu. Erstens: **Jede Fassung mit LightGBM-Prognose
+liegt über SPY** — auch die festen Horizonte, auch mit drei Nulljahren.
+Das ist, zusammen mit §6.10 (Skript 23, eigenes Training, Top 50: 15,7 %
+gegen 14,3 %), der zweite unabhängige Lauf, in dem die ML-Prognose den
+Handmix um 5 und mehr Punkte schlägt. Zweitens: Auf dem breiten Universum
+**schlägt die dynamische Horizontwahl jeden festen Horizont um 4–6
+Punkte** (auf dem S&P-Panel dagegen −2 gegen fest_h21). Die Wahl ist
+dort ein echter Mix (21 Tage 36 %, 5 Tage 20 %, 42 und 63 je 19 %), auf
+S&P eine Einheitswahl (63 Tage 75 %). HYP-19 ist damit **kandidat**: ein
+Panel dafür, eins dagegen, Drawdown ohne Regime-Tor untragbar (−50 %).
+
+Die eigentliche Nachricht ist nicht die Dynamik. Sie ist: **die Prognose
+ist die Stellschraube.** Alles, was in diesem Labor bisher über SPY und
+Universum lag, hatte eine LightGBM-Vorhersage im Score. Konsequenz in §7.2.
+
 ### 6.9 Der Replay-Test: die Strategie durch die ECHTE Engine
 
 Die Strategie „ranking“ ist in `signals.build_ranking_frame` und
@@ -654,10 +684,38 @@ exit 0,2) sind gestartet; Ergebnis in der Tabelle unten, sobald da.
 
 | Isolierender Lauf (S&P, 42 Tage fest, ohne Stop) | CAGR | MaxDD | Deutung |
 |---|---|---|---|
-| Sperre 0 Tage | _läuft_ | | Wiedereinstieg der Sieger |
-| Gleichgewicht statt 1/Vola | _läuft_ | | Sizing-Effekt |
-| beides | _läuft_ | | nächste Näherung an die Referenz |
-| qlib 21–63, Rangverlust < 0,20 | _läuft_ | | Bestätigung der Teilverbesserung |
+| Basis (Sperre 5, 1/Vola) | 6,5 % | −22,6 % | |
+| Sperre 0 Tage | 6,5 % | −22,6 % | **exakt gleich** — die Sperre wirkt nie, siehe unten |
+| Gleichgewicht statt 1/Vola | 7,3 % | −22,7 % | +0,8 Punkte: Sizing ist ein kleiner Hebel |
+| beides | 7,3 % | −22,7 % | wie Gleichgewicht allein |
+| qlib 21–63, Rangverlust < 0,20 (2009–2020) | 6,4 % | −39,9 % | +1,7 gegen Basis 4,7 %, Drawdown leicht besser als −45 % |
+
+**Der Täter ist gefunden — und es war keiner der Verdächtigen.** Der
+Abgleich der Engine-Bestände mit der Top-50-Liste der Referenz am
+jeweiligen Kauftag ergibt nur **33–46 von 50 gemeinsamen Namen**. Grund:
+Beim Zeitausstieg verkauft die Engine alle Positionen einer Kohorte und
+füllt die Plätze *am selben Tag* — eine gerade verkaufte Aktie ist an
+diesem Tag ausgeschlossen (deshalb ändert die Sperre 0 nichts), ihr Platz
+geht an Rang 51–100. Genau die Aktien, die nach 42 oder 63 Tagen **noch
+immer** im Top-Dezil stehen, sind die Dauer-Sieger — und aus ihnen kommen
+40–90 % des Gewinns (§6.9 Autopsie, Konzentration). Die vektorisierte
+Referenz hält solche Namen über ihre 42 gestaffelten Kohorten
+durchgehend; die Engine wirft sie systematisch raus. Weder Sizing noch
+Sperre noch Rangverlust: **der Zeitausstieg selbst** ist die Lücke.
+
+Konsequenz: **Verlängerung statt Zeitausstieg** — nach `max_hold_days`
+wird nur verkauft, wenn die Aktie *nicht mehr* im Kaufbereich steht
+(`renew_rank_pct`, Standardvorschlag 0,90 = das Top-Dezil). Das ist das
+„dynamisch je Aktie“, das der Nutzer wollte, ohne Prognosehorizonte: Der
+Rang entscheidet, wie lange gehalten wird. Sim und Live rechnen es gleich
+(keine Zählerpflege nötig — nach der Höchstfrist gilt „halten, solange im
+Kaufbereich“). Replays mit Verlängerung laufen; Ergebnis hier.
+
+| Verlängerung (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | MaxDD | Verlängerungen |
+|---|---|---|---|
+| ohne Stop, verlängern ab Perzentil 0,90 | _läuft_ | | |
+| ohne Stop, verlängern ab 0,80 | _läuft_ | | |
+| **Stop 3 ATR**, verlängern ab 0,90 (Kandidat Live-Standard) | _läuft_ | | |
 
 Für die Engine-Voreinstellung heißt das heute: **Stop bleibt bei 3 ATR**
 (Drawdown-Halbierer, CAGR-neutral), Rangverlust-Schwelle 0,20 nach dem
@@ -704,7 +762,20 @@ Haltedauer ohne Neutraining geprüft werden können, und rechnet die
 Handmixe auf **exakt demselben Universum** mit — sonst vergleicht man
 Universumsfilter statt Modelle.
 
-Wenn der ML-Ranker auf dem zweiten Panel hält, wird er der Score der
+**Zweites Panel, S&P 2019–2026 (nur 11 Kursmerkmale, ohne Volumen):**
+ML 24,6 % gegen Handmix `momentum` 24,8 % auf demselben Universum (SPY
+16,6 %, Univ.EW 17,1 %), OOS-IC +0,021, MaxDD −43,5 % gegen −40,7 %.
+**Kein Vorsprung.** Die Deutung, die beide Panels zusammen erlauben: Der
+ML-Vorsprung auf qlib kommt aus dem, was dem S&P-Panel fehlt — den
+Volumenmerkmalen (`vol_schub_6m_neg` ist die wichtigste Variable) und der
+Breite (8.000 statt 600 Namen, 2009 statt 2019 als erstes Testjahr). Das
+ist kein Beweis, aber es ist die einzige Erklärung, die beide Zahlen
+verträgt. Damit ist der **Projektcache (2018–2026, 2.168 Symbole MIT
+Volumen) das entscheidende dritte Panel** — Stufe 1 in
+`docs/bot-start-2027.md` bekommt `23_ --panel projekt` als Pflichtlauf mit
+Bestehensregel „ML ≥ Handmix + 2 Punkte auf demselben Universum“.
+
+Wenn der ML-Ranker auf dem dritten Panel hält, wird er der Score der
 Engine (Architektur §7: `build_ranking_frame` liefert die Merkmale, ein
 gespeichertes LightGBM-Modell den Rang; Training jährlich, Modell im Repo
 mit Datum). Wenn nicht, bleibt der Handmix.
@@ -890,6 +961,42 @@ Kapital brauchen.
 | News-Frequenz | Alpaca News | täglich (Kontingent!) | `news.py` (fertig) |
 
 ---
+
+### 7.2 Architektur v2: die Prognose als Score (Entwurf, 2026-09-29)
+
+Beschlossen als Plan, gebaut erst nach der Bestätigungskette (§6.10:
+S&P-Panel, qlib mit Regime-Tor, Horizonte 10/42). Wenn der ML-Ranker dort
+den Handmix nicht um ≥ 2 Punkte schlägt, bleibt §7.1 mit Handmix. Wenn ja:
+
+1. **Merkmale**: Der Faktorzoo (`labor.faktorzoo`, 19 Merkmale) wird die
+   einzige Merkmalsquelle — im Labor UND im Bot. Der Daemon lädt ohnehin
+   1.200 Symbole × 2 Jahre Tagesbars; daraus baut `labor.panel_aus_data_stock`
+   ein Panel und `faktorzoo` die Merkmale des Tages. Kein zweiter
+   Rechenweg (`build_ranking_frame` bleibt für die Handmix-Strategie).
+2. **Modell**: `src/alpaca_bot/modell.py` — `trainieren(panel, horizont,
+   bis)` (LightGBM, dieselben Parameter wie 23_, Embargo), `laden(pfad)`,
+   `vorhersagen(merkmale_heute)`. Modelle liegen in `models/lgbm_h21_<datum>.txt`
+   im Repo (klein), Training jährlich im Januar auf allen Daten bis
+   Ende November (Embargo), Protokoll im Register.
+3. **Engine**: Strategie `"ml"` — `_querschnitt_scores` nimmt die
+   Modellvorhersage als Score statt des Z-Score-Mixes; alles andere
+   (Regime-Tor, Top-Dezil, 50 Plätze, 21–63 Tage, Rangverlust 0,20, Stop
+   3 ATR, Risiko-Dach, Vola-Ziel) bleibt. So ist der Wechsel eine Zeile
+   in der Konfiguration, und der Replay 31_ vergleicht beide Scores auf
+   demselben Pfad.
+4. **Horizontwahl** (§6.8 dyn_ic) erst als zweite Stufe: ein Modell je
+   Horizont, Rate = IC-gewichtete Erwartung je Tag. Nur wenn Stufe 3 auf
+   beiden Panels steht.
+5. **Kontrollen, die nicht verhandelbar sind**: Walk-forward-Bericht je
+   Jahr im Register; das Modell des Bots ist immer das des letzten
+   Januars (kein Nachtrainieren unter dem Jahr); Merkmalswichtigkeit wird
+   protokolliert und muss die Handmix-Bausteine enthalten (sonst hat das
+   Modell etwas gelernt, das wir nicht verstehen — Abbruch, §9.2).
+
+Was das für den Zeitplan (§8) heißt: Schritt 2 (November) bekommt den
+Punkt „Modell-Modul + Strategie ml + Replay-Vergleich“; Schritt 3
+(Dezember) startet das Papierdepot mit dem Score, der im Replay auf
+deinem Cache vorn liegt. Der Handmix ist der Rückfall, nicht der Plan.
 
 ## 8. Bauplan mit Zeitachse bis Januar 2027
 
