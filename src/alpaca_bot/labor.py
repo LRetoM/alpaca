@@ -601,6 +601,21 @@ def regime_serien(spy_close: pd.Series, vix_close: pd.Series | None = None,
     df = pd.DataFrame(index=s.index)
     df["trend_ok"] = s > s.rolling(200).mean()
     df["trend_ok_50"] = s > s.rolling(50).mean()
+    # trend_hyst (HYP-2027-24): AUS, sobald SPY unter die SMA200 faellt; wieder AN,
+    # sobald SPY ueber der SMA50 liegt UND die SMA50 gegenueber vor 10 Tagen steigt -
+    # schnellerer Wiedereinstieg nach V-Erholungen, gleicher Ausstieg. Nur Vergangenheit.
+    sma50 = s.rolling(50).mean()
+    an_signal = (s > sma50) & (sma50 > sma50.shift(10))
+    aus_signal = ~df["trend_ok"]
+    zustand = np.zeros(len(s), dtype=bool)
+    z = False
+    for i, (a, b, t) in enumerate(zip(an_signal.to_numpy(), aus_signal.to_numpy(), df["trend_ok"].to_numpy())):
+        if z and b:
+            z = False
+        elif not z and (a or t):
+            z = True
+        zustand[i] = z
+    df["trend_hyst"] = zustand
     rv = np.log(s).diff().rolling(20).std() * np.sqrt(252)
     df["vola_20"] = rv
     df["vola_hoch"] = rv > rv.rolling(504, min_periods=250).quantile(0.8)

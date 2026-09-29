@@ -610,22 +610,154 @@ den macht fast jeder Gewinner irgendwann in 63 Tagen, und der Stop
 verkauft ihn genau dann. Das Kompendium (§3.2) sagt es seit dem Sommer:
 Zeit- und Regelausstiege schlagen bei Momentum den festen Stop.
 
-Die Simulationen ohne Stop (Rang und Zeit entscheiden, Stop nur als
-Katastrophenschutz bei 99 ATR) laufen; Ergebnis folgt in dieser Tabelle.
-Für die Engine-Voreinstellung heißt das schon jetzt: **Stop weit (≥ 5 ATR)
-oder aus, Risiko liegt im Rang-Ausstieg, im Regime-Tor und im Risiko-Dach.**
+**Ergebnis der Simulationen ohne Stop (2026-09-29):** HYP-20 ist in der
+Hauptaussage **widerlegt**. Der Stop kostet keine CAGR — er halbiert den
+Drawdown:
+
+| Panel | Stop 3 ATR | ohne Stop (99 ATR) | Referenz 22_ (gleicher Score) |
+|---|---|---|---|
+| S&P 2016–2026 | 6,7 % / MaxDD −18 % | 7,5 % / **−31 %** | 12,9 % / −31 % |
+| qlib 2009–2020 | 5,2 % / −30 % | 4,7 % / **−45 %** | 6,1 % (2009–2020: 6,7 %) / −29 % |
+
+Die Lücke zur vektorisierten Referenz bleibt also **mit und ohne Stop**
+bestehen. Die Trade-Autopsie (`scripts/33_`) zeigte als nächsten
+Verdächtigen den Rangverlust-Ausstieg (57 % der Ausstiege, Ø −2,3 %,
+Trefferquote 39 %; Zeitausstiege Ø +8,7 %, 73 %). Daraus wurde
+**HYP-2027-21**, registriert vor dem Test — und auch sie ist in der
+Hauptaussage widerlegt:
+
+| Engine-Fassung (S&P, ohne Stop) | CAGR | Sharpe | MaxDD |
+|---|---|---|---|
+| Basis: 21–63 Tage, Rangverlust < 50. Perzentil | 7,5 % | 0,56 | −31,0 % |
+| reiner Zeitausstieg 42 Tage (wie die Referenz) | 6,5 % | 0,53 | −22,6 % |
+| 21–63 Tage, Rangverlust erst < 20. Perzentil | **8,5 %** | **0,68** | **−20,5 %** |
+| Referenz 22_ `ranking_preis`, trend_ok, 20 bps | 12,9 % | 0,85 | −30,8 % |
+
+Der Rangverlust ist nicht die Lücke (der reine Zeitausstieg ist sogar
+schlechter), aber die weichere Schwelle 0,20 ist eine echte
+Teilverbesserung: +1 Punkt CAGR bei einem Drittel weniger Drawdown
+(Kandidat für `for_ranking(exit_rank_pct=0.2)`, qlib-Gegenlauf läuft).
+
+Was die Lücke NICHT ist (jeweils gemessen): das Signal (Engine- und
+Labor-Score haben Rangkorrelation 0,998), der Investitionsgrad (Engine
+77–86 % zu Einstandskursen, Referenz 74 %), die Kosten (Engine 0,6 % p.a.,
+Referenz 1,8 %), der Tagesdeckel (der Simulator hat keinen). Was bleibt —
+und jetzt einzeln gemessen wird: **1/Vola-Sizing** (die Referenz ist
+gleichgewichtet; Momentum in ruhigen Aktien trägt weniger), die
+**5-Tage-Wiedereinstiegssperre** (beim Zeitausstieg laufen die Sieger aus
+und dürfen fünf Tage nicht zurück — ihre Plätze bekommen die Ränge 51–100)
+und die **Klumpung der Kohorten** (die Referenz hat 42 gestaffelte
+Kohorten, die Engine wenige große; die Jahreswerte der drei Engine-Fassungen
+streuen deshalb um bis zu 20 Punkte — 2024: 18 % gegen 38 %). Die vier
+isolierenden Läufe (`--cooldown 0`, `--sizing gleich`, beides, qlib
+exit 0,2) sind gestartet; Ergebnis in der Tabelle unten, sobald da.
+
+| Isolierender Lauf (S&P, 42 Tage fest, ohne Stop) | CAGR | MaxDD | Deutung |
+|---|---|---|---|
+| Sperre 0 Tage | _läuft_ | | Wiedereinstieg der Sieger |
+| Gleichgewicht statt 1/Vola | _läuft_ | | Sizing-Effekt |
+| beides | _läuft_ | | nächste Näherung an die Referenz |
+| qlib 21–63, Rangverlust < 0,20 | _läuft_ | | Bestätigung der Teilverbesserung |
+
+Für die Engine-Voreinstellung heißt das heute: **Stop bleibt bei 3 ATR**
+(Drawdown-Halbierer, CAGR-neutral), Rangverlust-Schwelle 0,20 nach dem
+qlib-Gegenlauf, Sizing und Sperre nach den isolierenden Läufen.
 
 Zweiter Befund aus demselben Vergleich: Der Score-Kandidat **v2** (rohes
 12-1-Momentum + Konsistenz + halbes ruhiges Volumen) bringt auf dem S&P-
 Panel 16,2 % mit Regime (23,2 % ohne) gegen 12,9 % für die Fassung mit
 vola-skaliertem Momentum — bei etwas höherem Drawdown (−35 % gegen −31 %).
-Der Qlib-Gegenlauf entscheidet, welche Gewichte die Engine bekommt; die
-Auswahl zählt im Versuchszähler (Schwelle 3,1 Sigma), und die Bestätigung
-auf deinem Cache ist Pflicht.
+Der Qlib-Gegenlauf (in der ML-Kette) entscheidet, welche Gewichte die
+Engine bekommt; die Auswahl zählt im Versuchszähler (Schwelle 3,4 Sigma),
+und die Bestätigung auf deinem Cache ist Pflicht.
 
-### 6.6 Selbsttests
+### 6.10 ML-Ranker (LightGBM, walk-forward) — der erste Fund über SPY und Universum
 
-- `scripts/00_selftest.py`: 47/47 bestanden (nach Einbau von `labor.py`).
+`scripts/23_` auf qlib, liquides Universum, 19 Merkmale des Faktorzoos,
+jährlicher Walk-forward mit Embargo (Training nur bis 39 Kalendertage vor
+dem Testjahr), Ziel 21-Tage-Vorwärtsrendite, Top 50, 20 bps, **ohne**
+Regime-Tor, 2009–2020:
+
+| | CAGR | Sharpe | MaxDD | Jahre > SPY |
+|---|---|---|---|---|
+| **ML-Ranker h21** | **15,7 %** | 0,70 | −40,6 % | 7/12 |
+| SPY | 14,3 % | | −33,7 % | |
+| Univ.EW (liquides Universum) | 13,2 % | | | |
+| Handmix `ranking` (kein Regime), gleicher Zeitraum | 10,4 % | 0,37 | −54 % | 4/12 |
+| Handmix `momentum` (kein Regime) | 9,2 % | | | 5/12 |
+
+OOS-IC +0,030 (t deflationiert 1,4) — **genau so hoch wie der beste
+Einzelfaktor** (mom_12_1_vola +0,030) auf denselben Tagen. Das Portfolio
+ist trotzdem 5–6 Punkte besser als jeder Handmix: Die Stärke des Modells
+sitzt im oberen Rand der Verteilung, nicht im mittleren Rang (dieselbe
+Lehre wie §6.6, nur umgekehrt). Merkmalswichtigkeit: vol_schub_6m_neg >
+vola_niedrig > mom_12_1_vola > mom_6m > abstand_52w_tief — das Modell hat
+die Handmix-Bausteine selbst gefunden und ergänzt sie um Vola und
+52-Wochen-Abstand.
+
+Einordnung, ehrlich: erstes Panel, in-sample gewählte Merkmale, kein
+Regime-Tor, MaxDD über SPY. Urteil im Register: **kandidat** (2 von 3
+Kriterien). Die Bestätigungskette läuft: S&P-Panel (nur Kursmerkmale),
+qlib mit Regime-Tor, Horizonte 10 und 42. Das Skript speichert jetzt die
+OOS-Vorhersagen (`ml_pred_*.parquet`), damit Regime, Vola-Ziel und
+Haltedauer ohne Neutraining geprüft werden können, und rechnet die
+Handmixe auf **exakt demselben Universum** mit — sonst vergleicht man
+Universumsfilter statt Modelle.
+
+Wenn der ML-Ranker auf dem zweiten Panel hält, wird er der Score der
+Engine (Architektur §7: `build_ranking_frame` liefert die Merkmale, ein
+gespeichertes LightGBM-Modell den Rang; Training jährlich, Modell im Repo
+mit Datum). Wenn nicht, bleibt der Handmix.
+
+### 6.11 Chartmuster und Explosionen (Skript 30)
+
+Teil A, neun Muster × drei Horizonte auf qlib 2006–2020 (27 Zeilen im
+Register): **kein Muster über der Zufallsschwelle.** Bestes t_defl +1,99
+(Volumenkompression, 5 Tage) — ein Vola-Proxy, den `vola_niedrig` schon
+trägt. Gap-ups mit Volumen (−3,9) und Donchian-Ausbrüche (−2,8) sind
+**negativ**: Ausbrüche kehren um. Regel: keine Ausbruchskäufe.
+
+Teil B, 1.162 Explosionen (≥ +50 % in 60 Tagen) gegen 5.000 Kontrollen:
+Walk-forward-GBM **AUC 0,81** (Negativtest 0,50). Die Merkmale davor:
+vol_10 (Cohens d 1,08), atr_pct (1,07), bb_width (0,94), Drawdown (−0,92),
+RSI (−0,72). Explosionen kommen aus abgestürzten, volatilen Aktien — und
+genau die haben laut Faktorzoo **negative** erwartete Rendite (hohe Vola =
+Lotterie). Vorhersagbar ist nicht verdienbar: HYP-2027-23 registriert, mit
+dem Test, ob das Top-Dezil der Explosionswahrscheinlichkeit netto mehr
+verdient als das Universum (Erwartung: nein, Crash-Anteil 2–3× höher;
+Nutzen allenfalls als Ausschlussfilter).
+
+### 6.12 Vola-Ziel (HYP-2027-22) — Drawdown-Halbierer, wenn das Ziel stimmt
+
+`22_ --vola-ziel` skaliert den Investitionsgrad mit Zielvola /
+realisierter 20-Tage-Vola des Portfolios:
+
+| Panel, Variante | ohne | 0,15 | 0,20 | 0,25 |
+|---|---|---|---|---|
+| qlib kombi2, kein Regime | 5,1 % / −52,9 % | 5,2 % / −30,7 % | | |
+| qlib kombi2, trend_ok | 5,9 % / −23,8 % | 5,2 % / −18,3 % | | |
+| S&P ranking_preis, kein Regime | 18,0 % / −36,4 % | 13,4 % / −17,4 % | 15,7 % / −20,2 % | 16,8 % / −22,9 % |
+| S&P ranking_preis, trend_ok | 12,9 % / −30,8 % | 11,1 % / −15,7 % | 12,3 % / −18,7 % | **12,9 % / −20,8 %** |
+
+Mit Ziel 0,25 besteht die Regel (MaxDD ≤ 0,7×, CAGR ≥ ohne − 1) auf dem
+S&P-Panel; 0,15 ist zu eng für ein Bullenjahrzehnt. qlib mit 0,25 läuft.
+Wenn beides hält, kommt das Vola-Ziel ins Risiko-Dach als dynamischer
+`target_invested` — es ersetzt nicht das Regime-Tor, es ergänzt es (das Tor
+reagiert auf Trend, das Ziel auf Vola, und Vola steigt vor dem Trendbruch).
+
+### 6.13 Was das Register nach 190 Befunden sagt
+
+`docs/befunde-2027.md` (automatisch): 72 unterschiedliche Varianten,
+Zufallsschwelle 3,4 Sigma. **Bestanden** (CAGR ≥ SPY − 2, MaxDD ≤ 0,8 ×
+SPY, ≥ Univ.EW): zwei Zeilen, beide `momentum` qlib trend_ok bei 10 bps.
+**Kandidat**: ML-Ranker h21, Engine exit 0,2, mehrere Vola-Ziel-Zeilen.
+Alles andere verworfen oder zu dünn — und das ist der Zustand, den ein
+ehrliches Labor nach 72 Versuchen zeigen muss. Die Lehren daraus, als
+Regeln: `docs/lehren-2027.md`.
+
+### 6.14 Selbsttests
+
+- `scripts/00_selftest.py`: 61/61 bestanden (Ranking-Strategie, Risiko-Dach, Befundregister).
 - `scripts/09_selfcheck.py`: 9 Prüfungen, 0 Verstöße.
 - `scripts/26_labor_orb_intraday.py --selftest`: 6/6 bestanden (Auslöser,
   Stop-Begrenzung, Short-Sperre, relatives Volumen, Top-N, Zufallsmarkt ≈ 0).

@@ -79,6 +79,8 @@ def main() -> int:
     p.add_argument("--kosten", type=float, default=20.0)
     p.add_argument("--min-preis", type=float, default=3.0)
     p.add_argument("--min-dollar-volume", type=float, default=1_000_000)
+    p.add_argument("--regime", default=None, help="z. B. trend_ok (SPY > SMA200) fuer das Portfolio")
+    p.add_argument("--vix", default=str(PROJECT_ROOT / "data" / "extern" / "vix-daily.csv"))
     args = p.parse_args()
 
     try:
@@ -172,19 +174,66 @@ def main() -> int:
     # --- Rangportfolio auf den OOS-Vorhersagen ---
     score = pred.pivot(index="tag", columns="symbol", values="pred").reindex(columns=p_akt.close.columns)
     score = score.reindex(p_akt.close.index).ffill(limit=args.stichprobe)
+    vix = labor.vix_laden(args.vix) if Path(args.vix).exists() else None
+    regime = labor.regime_serien(spy, vix) if spy is not None else None
     cfg = labor.PortfolioConfig(top_n=args.top_n, haltedauer=args.horizont,
-                                kosten_bps_rundlauf=args.kosten)
-    erg = labor.rangportfolio(score, p_akt, cfg, maske=maske, benchmark=spy)
+                                kosten_bps_rundlauf=args.kosten, regime=args.regime)
+    erg = labor.rangportfolio(score, p_akt, cfg, maske=maske, regime=regime, benchmark=spy)
     erg.renditen = erg.renditen.loc[str(erstes):]
     k = erg.kennzahlen()
-    print(f"\n  Top-{args.top_n}-Portfolio auf OOS-Vorhersagen, H={args.horizont}, {args.kosten:.0f} bps:")
-    print(f"      CAGR {k['cagr']:+.1%}  (SPY {k['bench_cagr']:+.1%})  Sharpe {k['sharpe']:.2f}  "
-          f"MaxDD {k['max_drawdown']:.1%} (SPY {k['bench_maxdd']:.1%})  Umschlag {k['umschlag_pa']:.1f}/J")
+    print(f"\n  Top-{args.top_n}-Portfolio auf OOS-Vorhersagen, H={args.horizont}, {args.kosten:.0f} bps, "
+          f"Regime={args.regime or 'kein'}:")
+    print(f"      CAGR {k['cagr']:+.1%}  (SPY {k['bench_cagr']:+.1%}, Univ.EW {k.get('univ_cagr', float('nan')):+.1%})"
+          f"  Sharpe {k['sharpe']:.2f}  MaxDD {k['max_drawdown']:.1%} (SPY {k['bench_maxdd']:.1%})  "
+          f"Umschlag {k['umschlag_pa']:.1f}/J")
     print(erg.jahrestabelle().round(3).to_string())
+
+    # Fairer Vergleich: dieselben Handmixe auf EXAKT demselben Universum, denselben
+    # Tagen, derselben Haltedauer und denselben Kosten - sonst vergleicht man
+    # Universumsfilter statt Modelle.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from importlib import import_module
+    varianten = import_module("22_labor_portfolio").VARIANTEN
+    vergleich = {}
+    print(f"\n  Handmixe auf demselben Universum/Zeitraum (H={args.horizont}, {args.kosten:.0f} bps, "
+          f"Regime={args.regime or 'kein'}):")
+    for name in ("momentum", "ranking", "ranking_v2", "kombi2"):
+        gew = varianten[name]["gewichte"]
+        if any(g not in faktoren for g in gew):
+            continue
+        sc = labor.kombinieren(faktoren, gew)
+        e2 = labor.rangportfolio(sc, p_akt, cfg, maske=maske, regime=regime, benchmark=spy)
+        e2.renditen = e2.renditen.loc[str(erstes):]
+        k2 = e2.kennzahlen()
+        vergleich[name] = k2
+        print(f"      {name:<12} CAGR {k2['cagr']:+.1%}  Sharpe {k2['sharpe']:.2f}  MaxDD {k2['max_drawdown']:.1%}")
+    bester_hand = max(vergleich.values(), key=lambda v: v["cagr"])["cagr"] if vergleich else float("nan")
+    print(f"      ML minus bester Handmix: {k['cagr'] - bester_hand:+.1%} Punkte")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / f"ml_ranking_{args.panel}_h{args.horizont}.csv"
     ic_jahr.to_csv(out)
+    # OOS-Vorhersagen sichern: damit Regime, Vola-Ziel, andere Haltedauern und der
+    # Engine-Pfad OHNE neues Training ausprobiert werden koennen.
+    pred_out = OUT_DIR / f"ml_pred_{args.panel}_h{args.horizont}.parquet"
+    pred.to_parquet(pred_out, index=False)
+    print(f"  Vorhersagen: {pred_out} ({len(pred):,} Zeilen)")
+
+    from alpaca_bot import befunde
+    kz = {c: k[c] for c in ("cagr", "bench_cagr", "univ_cagr", "sharpe", "max_drawdown", "bench_maxdd",
+                            "umschlag_pa") if c in k}
+    kz.update(ic_oos=float(ic_tag.mean()), t_deflated=float(ges_t / np.sqrt(args.horizont)),
+              bester_handmix_cagr=float(bester_hand))
+    urteil, lehre = befunde.urteil_portfolio(kz)
+    befunde.eintragen(skript="23", panel=args.panel, variante=f"ml_lgbm_h{args.horizont}",
+                      zeitraum=f"{erstes}-{int(lang['jahr'].max())}",
+                      parameter={"regime": args.regime or "kein", "haltedauer": args.horizont,
+                                 "kosten_bps": float(args.kosten), "top_n": args.top_n,
+                                 "min_dollar_volume": args.min_dollar_volume, "stichprobe": args.stichprobe},
+                      kennzahlen=kz, urteil=urteil, hypothese="HYP-2027-06",
+                      lehre=lehre + f"; ML minus bester Handmix {k['cagr'] - bester_hand:+.1%}; "
+                                    f"OOS-IC {ic_tag.mean():+.4f}, bester Einzelfaktor {bester} {einzel[bester]:+.4f}",
+                      quelle_lauf=str(out))
     print(f"\n  gespeichert: {out}   ({time.time() - t0:.0f} s)")
     return 0
 

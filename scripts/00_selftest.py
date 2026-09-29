@@ -337,6 +337,42 @@ def main() -> int:
         f4 = d.pruefe_konto(96_500, ts=t0 + _dt.timedelta(days=4))
         check("Sperre nur mit woertlicher Bestaetigung loesbar, Hoechststand neu", f4.ok)
 
+    print("\n[15] Befundregister (Gedaechtnis: eintragen, laden, Urteil, Versuchszaehler)")
+    from alpaca_bot import befunde
+
+    with tempfile.TemporaryDirectory() as tmp:
+        alt_register = befunde.REGISTER
+        befunde.REGISTER = Path(tmp) / "befunde.jsonl"
+        try:
+            u1, _ = befunde.urteil_portfolio({"cagr": 0.10, "bench_cagr": 0.09, "univ_cagr": 0.08,
+                                              "max_drawdown": -0.20, "bench_maxdd": -0.40})
+            u2, _ = befunde.urteil_portfolio({"cagr": 0.02, "bench_cagr": 0.09, "univ_cagr": 0.08,
+                                              "max_drawdown": -0.50, "bench_maxdd": -0.40})
+            check("Urteil: CAGR >= SPY, DD <= 0,8 x SPY, >= Universum -> bestanden", u1 == "bestanden")
+            check("Urteil: alles verfehlt -> verworfen", u2 == "verworfen")
+            befunde.eintragen(skript="00", panel="test", variante="a", zeitraum="2020-2021",
+                              parameter={"regime": "kein", "haltedauer": 21, "kosten_bps": 20.0, "top_n": 50},
+                              kennzahlen={"cagr": 0.1, "bench_cagr": 0.09, "sharpe": float("nan")},
+                              urteil=u1, lehre="Selbsttest")
+            befunde.eintragen(skript="00", panel="test", variante="b", zeitraum="2020-2021",
+                              parameter={"regime": "kein", "haltedauer": 21, "kosten_bps": 20.0, "top_n": 50},
+                              kennzahlen={"cagr": 0.02, "bench_cagr": 0.09}, urteil=u2)
+            df = befunde.laden()
+            check("Register additiv, Kennzahlen/Parameter aufgefaltet, NaN -> null",
+                  len(df) == 2 and "k_cagr" in df.columns and "p_haltedauer" in df.columns
+                  and df["k_sharpe"].isna().all())
+            vz = befunde.versuchszaehler()
+            check("Versuchszaehler zaehlt Varianten und liefert Zufallsschwelle sqrt(2 ln N)+0,5",
+                  vz["varianten"] == 2 and abs(vz["schwelle_sigma"] - 1.68) < 0.02)
+            try:
+                befunde.eintragen(skript="00", panel="t", variante="c", zeitraum="", parameter={},
+                                  kennzahlen={}, urteil="super")
+                check("Unbekanntes Urteil wird abgelehnt", False)
+            except ValueError:
+                check("Unbekanntes Urteil wird abgelehnt", True)
+        finally:
+            befunde.REGISTER = alt_register
+
     print("\n[12] Konfiguration")
     from alpaca_bot.config import ConfigError, get_settings
 

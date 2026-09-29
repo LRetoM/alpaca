@@ -25,7 +25,7 @@ Die Umgebung steht (`.venv` mit allen Paketen). Nur die Keys fehlen:
 
 ```bash
 cp .env.example .env      # dann Keys eintragen
-.venv/bin/python scripts/00_selftest.py      # 56 Prüfungen, ohne Keys
+.venv/bin/python scripts/00_selftest.py      # 61 Prüfungen, ohne Keys
 .venv/bin/python scripts/01_check_setup.py   # mit Keys
 ```
 
@@ -37,7 +37,7 @@ cp .env.example .env      # dann Keys eintragen
 
 | Skript | Zweck |
 |---|---|
-| `00_selftest.py` | 56 Prüfungen des gesamten Codes (inkl. Ranking-Strategie, Risiko-Dach). Keine Keys nötig. |
+| `00_selftest.py` | 61 Prüfungen des gesamten Codes (inkl. Ranking-Strategie, Risiko-Dach). Keine Keys nötig. |
 | `01_check_setup.py` | Keys, Konto, Marktdaten, Börsenstatus |
 | `02_market_overview.py` | Täglicher Überblick: Trend, RSI, Vola, Korrelationen |
 | `03_backtest.py` | Strategien testen, immer gegen Buy & Hold |
@@ -62,6 +62,8 @@ cp .env.example .env      # dann Keys eintragen
 | **`29_labor_dynamisch.py`** | Dynamische Haltedauer: ein Modell je Horizont, Prognose entscheidet je Aktie |
 | **`30_labor_muster.py`** | Chartmuster als Faktoren + Explosions-Ereignisstudie mit Kontrollgruppe |
 | **`31_simulate_ranking.py`** | Strategie „ranking“ durch die echte Engine mit allen Kosten (Replay-Test) |
+| **`32_befunde.py`** | Befundregister: Rückfüllung, Versuchszähler mit Zufallsschwelle, Bericht `docs/befunde-2027.md` |
+| **`33_trade_autopsie.py`** | Trade-Autopsie eines Replays: Ausstiegsgrund, Haltedauer, Score, Monat, Jahr → Lehren ins Register |
 
 ---
 

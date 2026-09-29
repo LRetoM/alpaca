@@ -84,6 +84,9 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 | **Risiko-Dach** (Drawdown-Sperre, Tagesverlust) | `src/alpaca_bot/risiko.py`, eingehängt in `daemon.step()` |
 | Short Interest, Reg SHO | `src/alpaca_bot/finra.py`, `scripts/28_` |
 | Hypothesenkatalog + Registrierung | `src/alpaca_bot/hypothesen_2027.py`, `scripts/27_` |
+| **Gedächtnis: Befundregister** (jeder Lauf eine Zeile, Versuchszähler, Zufallsschwelle) | `src/alpaca_bot/befunde.py`, `scripts/32_befunde.py`, gerendert `docs/befunde-2027.md` |
+| **Lehren: Fehlschlag → Ursache → Regel → Verankerung** | `docs/lehren-2027.md` |
+| **Trade-Autopsie** (warum ein Replay verliert: Ausstiegsgrund, Haltedauer, Score, Monat, Jahr) | `scripts/33_trade_autopsie.py` → `results/labor/autopsie_*.md` + Register |
 | Kosten, Breakeven | `src/alpaca_bot/costs.py` |
 | Schatten, Flotte, Auswertung | `shadow.py`, `fleet.py`, `shadow_eval.py`, `scripts/16_–18_` |
 | Daten: Projektcache | `~/Library/Application Support/alpaca-bot/data/cache/bars/*.parquet` (macOS) |
@@ -93,7 +96,7 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 ## 4. Wie eine Session arbeitet
 
 ```bash
-.venv/bin/python scripts/00_selftest.py        # 56 Prüfungen, keine Keys
+.venv/bin/python scripts/00_selftest.py        # 61 Prüfungen, keine Keys
 .venv/bin/python scripts/09_selfcheck.py       # Projektverfassung
 # Panels einmal bauen (Mac: aus dem Projektcache)
 .venv/bin/python scripts/20_labor_daten.py --quelle projekt --pfad <cache.parquet> --name projekt
@@ -110,11 +113,29 @@ Arbeitsweise für jede Aufgabe:
 1. Hypothese im Katalog nachschlagen oder neu eintragen (Regel 2).
 2. Auf den Labor-Panels messen (Regel 1), Jahrestabelle lesen, nicht nur
    Mittelwerte.
-3. Befund in `docs/masterplan-2027.md` §Ergebnisse eintragen — auch negative.
-4. Erst dann, falls positiv: Bot in der Flotte voranmelden
+3. Der Lauf schreibt seinen Befund selbst ins Register (`befunde.eintragen`
+   in 22_/23_/24_/31_/33_). `scripts/32_befunde.py --bericht` rendert
+   `docs/befunde-2027.md` — das committete Gedächtnis. Zusammenfassung und
+   Deutung in `docs/masterplan-2027.md` §6 — auch negative.
+4. Nach jedem Engine-Replay (31_) Pflicht: `scripts/33_trade_autopsie.py`.
+   Die Zahl sagt OB, die Trades sagen WARUM. Jede Lehre daraus als
+   Fehlschlag → Ursache → Regel → Verankerung in `docs/lehren-2027.md`.
+5. Neue Idee = neue Hypothese im Katalog VOR dem Lauf, mit Bestehensregel
+   und Erwartung (HYP-21…24 sind das Muster). Ein Fund unter der
+   Zufallsschwelle des Versuchszählers ist „kandidat“, nie „bestanden“.
+6. Erst dann, falls positiv auf ZWEI Panels: Bot in der Flotte voranmelden
    (`scripts/18_fleet.py --anmelden`), eine Achse je Bot.
-5. Commit mit klarer Nachricht auf Deutsch, was gemessen wurde und was
+7. Commit mit klarer Nachricht auf Deutsch, was gemessen wurde und was
    herauskam.
+
+Betriebsregeln für Läufe (aus Verlusten gelernt, `docs/lehren-2027.md` §2.12):
+- Schwere Läufe (23_, 29_, 30_, 22_ auf qlib) **nacheinander**, nie parallel
+  — die 15-GB-Grenze hat fünf Läufe gekostet.
+- Prozesse per PID beenden. `pkill -f`/`pgrep -f` nie im selben Befehl wie
+  einen Start, dessen Text auf das Muster passt — die Shell tötet sich selbst.
+- Ergebnisdateien tragen alle Parameter im Namen (31_: `_stop{}_h{}-{}_x{}`).
+  Zwei Varianten, eine Datei = eine verlorene Messung.
+- Ein Ergebnis ohne Register-Zeile existiert nicht.
 
 ## 5. Was regulatorisch neu ist (prüfen, bevor es handelt)
 

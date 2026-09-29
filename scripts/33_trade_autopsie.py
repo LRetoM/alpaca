@@ -84,6 +84,20 @@ def tabellen(t: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return out
 
 
+def konzentration(t: pd.DataFrame) -> dict:
+    """Wie schief ist die Verteilung? Momentum lebt vom rechten Rand."""
+    gew = t.loc[t["net_pnl"] > 0, "net_pnl"].sort_values(ascending=False)
+    n5 = max(1, int(round(len(t) * 0.05)))
+    top5 = float(gew.head(n5).sum() / gew.sum()) if gew.sum() > 0 else float("nan")
+    je_sym = t.groupby("symbol")["net_pnl"].sum().sort_values(ascending=False)
+    ges = float(t["net_pnl"].sum())
+    top10_sym = float(je_sym.head(10).sum() / ges) if ges > 0 else float("nan")
+    ohne = float(ges - t["net_pnl"].sort_values(ascending=False).head(10).sum())
+    return {"anteil_top5pct_trades": top5, "anteil_top10_symbole": top10_sym,
+            "pnl_ohne_top10_trades": ohne, "pnl_gesamt": ges,
+            "top10_symbole": ", ".join(f"{s} {v:,.0f}" for s, v in je_sym.head(10).items())}
+
+
 def lehren(t: pd.DataFrame, tab: dict[str, pd.DataFrame], expo: pd.Series) -> list[str]:
     """Regeln, die aus den Tabellen Saetze machen. Jede Regel ist bewusst simpel und
     nachpruefbar - das Skript soll Hinweise geben, keine Urteile faellen."""
@@ -123,6 +137,12 @@ def lehren(t: pd.DataFrame, tab: dict[str, pd.DataFrame], expo: pd.Series) -> li
         L.append(f"Investitionsgrad (zu Einstandskursen) Mittel {e.mean():.0%}, Median {e.median():.0%}, "
                  f"Tage unter 50 %: {float((expo < 0.5).mean()):.0%} - Cash-Bremse "
                  + ("ist ein Hebel." if e.mean() < 0.75 else "ist kein Haupthebel."))
+    k = konzentration(t)
+    L.append(f"Konzentration: die besten 5 % der Trades liefern {k['anteil_top5pct_trades']:.0%} des Bruttogewinns, "
+             f"die 10 besten Symbole {k['anteil_top10_symbole']:.0%} des Netto-PnL; ohne die 10 besten Trades "
+             f"waere der Netto-PnL {k['pnl_ohne_top10_trades']:,.0f} $ statt {k['pnl_gesamt']:,.0f} $ - "
+             + ("rechtsschief: jede Regel, die Sieger zwingt (Zeitausstieg, Sperre, Gewinnziel), kostet den rechten Rand."
+                if k['anteil_top5pct_trades'] > 0.4 else "breit verteilt."))
     m = tab["einstiegsmonat"]
     L.append(f"Einstiegsmonat: bester {int(m['mittel'].idxmax())} ({m['mittel'].max():+.1%}), schlechtester "
              f"{int(m['mittel'].idxmin())} ({m['mittel'].min():+.1%}) - nur Notiz: {t['jahr'].nunique()} Jahre "
@@ -153,6 +173,8 @@ def bericht(name: str, t: pd.DataFrame, tab: dict[str, pd.DataFrame], expo: pd.S
                        ("Einstiegsjahr", "jahr")):
         if key in tab:
             L += ["", f"## Nach {titel}", "", f(tab[key])]
+    kz = konzentration(t)
+    L += ["", "## Konzentration", "", f"Top-10-Symbole nach Netto-PnL: {kz['top10_symbole']}", ""]
     L += ["", "## Investitionsgrad je Jahr", "",
           ", ".join(f"{y}: {v:.0%}" for y, v in expo.groupby(expo.index.year).mean().items()), ""]
     return "\n".join(L)
@@ -177,6 +199,7 @@ def autopsie(pfad: Path, kapital: float, register: bool) -> list[str]:
         a = tab["ausstieg"]
         k = {f"mittel_{g}": float(r["mittel"]) for g, r in a.iterrows()}
         k.update({f"anteil_{g}": float(r["anteil"]) for g, r in a.iterrows()})
+        k.update({f"konz_{a}": v for a, v in konzentration(t).items() if isinstance(v, float)})
         k.update(expo_mittel=float(expo[expo > 0].mean()) if (expo > 0).any() else None,
                  n_trades=int(len(t)), treffer=float((t["return_pct"] > 0).mean()),
                  mittel_je_trade=float(t["return_pct"].mean()))

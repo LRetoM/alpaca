@@ -259,6 +259,9 @@ class EngineConfig:
     'momentum'  = der urspruengliche Mehrfaktor-Score (im Test unterlegen)"""
 
     reenter_cooldown_days: int = 3
+    sizing: str = "vola"
+    """Gewichtung bei `deploy_to_target`: "vola" = 1/ATR-Gewichte (Risikoparitaet),
+    "gleich" = Gleichgewicht wie die vektorisierte Labor-Referenz (22_)."""
     """Sperrfrist, bevor ein gerade verkauftes Symbol neu gekauft werden darf.
 
     Ohne diese Sperre verkauft die Engine eine Position am Ziel und kauft
@@ -353,6 +356,7 @@ class EngineConfig:
             "min_dollar_volume": self.min_dollar_volume,
             "min_price": self.min_price,
             "reenter_cooldown_days": self.reenter_cooldown_days,
+            "sizing": self.sizing,
             "min_hold_days": self.min_hold_days,
             "min_rank_pct": self.min_rank_pct,
             "exit_rank_pct": self.exit_rank_pct,
@@ -923,7 +927,8 @@ class Engine:
         verteilt: dict[str, float] = {}
         if cfg.deploy_to_target:
             verteilt = verteile_kapital(
-                {sym: _vola_gewicht(float(row.get("atr_pct", 0) or 0))
+                {sym: (1.0 if cfg.sizing == "gleich"
+                       else _vola_gewicht(float(row.get("atr_pct", 0) or 0)))
                  for sym, _score, row, _price in chosen},
                 frei=free, deckel=cap, mindest=mindest,
             )

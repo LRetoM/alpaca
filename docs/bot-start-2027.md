@@ -32,7 +32,7 @@ Erwarteter Umschlag: 12–18 Rundläufe je Position und Jahr, Kosten
 
 ```bash
 cd ~/Documents/alpaca            # oder wo das Repo liegt
-.venv/bin/python scripts/00_selftest.py      # 56 Prüfungen, ohne Keys
+.venv/bin/python scripts/00_selftest.py      # 61 Prüfungen, ohne Keys
 .venv/bin/python scripts/09_selfcheck.py     # Projektverfassung
 .venv/bin/python scripts/01_check_setup.py   # Keys, Konto, Uhr
 ```

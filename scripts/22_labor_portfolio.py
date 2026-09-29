@@ -101,6 +101,8 @@ def main() -> int:
     p.add_argument("--kosten", type=float, nargs="+", default=[10.0, 20.0, 40.0],
                    help="bps je Rundlauf")
     p.add_argument("--vola-ziel", type=float, default=None)
+    p.add_argument("--regimes", nargs="+", default=None,
+                   help="Regime-Spalten statt der vier Standardfassungen, z. B. trend_ok trend_hyst")
     p.add_argument("--vix", default=str(PROJECT_ROOT / "data" / "extern" / "vix-daily.csv"))
     p.add_argument("--min-preis", type=float, default=3.0)
     p.add_argument("--min-dollar-volume", type=float, default=1_000_000)
@@ -133,7 +135,13 @@ def main() -> int:
         vix = labor.vix_laden(args.vix)
     regime = labor.regime_serien(spy, vix) if spy is not None else None
     regime_varianten = [None]
-    if regime is not None:
+    if regime is not None and args.regimes:
+        fehlend = [r for r in args.regimes if r not in regime.columns]
+        if fehlend:
+            print(f"  ABBRUCH: unbekannte Regime-Spalten {fehlend}; bekannt: {list(regime.columns)}")
+            return 1
+        regime_varianten += list(args.regimes)
+    elif regime is not None:
         regime_varianten += ["trend_ok"]
         if vix is not None:
             regime["vix_ruhig"] = ~regime["vix_hoch"]

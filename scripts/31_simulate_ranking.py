@@ -73,6 +73,9 @@ def main() -> int:
     ap.add_argument("--max-hold", type=int, default=63)
     ap.add_argument("--exit-rank", type=float, default=0.50)
     ap.add_argument("--min-rank", type=float, default=0.90)
+    ap.add_argument("--cooldown", type=int, default=5, help="Wiedereinstiegssperre in Tagen nach Verkauf")
+    ap.add_argument("--sizing", choices=["vola", "gleich"], default="vola",
+                    help="vola = 1/ATR-Gewichte (Engine-Standard), gleich = wie die Labor-Referenz")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -104,9 +107,11 @@ def main() -> int:
         max_position_pct=0.05 if args.positions >= 40 else 0.10,
         stop_atr=args.stop_atr, min_hold_days=args.min_hold, max_hold_days=args.max_hold,
         exit_rank_pct=args.exit_rank, min_rank_pct=args.min_rank,
+        reenter_cooldown_days=args.cooldown, sizing=args.sizing,
     )
     print(f"  Engine: Stop {args.stop_atr} ATR, Haltedauer {args.min_hold}-{args.max_hold}, "
-          f"Kauf ab Perzentil {args.min_rank}, Ausstieg unter {args.exit_rank}")
+          f"Kauf ab Perzentil {args.min_rank}, Ausstieg unter {args.exit_rank}, "
+          f"Sperre {args.cooldown} Tage, Sizing {args.sizing}")
     scfg = simulate.SimConfig(initial_cash=args.kapital, spread_bps=args.spread_bps,
                               slippage_bps=args.slippage_bps, log_to_journal=False)
     res = simulate.run(bars, ecfg, scfg, market=spy, verbose=True)
@@ -133,7 +138,7 @@ def main() -> int:
         print("  Ausstiegsgruende:", res.trades["exit_reason"].value_counts().to_dict())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     tag = (f"simulate_ranking_{args.panel}_stop{args.stop_atr:g}"
-           f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}")
+           f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}_c{args.cooldown}_{args.sizing}")
     res.trades.to_csv(OUT_DIR / f"{tag}.csv", index=False)
     eq.rename("kapital").to_csv(OUT_DIR / f"{tag}_kapital.csv")
     print(f"  gespeichert: {OUT_DIR / tag}.csv (+ _kapital.csv)")
@@ -150,7 +155,7 @@ def main() -> int:
                       parameter={"regime": "kein" if args.ohne_regime else "trend_ok", "haltedauer": f"{args.min_hold}-{args.max_hold}",
                                  "kosten_bps": args.spread_bps * 2 + args.slippage_bps * 2, "top_n": args.positions,
                                  "stop_atr": args.stop_atr, "symbole": len(symbole), "min_rank": args.min_rank,
-                                 "exit_rank": args.exit_rank},
+                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing},
                       kennzahlen=kz, urteil=urteil,
                       lehre=lehre + f"; Ausstiege {res.trades['exit_reason'].value_counts().to_dict() if not res.trades.empty else {}}",
                       hypothese="HYP-2027-20" if args.stop_atr >= 5 else None)
