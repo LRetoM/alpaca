@@ -99,6 +99,17 @@ QUOTAS: dict[str, Quota] = {
         note="Kein hartes veroeffentlichtes Limit, 120/min ist sicher. Key noetig, gratis.",
         verified="2026-07-28",
     ),
+    "finra": Quota(
+        name="FINRA (Short Interest, Reg SHO Tagesdateien)",
+        per_second=2,
+        per_day=5000,
+        note=(
+            "Kein veroeffentlichtes Limit fuer die Dateien; die Query-API ist "
+            "ohne Schluessel nutzbar und gedrosselt. Bewusst konservativ 2/s."
+        ),
+        verified="2026-09-29",
+        docs="https://developer.finra.org/",
+    ),
     "yfinance": Quota(
         name="yfinance (inoffiziell)",
         per_minute=60,
