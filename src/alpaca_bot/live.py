@@ -428,7 +428,7 @@ def run_once(
 
         # --- 2. Lage erfassen ---
         snapshot = build_snapshot(symbols, verbose=verbose)
-        if engine.cfg.strategy == "ranking" and engine.cfg.score_quelle == "ml":
+        if engine.cfg.strategy == "ranking" and engine.cfg.score_quelle in ("ml", "hybrid"):
             # Score-Quelle ml: dieselben Merkmale und dasselbe Modell wie im Labor.
             # Ohne Modell bleibt `signals` leer -> die Engine findet keine
             # Kandidaten und kauft nichts (sicherer Ausfall, Verkaeufe laufen weiter).

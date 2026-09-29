@@ -485,10 +485,13 @@ def build_ranking_frame(
     out["atr_pct"] = out["atr"] / c
 
     gate = ((vol < w.max_volatility) & (c >= w.min_price)).astype(float)
-    if w.market_regime_filter and market is not None:
+    if market is not None:
+        # markt_ok wird IMMER ausgewiesen (der Hybrid-Score liest daran die Phase ab);
+        # als Einstiegstor wirkt es nur, wenn market_regime_filter gesetzt ist.
         mkt = market.reindex(df.index).ffill()
         out["markt_ok"] = (mkt > ind.sma(mkt, 200)).astype(float)
-        gate = gate * out["markt_ok"].fillna(0.0)
+        if w.market_regime_filter:
+            gate = gate * out["markt_ok"].fillna(0.0)
     else:
         out["markt_ok"] = 1.0
     out["zulaessig"] = gate

@@ -259,32 +259,6 @@ class EngineConfig:
     'momentum'  = der urspruengliche Mehrfaktor-Score (im Test unterlegen)"""
 
     reenter_cooldown_days: int = 3
-    sizing: str = "vola"
-    score_quelle: str = "mix"
-    max_new_per_day: int | None = None
-    """Hoechstens so viele NEUE Positionen je Handelstag - gestaffelte Kohorten statt
-    einer Klumpen-Kohorte. Grund (masterplan §6.9): Dieselbe Strategie als einzelne
-    42-Tage-Kohorte streut je nach Startversatz zwischen 7,9 % und 18,0 % CAGR; die
-    Momentum-Literatur (Jegadeesh/Titman) mittelt das mit ueberlappenden Kohorten weg.
-    Mit Deckel 3-5 baut sich die Engine diese Staffelung selbst. None = kein Deckel.
-    Gilt in Simulation UND Live (dort zusaetzlich der Deckel des Laufs)."""
-    ml_modell: str | None = None
-    """Name des gespeicherten Modells (models/<name>.txt/.json) fuer score_quelle='ml';
-    None = das juengste `lgbm_h21_*`."""
-    renew_rank_pct: float | None = None
-    """Verlaengerung (Strategie 'ranking'): Nach `max_hold_days` wird NUR verkauft, wenn
-    das Rangperzentil der Position UNTER diesem Wert liegt - solange sie im Kaufbereich
-    steht, bleibt sie. None = klassischer Zeitausstieg. Keine Zaehlerpflege, deshalb in
-    Simulation und Live identisch (dort wird bars_held taeglich aus dem Einstiegsdatum
-    berechnet). Grund (masterplan §6.9): Beim Zeitausstieg darf die verkaufte Aktie am
-    selben Tag nicht zurueckgekauft werden, ihr Platz geht an Rang 51-100 - so verliert
-    die Engine systematisch ihre Dauer-Sieger, aus denen 40-90 % des Gewinns kommen."""
-    """Woher der Querschnitts-Score der Strategie 'ranking' kommt: "mix" =
-    Z-Score-Mix der RankingWeights (Handmix), "ml" = Spalte `ml_score` in den
-    Signalen (Vorhersage eines gespeicherten Modells, modell.py). Fehlt die
-    Spalte, gibt es keine Kandidaten - und damit keine Kaeufe (sicherer Ausfall)."""
-    """Gewichtung bei `deploy_to_target`: "vola" = 1/ATR-Gewichte (Risikoparitaet),
-    "gleich" = Gleichgewicht wie die vektorisierte Labor-Referenz (22_)."""
     """Sperrfrist, bevor ein gerade verkauftes Symbol neu gekauft werden darf.
 
     Ohne diese Sperre verkauft die Engine eine Position am Ziel und kauft
@@ -292,6 +266,38 @@ class EngineConfig:
     hoch ist - beobachtet bei AMKR: drei Runden hintereinander verkauft und
     neu gekauft, mit identischem Stop und Ziel. Es entsteht keine neue
     These, nur doppelte Spread- und Gebuehrenkosten."""
+
+    sizing: str = "vola"
+    """Gewichtung bei `deploy_to_target`: "vola" = 1/ATR-Gewichte (Risikoparitaet),
+    "gleich" = Gleichgewicht wie die vektorisierte Labor-Referenz (22_)."""
+
+    score_quelle: str = "mix"
+    """Woher der Querschnitts-Score der Strategie 'ranking' kommt:
+    "mix"    = Z-Score-Mix der RankingWeights (Handmix)
+    "ml"     = Spalte `ml_score` der Signale (Vorhersage eines gespeicherten Modells, modell.py)
+    "hybrid" = ueber der SMA200 (markt_ok) der Handmix, darunter das Modell (HYP-2027-25:
+               Momentum traegt im Trend, das Modell in der Erholung). Das Regime-Tor wird
+               fuer Einstiege dann NICHT angewendet - den Schutz uebernimmt das Vola-Ziel.
+    Fehlt `ml_score` in einer Modell-Phase, gibt es keine Kandidaten und damit keine
+    Kaeufe (sicherer Ausfall)."""
+
+    ml_modell: str | None = None
+    """Name des gespeicherten Modells (models/<name>.txt/.json) fuer score_quelle 'ml'/'hybrid';
+    None = das juengste `lgbm_h21_*`."""
+
+    max_new_per_day: int | None = None
+    """Hoechstens so viele NEUE Positionen je Handelstag - gestaffelte Kohorten statt
+    einer Klumpen-Kohorte. Grund (masterplan §6.9): Dieselbe Strategie als einzelne
+    42-Tage-Kohorte streut je nach Startversatz zwischen 7,9 % und 18,0 % CAGR; die
+    Momentum-Literatur (Jegadeesh/Titman) mittelt das mit ueberlappenden Kohorten weg.
+    Mit Deckel 3-5 baut sich die Engine diese Staffelung selbst. None = kein Deckel.
+    Gilt in Simulation UND Live (dort zusaetzlich der Deckel des Laufs)."""
+
+    renew_rank_pct: float | None = None
+    """Verlaengerung (Strategie 'ranking'): Nach `max_hold_days` wird NUR verkauft, wenn
+    das Rangperzentil der Position UNTER diesem Wert liegt. None = klassischer
+    Zeitausstieg. Gemessen (masterplan §6.9): greift selten und hilft nicht - bleibt als
+    Schalter fuer Replays, ist nicht Standard."""
 
     allow_topup: bool = False
     """Duerfen bereits gehaltene Positionen zusaetzliches Kapital bekommen,
@@ -346,6 +352,8 @@ class EngineConfig:
     ranking_weights: RankingWeights = field(default_factory=RankingWeights)
 
     def __post_init__(self) -> None:
+        if self.score_quelle == "hybrid":
+            self.ranking_weights.market_regime_filter = False
         if self.max_position_pct is None:
             try:
                 from .config import get_settings
@@ -612,14 +620,17 @@ class Engine:
         dvol = pd.to_numeric(tab.get("dollar_volume"), errors="coerce").fillna(0.0)
         zul = (pd.to_numeric(tab.get("zulaessig"), errors="coerce").fillna(0.0) > 0) \
             & (dvol >= cfg.min_dollar_volume) & tab[list(gew)].notna().all(axis=1)
-        if cfg.score_quelle == "ml":
+        markt_ok = bool(pd.to_numeric(tab.get("markt_ok"), errors="coerce").fillna(1.0).mean() >= 0.5)
+        modell_phase = cfg.score_quelle == "ml" or (cfg.score_quelle == "hybrid" and not markt_ok)
+        self.__dict__["_modell_phase"] = modell_phase
+        if modell_phase:
             ml = pd.to_numeric(tab.get("ml_score"), errors="coerce")
             tab["ml_score"] = ml
             zul = zul & ml.notna()
         kand = tab[zul]
         out: dict[str, dict] = {}
         if len(kand) >= 30:
-            if cfg.score_quelle == "ml":
+            if modell_phase:
                 # Die Vorhersage IST der Querschnitts-Score - kein Mix, keine Kappung.
                 score = kand["ml_score"].astype(float)
             else:

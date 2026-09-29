@@ -50,8 +50,8 @@ def main() -> int:
                    help="Plaetze (Standard: 15 bei reversal, 50 bei ranking)")
     p.add_argument("--max-new", type=int, default=None,
                    help="Kaeufe je Lauf (Standard: 3 bei reversal, 10 bei ranking)")
-    p.add_argument("--score-quelle", choices=["mix", "ml"], default="mix",
-                   help="ranking: Handmix (mix) oder gespeichertes LightGBM-Modell (ml, models/)")
+    p.add_argument("--score-quelle", choices=["mix", "ml", "hybrid"], default="mix",
+                   help="ranking: Handmix (mix), LightGBM-Modell (ml) oder hybrid (ueber SMA200 mix, darunter ml; HYP-25)")
     p.add_argument("--modell", default=None, help="Modellname fuer --score-quelle ml (Standard: juengstes lgbm_h21_*)")
     p.add_argument("--strategy", default="reversal",
                    choices=["reversal", "momentum", "ranking"],

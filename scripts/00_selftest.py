@@ -349,6 +349,24 @@ def main() -> int:
     snap_leer = MarketSnapshot(as_of=idx[-1], bars=bars, market=spy, signals=frames)
     check("Score-Quelle ml ohne Vorhersagen: keine Kaeufe (sicherer Ausfall)",
           not eng_ml.decide(snap_leer, PortfolioState(cash=100_000, equity=100_000)))
+    # Hybrid: unter der SMA200 entscheidet das Modell (und das Tor sperrt nicht), darueber der Handmix
+    from alpaca_bot.signals import RankingWeights as _RW
+    spy_unten = pd.Series(np.linspace(200, 100, 600), index=idx)     # faellt: SPY < SMA200
+    spy_oben = pd.Series(np.linspace(100, 200, 600), index=idx)      # steigt: SPY > SMA200
+    for spy_x, phase in ((spy_unten, "modell"), (spy_oben, "mix")):
+        fr_h = {s: build_ranking_frame(df, spy_x, _RW(market_regime_filter=False)) for s, df in bars.items()}
+        for s_, fr in fr_h.items():
+            fr["ml_score"] = ml_rang[s_]
+        eng_h = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, score_quelle="hybrid"))
+        dec_h = eng_h.decide(MarketSnapshot(as_of=idx[-1], bars=bars, market=spy_x, signals=fr_h),
+                             PortfolioState(cash=100_000, equity=100_000))
+        gek = {d.symbol for d in dec_h}
+        if phase == "modell":
+            check("Hybrid unter SMA200: Modell entscheidet, Tor sperrt nicht",
+                  len(gek) > 0 and gek == set(sorted(fr_h)[-len(gek):]) and eng_h._modell_phase)
+        else:
+            check("Hybrid ueber SMA200: Handmix entscheidet",
+                  len(gek) > 0 and gek != set(sorted(fr_h)[-len(gek):]) and not eng_h._modell_phase)
 
     print("\n[14] Risiko-Dach (Drawdown-Sperre, Tagesverlust, Einzahlungen)")
     from alpaca_bot import risiko
