@@ -77,6 +77,8 @@ def main() -> int:
     ap.add_argument("--verlaengern", type=float, default=None,
                     help="Verlaengerung statt Zeitausstieg, solange Rangperzentil >= Wert (z. B. 0.9)")
     ap.add_argument("--max-new", type=int, default=None, help="hoechstens N neue Positionen je Tag (gestaffelte Kohorten)")
+    ap.add_argument("--variante", choices=["momentum", "ranking", "ranking_v2"], default="momentum",
+                    help="Handmix-Gewichte wie in scripts/22 (Standard momentum = Engine-Standard seit 2026-09-29)")
     ap.add_argument("--hybrid", action="store_true", help="mit --ml-pred: ueber SMA200 Handmix, darunter Modell (HYP-25)")
     ap.add_argument("--ml-pred", default=None,
                     help="Parquet mit OOS-Vorhersagen (tag, symbol, pred) aus scripts/23 -> Score-Quelle ml")
@@ -103,9 +105,15 @@ def main() -> int:
     bars = panel_zu_bars(panel, symbole)
     print(f"  {len(symbole)} Symbole, {len(bars):,} Bars")
 
-    weights = RankingWeights(market_regime_filter=not args.ohne_regime)
+    GEWICHTE = {   # exakt die Varianten aus scripts/22 (Labor-Referenz)
+        "momentum": dict(mom_12_1=1.0, mom_konsistenz=1.0, vol_ruhig=0.0, mom_12_1_vola=0.0),
+        "ranking": dict(mom_12_1=0.0, mom_konsistenz=1.0, vol_ruhig=1.0, mom_12_1_vola=0.5),
+        "ranking_v2": dict(mom_12_1=1.0, mom_konsistenz=1.0, vol_ruhig=0.5, mom_12_1_vola=0.0),
+    }
+    weights = RankingWeights(market_regime_filter=not args.ohne_regime, **GEWICHTE[args.variante])
     if panel.volume is None:
-        weights = RankingWeights(vol_ruhig=0.0, market_regime_filter=not args.ohne_regime)
+        weights = RankingWeights(market_regime_filter=not args.ohne_regime,
+                                 **{**GEWICHTE[args.variante], "vol_ruhig": 0.0})
         print("  Panel ohne Volumen: vol_ruhig = 0, Universum ohne Umsatzfilter")
     ecfg = EngineConfig.for_ranking(
         max_positions=args.positions, ranking_weights=weights,
@@ -156,7 +164,7 @@ def main() -> int:
     if verl:
         print(f"  Verlaengerungen: {len(verl)} (Tage-am-Zeitausstieg gehalten statt verkauft)")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    tag = (f"simulate_ranking_{args.panel}_stop{args.stop_atr:g}"
+    tag = (f"simulate_ranking_{args.panel}_{args.variante}_stop{args.stop_atr:g}"
            f"_h{args.min_hold}-{args.max_hold}_x{args.exit_rank:g}_c{args.cooldown}_{args.sizing}"
            + (("_hybrid" if args.hybrid else "_ml") if args.ml_pred else "") + (f"_v{args.verlaengern:g}" if args.verlaengern is not None else "") + (f"_n{args.max_new}" if args.max_new else ""))
     res.trades.to_csv(OUT_DIR / f"{tag}.csv", index=False)
@@ -175,7 +183,7 @@ def main() -> int:
                       parameter={"regime": "kein" if args.ohne_regime else "trend_ok", "haltedauer": f"{args.min_hold}-{args.max_hold}",
                                  "kosten_bps": args.spread_bps * 2 + args.slippage_bps * 2, "top_n": args.positions,
                                  "stop_atr": args.stop_atr, "symbole": len(symbole), "min_rank": args.min_rank,
-                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new},
+                                 "exit_rank": args.exit_rank, "cooldown": args.cooldown, "sizing": args.sizing, "score_quelle": (("hybrid" if args.hybrid else "ml") if args.ml_pred else "mix"), "verlaengern": args.verlaengern, "max_new": args.max_new, "gewichte": args.variante},
                       kennzahlen=kz, urteil=urteil,
                       lehre=lehre + f"; Ausstiege {res.trades['exit_reason'].value_counts().to_dict() if not res.trades.empty else {}}",
                       hypothese="HYP-2027-20" if args.stop_atr >= 5 else None)

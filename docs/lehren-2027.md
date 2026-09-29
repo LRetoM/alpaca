@@ -329,7 +329,7 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 
 | Fund | Messung | Warum es trägt | Status |
 |---|---|---|---|
-| Ruhiges Volumen (`vol_schub_6m_neg`) | t_defl 3,9–5,2 auf allen Horizonten, 87–93 % positive Jahre | „Gefallene Aufmerksamkeit“: keiner handelt sie, deshalb keine Überreaktion | in-sample; HYP-17 auf 2. Panel offen |
+| Ruhiges Volumen (`vol_schub_6m_neg`) | t_defl 3,9–5,2 auf allen Horizonten, 87–93 % positive Jahre — **aber jedes Portfolio mit ihm ist schlechter** (qlib trend h21: ranking 6,1 gegen momentum 10,2 %) | Als Faktor echt, als Baustein schädlich: kippt die Auswahl zu unbeachteten Namen mit weniger Momentum | HYP-17: Faktor bestätigt, Baustein verworfen; aus `RankingWeights` gestrichen (2026-09-29) |
 | Momentum-Konsistenz | t_defl 4,0 (5 T) … 1,7 (63 T), 75–81 % positive Jahre | Weg statt Ziel: stetige Gewinner statt Sprünge | robust |
 | Längere Haltedauer | Netto-CAGR steigt monoton H 2 → 42 | Kosten je Tag sinken, Signal hält | erledigt |
 | Regime-Tor SPY > SMA200 | MaxDD halbiert (−55 % → −24 %) | Momentum-Crashs passieren unter der 200er | erledigt |
@@ -346,6 +346,7 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
 | HYP-24 | Schnellerer Wiedereinstieg | 22_ --regimes trend_hyst | CAGR ≥ +1, MaxDD ≤ +5 — S&P verfehlt (+0,1), qlib läuft |
 | HYP-17 | Ruhiges Volumen hält auf 2016–2026 | 21_ projekt | ≥ 75 % positive Jahre |
 | HYP-06 | ML-Ranker schlägt Handmix OOS | 23_ auf projekt | CAGR ≥ Handmix + 2 — qlib ohne Tor +3,6/+5 ✓, mit Tor ✗, S&P ✗ (kein Volumen) → Projektcache entscheidet |
+| HYP-26 | Im Hybrid Stop nur in der Trendphase | 31_ --hybrid --stop-modell 99 | CAGR ≥ stoplos − 1 UND MaxDD ≤ stoplos — Engine qlib: mit Stop 10,5 %, ohne 15,5 % |
 | HYP-25 | Hybrid: Momentum über SMA200, Modell darunter, Vola-Ziel 0,25 | 35_ auf projekt | ≥ SPY − 1 UND ≥ momentum_trend + 2 UND MaxDD ≤ 0,9 × SPY — qlib bestanden (in-sample entworfen) |
 
 ---

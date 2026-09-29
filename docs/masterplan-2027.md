@@ -56,8 +56,11 @@
 6. Daraus der **Hybrid** (HYP-25): über der SMA200 Momentum-Handmix,
    darunter Modell, immer investiert, Drawdown über Vola-Ziel 0,25 — auf
    qlib 2009–2020 **18,4 % ohne / 14,0 % mit Vola-Ziel bei −30 % MaxDD**
-   (SPY 14,5 % bei −34 %). Erste Fassung, die eine vorab registrierte Regel
-   besteht; in-sample entworfen, deshalb entscheidet der Projektcache.
+   (SPY 14,5 % bei −34 %) — und **durch den echten Engine-Pfad mit allen
+   Kosten 15,5 % gegen 14,3 %** (ohne Stop; mit 3-ATR-Stop nur 10,5 %:
+   HYP-26, Stop nur in der Trendphase). Erste Fassung, die eine vorab
+   registrierte Regel besteht; in-sample entworfen, 2008/2022 ungemessen,
+   deshalb entscheidet der Projektcache.
 7. Der Engine-Pfad rechnet dasselbe wie das Labor — sobald man weiß, dass
    ein **einzelner Replay ±3 Punkte Kohorten-Lotterie** ist (§6.9). Stop
    3 ATR bleibt (Drawdown-Halbierer), Rangverlust erst unter dem 20.
@@ -781,6 +784,27 @@ Der Qlib-Gegenlauf (in der ML-Kette) entscheidet, welche Gewichte die
 Engine bekommt; die Auswahl zählt im Versuchszähler (Schwelle 3,4 Sigma),
 und die Bestätigung auf deinem Cache ist Pflicht.
 
+**Gewichte des Handmix — Entscheidung 2026-09-29.** Auf beiden Panels, auf 21
+und 42 Tagen, mit und ohne Tor gilt dieselbe Reihenfolge: **momentum**
+(rohes 12-1 + Konsistenz) > ranking_v2 (dazu halbes ruhiges Volumen) >
+ranking (Konsistenz + ruhiges Volumen + vola-skaliertes 12-1):
+
+| Messung | momentum | ranking_v2 | ranking |
+|---|---|---|---|
+| qlib trend_ok, 21 T (35_/23_, gleiches Universum) | **10,2 %** | 8,5 % | 6,1 % |
+| qlib ohne Tor, 42 T (23_ h42) | **13,0 %** | 11,6 % | 10,4 % |
+| qlib trend_ok 2009–2020 (22_ liq25) | **7,5 %** | — | 6,7 % |
+| S&P trend_ok, 42 T (22_, *_preis) | **16,2 %** | (= momentum) | 12,9 % |
+
+Das ruhige Volumen hat den besten IC im Zoo (§6.5) und macht jedes
+Portfolio schlechter, in das es kommt — es kippt die Auswahl zu
+unbeachteten Namen mit weniger Momentum. Das ist Lehre §2.3 in Reinform
+(IC ist nicht Portfolio) und das Urteil zu HYP-17: als Faktor bestätigt,
+als Portfolio-Baustein verworfen. **`RankingWeights` ist seit heute
+`momentum`** (mom_12_1 1, mom_konsistenz 1, Volumen 0); Engine-Replays
+mit den neuen Gewichten laufen (Kette 6), die alte Mischung bleibt über
+`31_ --variante ranking` rekonstruierbar.
+
 ### 6.10 ML-Ranker (LightGBM, walk-forward) — der erste Fund über SPY und Universum
 
 `scripts/23_` auf qlib, liquides Universum, 19 Merkmale des Faktorzoos,
@@ -884,6 +908,27 @@ Sigma). Deshalb **HYP-2027-25** mit Bestehensregel für das dritte Panel
 ist der Lauf, der 2027 entscheidet. Die Engine kann den Hybrid schon
 rechnen (`score_quelle="hybrid"`, §7.2), das Vola-Ziel kommt ins
 Risiko-Dach.
+
+**Hybrid durch den Engine-Pfad (31_ `--hybrid`, qlib, Stop 3 ATR,
+Rangverlust < 0,20, Deckel 3, alte `ranking`-Gewichte in der Trendphase):**
+10,5 % über 2009–2020 (SPY 14,3 %), MaxDD −34 %, 1.877 Trades, 44 %
+Stops — gegen 6,1 % für denselben Engine-Lauf ohne Modell-Phase. **+4,4
+Punkte allein durch die Modell-Phase**, im echten Pfad mit allen Kosten.
+**Derselbe Lauf ohne Stop: 15,5 % über 2009–2020 gegen SPY 14,3 %**,
+MaxDD −35 % (SPY −34 %), Sharpe 0,80, 1.463 Trades, jedes Jahr außer 2018
+(−5,8 %) positiv, 2020 +21,5 %, 6 von 12 Jahren über SPY. Das ist der
+erste Engine-Replay mit allen Kosten, der SPY auf dem breiten Panel
+schlägt. Der Stop kostet im Hybrid 5 Punkte: In der Modell-Phase (SPY
+unter SMA200, hohe Vola, V-Erholungen) reißt der 3-ATR-Stop die
+Erholungskäufe am Tief raus — 820 Stops. Daraus **HYP-2027-26**: Stop nur
+in der Trendphase (`stop_atr_modellphase`, gebaut), Schutz in der
+Modell-Phase über das Vola-Ziel. Was noch offen ist: die alten
+`ranking`-Gewichte in der Trendphase (`momentum` bringt dort +4, §6.9,
+Kette 6) und — die Warnung, die über allem steht — **2008 und 2022 sind
+für den Hybrid nicht gemessen** (keine Vorhersagen vor 2009; qlib endet
+2020). Ein langer Bär ohne V-Erholung ist der Fall, in dem der
+Erholungs-Ranker ohne Stop am meisten verlieren kann. Der Projektcache
+enthält 2022 — deshalb entscheidet er, nicht dieses Kapitel.
 
 Wenn der ML-Ranker auf dem dritten Panel hält, wird er der Score der
 Engine (Architektur §7: `build_ranking_frame` liefert die Merkmale, ein

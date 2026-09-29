@@ -415,13 +415,22 @@ class RankingWeights:
     Die Kombination ist ein Z-Score-Mix ueber den TAGES-QUERSCHNITT aller
     zulaessigen Kandidaten (Engine._querschnitt_scores), nicht je Symbol -
     deshalb liefert build_ranking_frame() die ROHEN Bausteine, und die
-    Engine rechnet den Score. Gewichte bewusst rund (1 / 1 / 0,5 / 0).
+    Engine rechnet den Score. Gewichte bewusst rund (1 / 1 / 0 / 0 / 0 seit 2026-09-29).
     """
 
+    mom_12_1: float = 1.0
     mom_konsistenz: float = 1.0
-    vol_ruhig: float = 1.0
-    mom_12_1_vola: float = 0.5
+    vol_ruhig: float = 0.0
+    mom_12_1_vola: float = 0.0
     reversal_5d: float = 0.0
+    """Standard seit 2026-09-29 = Variante 'momentum' des Labors (rohes 12-1-Momentum +
+    Konsistenz, ohne Volumen). Gemessen auf qlib und S&P, 21 und 42 Tage, mit und ohne
+    Tor: momentum > ranking_v2 > ranking (qlib trend_ok h21: 10,2 / 8,5 / 6,1 %; h42 ohne
+    Tor: 13,0 / 11,6 / 10,4 %; S&P trend_ok: 16,2 gegen 12,9 %). Das ruhige Volumen hat
+    den besten IC im Zoo und macht das Portfolio trotzdem schlechter - es kippt die
+    Auswahl zu unbeachteten Namen mit weniger Momentum (Lehre §2.3: IC ist nicht
+    Portfolio). Die alte Mischung bleibt als RankingWeights(mom_12_1=0, vol_ruhig=1,
+    mom_12_1_vola=0.5) rekonstruierbar (31_ --variante ranking)."""
 
     market_regime_filter: bool = True
     """Neue Kaeufe nur, wenn SPY ueber seinem 200-Tage-Schnitt liegt.
@@ -431,7 +440,7 @@ class RankingWeights:
     min_price: float = 5.0
     """Kurs-Untergrenze hoeher als bei der Umkehr: Spread ist hier alles."""
 
-    FAKTOREN = ("mom_konsistenz", "vol_ruhig", "mom_12_1_vola", "reversal_5d")
+    FAKTOREN = ("mom_12_1", "mom_konsistenz", "vol_ruhig", "mom_12_1_vola", "reversal_5d")
 
     def gewichte(self) -> dict[str, float]:
         return {k: float(getattr(self, k)) for k in self.FAKTOREN if getattr(self, k) != 0}

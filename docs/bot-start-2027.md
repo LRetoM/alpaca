@@ -11,9 +11,11 @@
 
 1. Jeden Handelstag (alle 15 Minuten, ab 20 Minuten nach Eröffnung) lädt
    er Tagesbars für die 1.200 liquidesten US-Aktien plus SPY.
-2. Er berechnet je Aktie drei Bausteine — Momentum-Konsistenz, ruhiges
-   Volumen, vola-skaliertes 12-1-Momentum — und bildet daraus im
-   **Tagesquerschnitt** einen Z-Score-Mix und einen Rang.
+2. Er berechnet je Aktie zwei Bausteine — rohes 12-1-Momentum und
+   Momentum-Konsistenz (Anteil positiver Monate) — und bildet daraus im
+   **Tagesquerschnitt** einen Z-Score-Mix und einen Rang (Gewichte seit
+   2026-09-29 = Laborvariante `momentum`; ruhiges Volumen gemessen und als
+   Portfolio-Baustein verworfen, Masterplan §6.9).
 3. Er kauft aus dem obersten Zehntel des Rangs bis zu 50 Positionen,
    gewichtet nach 1/Volatilität, nur wenn SPY über seinem 200-Tage-Schnitt
    liegt (Regime-Tor), Kurs ≥ 5 $, Umsatz ≥ 25 Mio. $/Tag.

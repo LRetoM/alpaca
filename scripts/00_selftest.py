@@ -306,13 +306,14 @@ def main() -> int:
     check("Score entsteht im Querschnitt (Z-Score-Mix, Perzentil 0..1)",
           all(0 <= d.reasons["rang_pct"] <= 1 for d in dec) and len(eng._qs) >= 30)
     schlecht = min(eng._qs, key=lambda s: eng._qs[s]["pct"])
+    # Synthetische Positionen ohne Stop/Ziel (0 / 1e9): nur Rang- und Zeitregeln duerfen greifen
     alt = PortfolioState(cash=50_000, equity=100_000, positions={
-        schlecht: Position(schlecht, 100, 40.0, idx[-40], 30.0, 999.0, bars_held=30, high_water=40.0)})
+        schlecht: Position(schlecht, 100, 40.0, idx[-40], 0.0, 1e9, bars_held=30, high_water=40.0)})
     verk = [d for d in eng.decide(snap, alt) if d.action == "sell"]
     check("Rangverlust nach Mindesthaltedauer verkauft",
           len(verk) == 1 and verk[0].reasons["ausstiegsgrund"] == "rangverlust")
     jung = PortfolioState(cash=50_000, equity=100_000, positions={
-        schlecht: Position(schlecht, 100, 40.0, idx[-5], 30.0, 999.0, bars_held=5, high_water=40.0)})
+        schlecht: Position(schlecht, 100, 40.0, idx[-5], 0.0, 1e9, bars_held=5, high_water=40.0)})
     check("Kein Rangverlust-Ausstieg vor der Mindesthaltedauer",
           not [d for d in eng.decide(snap, jung) if d.action == "sell"])
     check("Regeln der Strategie vollstaendig protokollierbar",
@@ -321,8 +322,8 @@ def main() -> int:
     bester = max(eng._qs, key=lambda s: eng._qs[s]["pct"])
     eng_v = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, renew_rank_pct=0.9))
     reif = PortfolioState(cash=50_000, equity=100_000, positions={
-        bester: Position(bester, 100, 40.0, idx[-70], 30.0, 999.0, bars_held=63, high_water=40.0),
-        schlecht: Position(schlecht, 100, 40.0, idx[-70], 30.0, 999.0, bars_held=63, high_water=40.0)})
+        bester: Position(bester, 100, 40.0, idx[-70], 0.0, 1e9, bars_held=63, high_water=40.0),
+        schlecht: Position(schlecht, 100, 40.0, idx[-70], 0.0, 1e9, bars_held=63, high_water=40.0)})
     verk_v = {d.symbol: d.reasons["ausstiegsgrund"] for d in eng_v.decide(snap, reif) if d.action == "sell"}
     check("Verlaengerung: Top-Position bleibt nach max_hold, schwache geht (zeitausstieg)",
           bester not in verk_v and verk_v.get(schlecht) == "zeitausstieg", str(verk_v))
