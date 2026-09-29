@@ -652,26 +652,44 @@ class PortfolioErgebnis:
     umschlag_pa: float
     kosten_pa: float
     exposure: float
+    universum: pd.Series | None = None
+    """Gleichgewichtete Tagesrendite ALLER zugelassenen Symbole (ohne Kosten).
+
+    Der zweite, wichtigere Massstab: Schlaegt die Auswahl das Universum, aus
+    dem sie waehlt? SPY ist kapitalgewichtet und besteht aus Grosswerten;
+    ein Top-20 aus 3.000 Nebenwerten kann SPY verlieren und trotzdem
+    Auswahl-Alpha haben - oder umgekehrt. Nur dieser Vergleich trennt
+    Faktorwirkung von Universumseffekt."""
 
     def kennzahlen(self) -> dict:
         r = self.renditen.dropna()
         b = self.benchmark.reindex(r.index).fillna(0.0)
-        return {**_kennzahlen(r), "bench_cagr": _kennzahlen(b)["cagr"],
-                "bench_maxdd": _kennzahlen(b)["max_drawdown"],
-                "umschlag_pa": self.umschlag_pa, "kosten_pa": self.kosten_pa,
-                "exposure": self.exposure}
+        out = {**_kennzahlen(r), "bench_cagr": _kennzahlen(b)["cagr"],
+               "bench_maxdd": _kennzahlen(b)["max_drawdown"],
+               "umschlag_pa": self.umschlag_pa, "kosten_pa": self.kosten_pa,
+               "exposure": self.exposure}
+        if self.universum is not None:
+            u = self.universum.reindex(r.index).fillna(0.0)
+            out["univ_cagr"] = _kennzahlen(u)["cagr"]
+            out["univ_maxdd"] = _kennzahlen(u)["max_drawdown"]
+        return out
 
     def jahrestabelle(self) -> pd.DataFrame:
         r = self.renditen.dropna()
         b = self.benchmark.reindex(r.index).fillna(0.0)
+        u = (self.universum.reindex(r.index).fillna(0.0)
+             if self.universum is not None else None)
         rows = []
         for y, g in r.groupby(r.index.year):
             bb = b.loc[g.index]
-            rows.append({"jahr": int(y), "strategie": float((1 + g).prod() - 1),
-                         "spy": float((1 + bb).prod() - 1),
-                         "differenz": float((1 + g).prod() - (1 + bb).prod()),
-                         "maxdd": float(_maxdd(g)), "maxdd_spy": float(_maxdd(bb)),
-                         "tage": len(g)})
+            row = {"jahr": int(y), "strategie": float((1 + g).prod() - 1),
+                   "spy": float((1 + bb).prod() - 1),
+                   "differenz": float((1 + g).prod() - (1 + bb).prod()),
+                   "maxdd": float(_maxdd(g)), "maxdd_spy": float(_maxdd(bb)),
+                   "tage": len(g)}
+            if u is not None:
+                row["univ_ew"] = float((1 + u.loc[g.index]).prod() - 1)
+            rows.append(row)
         return pd.DataFrame(rows).set_index("jahr")
 
 
@@ -716,8 +734,12 @@ def rangportfolio(score: pd.DataFrame, p: Panel, cfg: PortfolioConfig,
     c = p.close
     r_close = c.pct_change()
     sc = score.reindex_like(c)
+    universum_ew = None
     if maske is not None:
-        sc = sc.where(maske.reindex_like(c).fillna(False).astype(bool))
+        m = maske.reindex_like(c).fillna(False).astype(bool)
+        sc = sc.where(m)
+        # Gleichgewichtetes Universum: Zulassung von gestern, Rendite von heute
+        universum_ew = r_close.where(m.shift(1)).mean(axis=1).fillna(0.0)
     if cfg.min_score_rang is not None:
         pr = sc.rank(axis=1, pct=True)
         sc = sc.where(pr >= cfg.min_score_rang)
@@ -778,7 +800,9 @@ def rangportfolio(score: pd.DataFrame, p: Panel, cfg: PortfolioConfig,
     return PortfolioErgebnis(equity=equity, renditen=port, benchmark=bench, cfg=cfg,
                              umschlag_pa=umschlag,
                              kosten_pa=float(kosten.mean() * TRADING_DAYS),
-                             exposure=exposure)
+                             exposure=exposure,
+                             universum=(universum_ew.reindex(port.index)
+                                        if universum_ew is not None else None))
 
 
 def zscore_querschnitt(f: pd.DataFrame, clip: float = 3.0) -> pd.DataFrame:

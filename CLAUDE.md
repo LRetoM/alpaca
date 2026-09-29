@@ -20,12 +20,16 @@ Score sortiert am oberen Ende falsch). Der Vorsprung je Trade (+0,11 %) liegt
 unter dem Rundlauf-Breakeven (0,14 % bei 5 bps Spread). **Das ist der Befund,
 von dem aus 2027 geplant wird — nicht wegdiskutieren.**
 
-**Der Plan:** [docs/masterplan-2027.md](docs/masterplan-2027.md). Kurz: weg
-vom 5-Tage-Umschlag, hin zu **Multi-Wochen-Ranking** (Momentum + Volumen +
-Ereignisse, 3–6 Wochen Haltedauer, Regimefilter, Vola-Sizing), plus **ein**
-kontrollierter Daytrading-Test (ORB auf „Stocks in Play“), plus Auktions-
-Overnight als Nebenkandidat. Alles zuerst auf 10+ Jahren Historie, dann
-vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
+**Der Plan:** [docs/masterplan-2027.md](docs/masterplan-2027.md). Kurz:
+**Einzelaktien, keine ETFs** (SPY/VIX nur als Regime-Tor). Zwei Spuren im
+Ranking-Buch, die gegeneinander laufen: **„kurz“** (5–10 Tage, Umkehr für
+das Timing + Momentum-Konsistenz + ruhiges Volumen für die Auswahl, nur die
+500 liquidesten Werte, Top 30) und **„mittel“** (21–42 Tage, Top 50 aus 800).
+Dazu **ein** kontrollierter Daytrading-Test auf Einzelaktien (ORB auf „Stocks
+in Play“) und Auktions-Overnight als kleiner Nebentest. Gemessen (§6.6 des
+Plans): Top 20 aus 3.000 Werten verliert gegen SPY trotz positiver ICs —
+deshalb liquides Universum und Breite. Alles zuerst auf 10+ Jahren Historie,
+dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 
 ## 2. Regeln, die nie verhandelt werden
 

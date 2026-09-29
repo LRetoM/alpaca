@@ -62,6 +62,21 @@ VARIANTEN = {
                              "mom_12_1_vola": 0.5}, haltedauer=21),
     "kombi2_h42": dict(gewichte={"mom_konsistenz": 1.0, "vol_schub_6m_neg": 1.0,
                                  "mom_12_1_vola": 0.5}, haltedauer=42),
+    # --- KURZE Horizonte auf Einzelaktien (Nutzerwunsch: Tage statt Wochen) ---
+    # Die auf 5 Tagen staerksten, untereinander wenig korrelierten Faktoren
+    # aus dem Zoo (t_defl h=5: vol_schub_6m_neg 5,2 / mom_konsistenz 4,0 /
+    # reversal_5d 3,8 / rsi2 3,0 / vol_z_1d 2,6). Umkehr liefert das Timing,
+    # Momentum-Konsistenz und ruhiges Volumen die Auswahl - "gefallene
+    # Qualitaet, die keiner beachtet".
+    "kurz": dict(gewichte={"reversal_5d": 1.0, "rsi2_invers": 0.5, "mom_konsistenz": 1.0,
+                           "vol_schub_6m_neg": 1.0, "vol_z_1d": 0.5}, haltedauer=5),
+    "kurz10": dict(gewichte={"reversal_5d": 1.0, "rsi2_invers": 0.5, "mom_konsistenz": 1.0,
+                             "vol_schub_6m_neg": 1.0, "vol_z_1d": 0.5}, haltedauer=10),
+    # Nur Kursfaktoren (fuer Panels ohne Volumen wie sp500_close)
+    "kurz_preis": dict(gewichte={"reversal_5d": 1.0, "rsi2_invers": 0.5, "mom_konsistenz": 1.0,
+                                 "mom_12_1_vola": 0.5}, haltedauer=5),
+    # Reine Umkehr wie der heutige Bot, zum direkten Vergleich mit 'kurz'
+    "reversal_rein": dict(gewichte={"reversal_5d": 1.0, "rsi2_invers": 1.0}, haltedauer=5),
 }
 
 
@@ -139,13 +154,16 @@ def main() -> int:
     print("=" * 108)
     print(f"  RANGPORTFOLIO  {args.variante}  Top {args.top_n}, H={H} Tage, Panel {args.panel}")
     print("=" * 108)
-    print(f"  {'Regime':<14}{'Kosten':>7}{'CAGR':>8}{'SPY':>8}{'Sharpe':>8}{'MaxDD':>8}{'SPY DD':>8}"
+    print(f"  {'Regime':<14}{'Kosten':>7}{'CAGR':>8}{'SPY':>8}{'Univ.EW':>9}{'Sharpe':>8}{'MaxDD':>8}{'SPY DD':>8}"
           f"{'Vola':>7}{'Umschl./J':>10}{'Kosten/J':>9}{'Expo':>6}")
-    print("  " + "-" * 104)
+    print("  " + "-" * 113)
     for _, r in df.iterrows():
         print(f"  {r['regime']:<14}{r['kosten_bps']:>7.0f}{r['cagr']:>8.1%}{r['bench_cagr']:>8.1%}"
+              f"{r.get('univ_cagr', float('nan')):>9.1%}"
               f"{r['sharpe']:>8.2f}{r['max_drawdown']:>8.1%}{r['bench_maxdd']:>8.1%}{r['vola']:>7.1%}"
               f"{r['umschlag_pa']:>10.1f}{r['kosten_pa']:>9.1%}{r['exposure']:>6.0%}")
+    print("  Univ.EW = gleichgewichtetes Universum aller zugelassenen Werte, ohne Kosten -")
+    print("  der Massstab fuer AUSWAHL-Alpha; SPY ist der Massstab fuer den Anleger.")
 
     # Jahrestabelle: Referenzfassung (kein Regime, mittlere Kosten) und beste Regimefassung
     mitte = args.kosten[len(args.kosten) // 2]

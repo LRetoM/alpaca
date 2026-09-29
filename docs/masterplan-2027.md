@@ -39,22 +39,28 @@
 2. Die **Strategie** darauf ist die Schwachstelle: Kurzfrist-Umkehr mit fünf
    Tagen Haltedauer verdient +0,11 % je Trade und zahlt 0,14 % Kosten je
    Rundlauf. Das ist mathematisch verloren, egal wie gut das Signal wird.
-3. Der Hebel heißt deshalb nicht „besseres Signal“, sondern **weniger
-   Umschlag und mehr Vorsprung je Trade**: Haltedauer 3–6 Wochen statt 5
-   Tage, Auswahl aus Momentum, Volumen und Ereignissen statt aus RSI(2).
-4. Die drei stärksten Kandidaten mit freier Datenbasis sind:
-   **Querschnitts-Momentum mit Konsistenzfilter**, das
-   **High-Volume-Return-Premium** (ungewöhnliches Volumen der letzten Woche)
-   und **Post-Earnings-Drift über die Ergebnistagsrendite** (ohne
-   Analystendaten, Termine aus EDGAR 8-K).
+3. Der Hebel heißt deshalb nicht „besseres Signal“, sondern **mehr Vorsprung
+   je Trade als Kosten je Trade**. Auf Einzelaktien geht das auf zwei Wegen,
+   die beide gebaut werden: **kurz** (5–10 Tage, Mehrfaktor statt reiner
+   Umkehr, nur die liquidesten 800 Werte, Kosten ≤ 20 bps) und **mittel**
+   (3–6 Wochen, Konsistenz-Momentum plus ruhiges Volumen). Welcher Weg mehr
+   verdient, entscheidet die Haltedauer-Kurve (§6.6), nicht die Vorliebe.
+4. Die stärksten Bausteine auf Einzelaktien (gemessen auf 8.061 US-Aktien,
+   2005–2020, §6.5): **ruhiges Volumen** (sechs Monate unter dem eigenen
+   Vorjahresumsatz — stabilster Faktor im Zoo), **Momentum-Konsistenz**
+   (Anteil positiver Monate), **5-Tage-Umkehr** (stärkster Kurzfrist-Faktor,
+   t = 3,8) und der **1-Tages-Volumenschock**. Das Wochen-Volumenpremium aus
+   der Literatur ist in liquiden Werten tot; Gap-ups mit Volumen kehren um.
+   PEAD braucht echte Ergebnistermine (EDGAR 8-K) — der Proxy taugt nicht.
 5. Für den Daytrading-Wunsch gibt es genau **einen** wissenschaftlich sauber
    dokumentierten Ansatz: Opening-Range-Breakout auf den 20 Aktien mit dem
    höchsten relativen Volumen der ersten fünf Minuten (Sharpe 2,4–2,8 im
    Paper). Er wird als kontrollierter Test gebaut — mit der Erwartung, dass
    IEX-Daten und Kosten den Großteil davon auffressen.
-6. Die **Overnight-Prämie** (Schluss→Eröffnung) ist bei QQQ/IWM brutto 12–13 %
-   p.a. mit Breakeven 2,6 bps je Ausführung; mit Auktionsorders bei Alpaca
-   (kein Spread) ist das ein billiger Nebentest, kein Kern.
+6. **ETFs sind nicht das Ziel.** SPY und VIX dienen nur als Regime-Anzeiger
+   (wann Einzelaktien gekauft werden dürfen). Die Overnight-Prämie bei
+   QQQ/IWM (brutto 12–13 % p.a., Breakeven 2,6 bps je Ausführung) bleibt
+   ein Nebentest mit Auktionsorders und kleinem Kapitaldeckel — mehr nicht.
 7. **Regimefilter** (SPY über SMA200, VIX unter 25) und **Volatilitäts-Sizing**
    sind die zwei Hebel, die den Drawdown steuern; sie kosten in
    Erholungsjahren (2020) und zahlen in Bärenjahren (2022).
@@ -64,11 +70,15 @@
 9. Zeitplan: Oktober 2026 messen auf deinen Daten, November bauen und in
    der Schattenflotte voranmelden, Dezember Papierdepot mit der neuen
    Engine-Konfiguration, **Januar 2027 Start** — klein, mit Risiko-Dach.
-10. Realistische Erwartung nach Kosten: **SPY + 3 bis 6 Prozentpunkte p.a.**
-    bei Sharpe 0,8–1,2 und maximalem Drawdown von 20–30 % für die
-    Multi-Wochen-Strategie; für den ORB-Test Sharpe > 1 als Bestehensgrenze.
-    „Zuverlässig hohe Margen mit Daytrading“ verspricht dieser Plan nicht,
-    weil kein ehrlicher Datensatz sie hergibt.
+10. Realistische Erwartung nach Kosten: **SPY + 3 bis 8 Prozentpunkte p.a.**
+    bei Sharpe 0,8–1,3 und maximalem Drawdown von 20–30 % für das
+    Einzelaktien-Ranking (kurz oder mittel, je nach §6.6); für den ORB-
+    Daytrading-Test Sharpe > 1 als Bestehensgrenze. Gewinnmaximierung heißt
+    hier: konzentrierter (Top 10 statt 20), kürzer (wenn die Kurve es
+    erlaubt), und voll investiert im richtigen Regime — nicht: mehr
+    handeln. „Zuverlässig hohe Margen mit Daytrading“ verspricht dieser Plan
+    nicht, weil kein ehrlicher Datensatz sie hergibt; er baut den Test, der
+    es zeigen oder widerlegen kann.
 
 ---
 
@@ -343,7 +353,49 @@ Sieben Lehren daraus, alle direkt handlungsrelevant:
    Quintilspanne (das oberste Quintil ist zu langweilig, um SPY zu
    schlagen). Nur als Positionsgröße (1/Vola) nutzen.
 
-### 6.6 Breites Universum (qlib, 2006–2020): Rangportfolios, Haltedauer, ML
+### 6.6 Breites Universum (qlib, 2006–2020): Rangportfolios — der wichtigste Befund
+
+Top 20 aus ~2.500–3.500 zugelassenen Aktien, H=21, Einstieg Eröffnung T+1:
+
+| Variante | Regime | CAGR @20 bps | SPY | Sharpe | MaxDD | Jahre < SPY |
+|---|---|---|---|---|---|---|
+| kombi (mom+konsistenz+vol_1w+lowvol) | kein | **+0,3 %** | 9,4 % | 0,14 | −54 % | 12 von 15 |
+| kombi | SPY > SMA200 | +1,1 % | 9,4 % | 0,16 | −42 % | |
+| momentum (12-1 + Konsistenz) | kein | **−1,5 %** | 9,4 % | 0,11 | **−69 %** | 10 von 15 |
+| momentum | SPY > SMA200 | +2,1 % | 9,4 % | 0,21 | −39 % | |
+| kombi ohne Volumen | SPY > SMA200 | +2,9 % | 9,4 % | 0,24 | −42 % | |
+| volumen (1-Wochen-Premium) | kein | +1,0 % | 9,4 % | 0,16 | −54 % | 11 von 15 |
+
+**Positive ICs, verlorene Portfolios.** Das ist kein Widerspruch, sondern
+die Lehre, die das ganze Projekt seit dem Frühjahr wiederholt: Ein IC von
+0,02 über 3.000 Namen sagt, dass das *oberste Fünftel* (600 Aktien) das
+unterste schlägt. Er sagt nichts über die **obersten 20** — das ist die
+extreme Spitze der Rangliste, und dort sitzen bei einem Universum ab 1 Mio. $
+Tagesumsatz systematisch: die kleinsten, volatilsten (25–32 % Vola gegen
+19 % SPY), am weitesten gefallenen oder gestiegenen Namen. Gleichgewichtet
+Top 20 aus Nebenwerten hat 2014–2020 gegen kapitalgewichtete Großwerte
+strukturell verloren — unabhängig vom Signal. **Genau das ist der
+Umkehr-Bot: Top 15 aus 1.200 Werten, Score-Spitze = Ausreißer.**
+
+Drei Konsequenzen, die ab hier gelten:
+
+1. **Universum: Top 500–800 nach Dollar-Umsatz**, nicht 1.200–3.000. Der
+   Spread ist dort tragbar und die Rangspitze ist keine Lotterie.
+2. **Breite statt Spitze: Top 50 statt Top 20.** Das Fundamentalgesetz
+   (IR = IC × √BR) verlangt Breite; ein 20er-Portfolio wirft sie weg.
+3. **Zwei Maßstäbe, immer beide:** SPY (was der Anleger sonst hätte) UND das
+   gleichgewichtete Universum (ob die Auswahl überhaupt sortiert). Ab jetzt
+   in jeder `22_`-Ausgabe als Spalte `Univ.EW`.
+
+Die Läufe mit diesen Korrekturen (Universum ≥ 25 Mio. $/Tag, Top 50, Varianten
+`kombi2`, `kurz`, `kurz10`, `momentum`) folgen in §6.7.
+
+Bereits sichtbar in den Jahrestabellen: Der Trendfilter halbiert den
+Drawdown (−69 % → −39 % bei Momentum) und kostet in Erholungsjahren
+(2009: 0 % gegen +26 % SPY). Das ist der Preis des Filters, und er ist es
+wert — 2008 hätte er den Momentum-Drawdown von −61 % auf −38 % begrenzt.
+
+### 6.7 Korrigierte Läufe: liquides Universum, Top 50, kurze Horizonte
 
 *(Läufe gestartet; Ergebnisse werden hier nachgetragen, Logs unter
 `results/labor/logs/`.)*
@@ -368,36 +420,52 @@ Sieben Lehren daraus, alle direkt handlungsrelevant:
                                      │
         ┌────────────────────────────┼─────────────────────────────┐
         ▼                            ▼                             ▼
-┌──────────────────┐     ┌────────────────────────┐     ┌────────────────────┐
-│ BUCH A  Multi-   │     │ BUCH B  ORB-Daytrading │     │ BUCH C  Overnight  │
-│ Wochen-Ranking   │     │ (nur wenn HYP-04 hält) │     │ Auktion (HYP-07)   │
-│ 70–100 % Kapital │     │ ≤ 20 % Kapital, 0 über │     │ ≤ 20 %, QQQ/IWM    │
-│ Momentum+Volumen │     │ Nacht, Hebel ≤ 4 intra │     │ MOC → MOO          │
-│ +EAR, H=21–42,   │     │ Top 20 Rel.-Volumen    │     │ nur über SMA200    │
-│ Regime, 1/Vola   │     └────────────────────────┘     └────────────────────┘
-└──────────────────┘
+┌──────────────────────┐   ┌────────────────────────┐   ┌────────────────────┐
+│ BUCH A  Einzelaktien │   │ BUCH B  ORB-Daytrading │   │ BUCH C  Overnight  │
+│ Ranking, 2 Spuren:   │   │ auf Einzelaktien       │   │ Auktion (HYP-07)   │
+│  kurz  H=5–10 Tage   │   │ (nur wenn HYP-04 hält) │   │ ≤ 10 %, QQQ/IWM    │
+│  mittel H=21–42 Tage │   │ ≤ 20 % Kapital, 0 über │   │ MOC → MOO          │
+│ Universum Top 500–800│   │ Nacht, Hebel ≤ 4 intra │   │ nur über SMA200    │
+│ Top 50 (kurz: 30)    │   │ Top 20 Rel.-Volumen    │   │ Nebentest, kein    │
+│ Regime, 1/Vola       │   └────────────────────────┘   │ Kernbaustein       │
+└──────────────────────┘                                └────────────────────┘
         ▲ dieselbe Engine.decide(), neue Strategie "ranking" in signals.py
 ```
 
-**Buch A ist der Kern.** Es ersetzt die Umkehr-Strategie in `EngineConfig`
-durch eine Strategie `ranking` mit:
+**Buch A ist der Kern — Einzelaktien, keine ETFs.** SPY und VIX kommen nur
+als Regime-Tor vor. Die Strategie `ranking` ersetzt die Umkehr in
+`EngineConfig`, in zwei Spuren, die als getrennte Schattenbots laufen und
+von denen die bessere (netto, gepaart, ≥ 60 Tage) das Kapital bekommt:
 
-- Score = Z-Score-Mix aus `mom_12_1`, `mom_konsistenz`, `vol_schub_1w`,
-  `ear` (sobald EDGAR-8-K-Lader steht), Gewichte rund (1 / 0,5 / 1 / 1).
-- Universum: Top 1.200 nach Dollar-Volumen, Kurs ≥ 5 $ (Spread!).
-- Auswahl: Top 20–30, Rebalancing wöchentlich, Haltedauer-Minimum 21 Tage,
-  Ausstieg bei Rangverlust (< Perzentil 60) oder Zeit (63 Tage), Stop 3 ATR.
-- Regime: neue Käufe nur bei SPY > SMA200 UND VIX < 25; bestehende
-  Positionen laufen mit Stop weiter (kein Panikverkauf am Filtertag).
-- Sizing: 1/Vola relativ (`deploy_to_target=True`), Deckel 10 % je Position,
-  Zielinvestition 90 %.
-- Erwarteter Umschlag: 12–20 Rundläufe je Position und Jahr → ~2–4 % des
-  Kapitals an Kosten bei 20 bps. Bei einem Bruttovorsprung von 5–8 % p.a.
-  bleibt etwas übrig — das ist der ganze Unterschied zu heute.
+- **Spur „kurz“ (5–10 Tage)** — der Wunsch nach kurzen Zeiträumen, ehrlich
+  gebaut: Score = 5-Tage-Umkehr (Timing) + Momentum-Konsistenz und ruhiges
+  Volumen (Auswahl) + Volumenschock (Verstärker), Gewichte 1 / 0,5 / 1 / 1 /
+  0,5. **Nur Top 500 nach Umsatz, Kurs ≥ 5 $**, Top 30, Haltedauer 5 oder
+  10 Tage (entscheidet §6.7), Stop 2 ATR. Kosten sind hier alles:
+  Limit-Orders im Spread, kein Kauf in den ersten 20 Minuten, Zielkosten
+  ≤ 10 bps je Seite. Stirbt die Spur bei 20 bps im Backtest, wird sie
+  nicht live gebaut.
+- **Spur „mittel“ (21–42 Tage)** — Score = Momentum-Konsistenz + ruhiges
+  Volumen + vola-skaliertes Momentum (1 / 1 / 0,5), Top 800, Top 50,
+  Rebalancing wöchentlich mit Mindesthaltedauer 21 Tage, Ausstieg bei
+  Rangverlust unter Perzentil 60 oder nach 63 Tagen, Stop 3 ATR.
+- **Regime** für beide: neue Käufe nur bei SPY > SMA200 UND VIX < 25;
+  offene Positionen laufen mit Stop weiter (kein Panikverkauf am
+  Filtertag). Gemessen (§6.6): halbiert den Drawdown, kostet in
+  Erholungsjahren.
+- **Sizing**: 1/Vola relativ (`deploy_to_target=True`), Deckel 5 % je
+  Position bei Top 50 (10 % bei Top 30), Zielinvestition 90 %.
+- **Gewinnmaximierung, wo sie erlaubt ist:** Konzentration auf Top 20–30
+  nur in der kurzen Spur und nur im liquiden Universum (§6.6 zeigt, warum
+  Top 20 aus 3.000 verliert); voll investiert bei Regime an; kein Hebel im
+  Aktienbuch. Mehr Rendite kommt aus mehr Vorsprung je Trade, nicht aus
+  mehr Trades.
 
-**Buch B und C sind Tests mit Kapitaldeckel**, nicht Bestandteile des Kerns.
-Sie bekommen je einen Schattenbot mit eigener Buchführung (`bot_id`), damit
-ihr Beitrag messbar bleibt (Attribution, `docs/mehrbot-plan.md` §7).
+**Buch B (ORB auf Einzelaktien) ist die Daytrading-Spur** — mit
+Kapitaldeckel, eigener Buchführung (`bot_id`) und der Bestehensgrenze aus
+HYP-04. **Buch C ist ein Nebentest** mit kleinem Deckel; es ist der einzige
+Ort, an dem ETFs gehandelt würden, und er entfällt, wenn Buch A und B das
+Kapital brauchen.
 
 **Datenpipeline (alles kostenlos):**
 
@@ -421,9 +489,9 @@ ihr Beitrag messbar bleibt (Attribution, `docs/mehrbot-plan.md` §7).
 |---|---|---|---|
 | 0.1 | Panel aus Projektcache bauen | `20_labor_daten.py --quelle projekt --pfad <yfinance_2168_*_8y.parquet> --name projekt` | 2.000+ Symbole, 8 Jahre, OHLCV |
 | 0.2 | Faktorzoo | `21_labor_faktoren.py --panel projekt` | Jahrestabelle inkl. 2020, 2022 gelesen |
-| 0.3 | Portfolios | `22_labor_portfolio.py --panel projekt --variante {momentum,kombi,kombi_ohne_volumen,volumen,ear,reversal}` | Tabelle in §6.7 dieses Docs |
-| 0.4 | Haltedauer | `24_labor_haltedauer.py --panel projekt --variante {reversal,kombi}` | Kurve zeigt, ab welchem H der Umschlag nicht mehr das Problem ist |
-| 0.5 | ML-Ranker | `23_labor_ml_ranking.py --panel projekt --horizont 21` | OOS-IC je Jahr |
+| 0.3 | Portfolios, liquides Universum, Top 50 | `22_labor_portfolio.py --panel projekt --variante {kurz,kurz10,kombi2,momentum,reversal_rein} --top-n 50 --min-dollar-volume 25000000` | Tabelle in §6.8 dieses Docs, Spalten SPY **und** Univ.EW |
+| 0.4 | Haltedauer-Kurve der kurzen Spur | `24_labor_haltedauer.py --panel projekt --variante kurz --haltedauern 2 5 10 21 42 --min-dollar-volume 25000000` | zeigt, ob H=5 oder H=10 die Kosten überlebt |
+| 0.5 | ML-Ranker | `23_labor_ml_ranking.py --panel projekt --horizont 10 --min-dollar-volume 25000000 --top-n 50` | OOS-IC je Jahr, Vergleich zum besten Einzelfaktor |
 | 0.6 | Overnight | `25_labor_overnight.py --panel projekt --symbole SPY QQQ IWM` | Breakeven 2016–2026 |
 | 0.7 | ORB | `26_labor_orb_intraday.py --start 2024-01-02 --ende 2024-12-31` (1 Jahr, ~2.000 Requests) | Sharpe, Trades je Tag, RV-Band-Tabelle |
 | 0.8 | Hypothesen registrieren | `27_hypothesen_anmelden.py --anmelden` | Register zeigt 16 Einträge |
@@ -447,11 +515,11 @@ auf deinen Daten netto?** Nur die kommen in Schritt 1.
 
 | # | Aufgabe | Datei | Prüfung |
 |---|---|---|---|
-| 2.1 | `build_ranking_frame()` mit den Siegern aus Schritt 0/1 | `signals.py` | `pit.audit_feature_function` |
-| 2.2 | `EngineConfig.for_ranking()` (H_min 21, max_hold 63, stop 3 ATR, exit_rank) | `engine.py` | `simulate.py` 2016–2026 reproduziert `22_`-Ergebnis ± 2 %-Pkt CAGR |
-| 2.3 | Regime als Kauf-Tor, Vola-Sizing relativ | `engine.py` | Investitionsgrad 85–90 % bei Regime an |
+| 2.1 | `build_ranking_frame()` mit den Siegern aus Schritt 0/1 — zwei Gewichtssätze („kurz“, „mittel“) | `signals.py` | `pit.audit_feature_function` |
+| 2.2 | `EngineConfig.for_ranking_kurz()` (H_min 5/10, max_hold 15, stop 2 ATR, Top 30, Universum 500) und `for_ranking_mittel()` (H_min 21, max_hold 63, stop 3 ATR, Top 50, Universum 800) | `engine.py` | `simulate.py` 2016–2026 reproduziert `22_`-Ergebnis ± 2 %-Pkt CAGR |
+| 2.3 | Regime als Kauf-Tor, Vola-Sizing relativ, Rangverlust-Ausstieg | `engine.py` | Investitionsgrad 85–90 % bei Regime an |
 | 2.4 | Risiko-Dach | `risiko.py` (mehrbot-plan §5) | Sperre auslösen/lösen im Trockenlauf |
-| 2.5 | Schattenbots anmelden: `R00_ranking_basis`, `R01_ohne_volumen`, `R02_ohne_regime`, `R03_H42`, `R04_top30` — **eine Achse je Bot** | `18_fleet.py --anmelden` | Divergenz-Diagnose: kein Bot identisch mit Basis |
+| 2.5 | Schattenbots anmelden: `K00_kurz_basis`, `K01_kurz_H10`, `K02_kurz_top20`, `M00_mittel_basis`, `M01_mittel_ohne_volumen`, `M02_mittel_ohne_regime` — **eine Achse je Bot**, Vergleich kurz gegen mittel gepaart | `18_fleet.py --anmelden` | Divergenz-Diagnose: kein Bot identisch mit Basis |
 | 2.6 | ORB als Schattenbuch (kein Handel), täglich nach Schluss ausgewertet | `26_` + `shadow.py` Erweiterung | Trades je Tag, RV-Band, netto |
 | 2.7 | Overnight-Papierhandel QQQ/IWM mit `cls`/`opg`, 4 Wochen | `05_paper_trade.py` Erweiterung | gemessene Fill-Abweichung zum Auktionspreis |
 
@@ -483,8 +551,9 @@ den Fehler vom Frühjahr (Strategie gebaut, dann gemessen).
 
 | Buch | Brutto p.a. | Kosten p.a. | **Netto p.a.** | Sharpe | MaxDD | Bezug |
 |---|---|---|---|---|---|---|
-| A Multi-Wochen-Ranking, kein Regime | SPY + 6–9 %-Pkt | 2–4 % | **SPY + 3–6 %-Pkt** | 0,8–1,1 | ≈ SPY | Literatur ÷ 2 (McLean-Pontiff), §6.3 ÷ 3 (Bias) |
-| A mit Regime + Vola-Sizing | SPY + 3–6 %-Pkt | 2–3 % | SPY + 1–4 %-Pkt | 0,9–1,3 | **−20 bis −28 %** | §6.3 Regimefassungen |
+| A „mittel“ (21–42 Tage), kein Regime | SPY + 6–9 %-Pkt | 2–4 % | **SPY + 3–6 %-Pkt** | 0,8–1,1 | ≈ SPY | Literatur ÷ 2 (McLean-Pontiff), §6.3 ÷ 3 (Bias) |
+| A „mittel“ mit Regime + Vola-Sizing | SPY + 3–6 %-Pkt | 2–3 % | SPY + 1–4 %-Pkt | 0,9–1,3 | **−20 bis −28 %** | §6.3 Regimefassungen |
+| A „kurz“ (5–10 Tage, Top 30, Universum 500) | SPY + 10–15 %-Pkt | **8–15 %** (!) | **SPY + 0–6 %-Pkt** | 0,7–1,2 | ≈ SPY | §6.5 h=5-Quintilspannen ÷ 2, Kosten 10–20 bps × 25–50 Rundläufe |
 | B ORB Stocks in Play (≤ 20 % Kapital) | 15–40 % auf das Teilkapital | 5–15 % | **0–20 %** auf Teilkapital | 0,5–1,5 | −15 % | Paper 2,4–2,8 Sharpe × IEX-Abschlag |
 | C Overnight QQQ/IWM Auktion (≤ 20 %) | 8–12 % | 1–3 % | 4–8 % | 0,6–0,9 | −25 % | §6.4 |
 | **Gesamt** | | | **SPY + 3–7 %-Pkt** | **1,0–1,3** | **−20 bis −30 %** | |

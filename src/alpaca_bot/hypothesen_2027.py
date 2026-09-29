@@ -27,8 +27,10 @@ KATALOG: list[dict] = [
                "eigene Messung scripts/22 (S&P 500 2016-2026: obere Schranke, Index-Bias)",
         quelle_typ="akademisch_repliziert", veroeffentlicht="1993-03-01",
         operationalisierung="labor.faktorzoo mom_12_1 + 0.5*mom_konsistenz, Z-Score-Mix, "
-                            "Top 20, H=21, Kosten 20 bps Rundlauf, Regime trend_ok; "
-                            "Messgroesse: Netto-CAGR minus SPY, MaxDD, Jahre 2018/2020/2022 einzeln.",
+                            "Universum >= 25 Mio. $/Tag (Top ~800), Top 50, H=21, Kosten 20 bps Rundlauf, "
+                            "Regime trend_ok; Messgroesse: Netto-CAGR minus SPY UND minus gleichgewichtetes "
+                            "Universum, MaxDD, Jahre 2018/2020/2022 einzeln. (Top 20 aus 3.000 Werten ist "
+                            "gemessen ein Verlustgeschaeft - masterplan §6.6.)",
         erwartung="Ueberschuss +2 bis +6 %-Punkte p.a. auf breitem Universum; auf heutigen "
                   "S&P-500-Konstituenten deutlich mehr (Bias). MaxDD ohne Filter ~ SPY, mit Filter kleiner.",
         skript="scripts/22_labor_portfolio.py --variante momentum",
@@ -252,6 +254,26 @@ KATALOG: list[dict] = [
                             "Portfolio 'ruhig' (H=42) und 'kombi2' gegen 'momentum' und 'kombi'.",
         erwartung="Out-of-sample halber Effekt (IC ~0,01), aber weiter positiv; kombi2 Sharpe > momentum.",
         skript="scripts/21_labor_faktoren.py --panel projekt; scripts/22_labor_portfolio.py --variante kombi2",
+    ),
+    dict(
+        hyp_id="HYP-2027-18",
+        prio=1,
+        behauptung="Ein Mehrfaktor-Ranking auf Einzelaktien mit 5-10 Tagen Haltedauer "
+                   "(Umkehr fuer das Timing, Momentum-Konsistenz und ruhiges Volumen fuer die "
+                   "Auswahl, Volumenschock als Verstaerker) hat einen groesseren Vorsprung je "
+                   "Trade als die reine Umkehr und ueberlebt 10-20 bps je Rundlauf - die reine "
+                   "Umkehr des heutigen Bots nicht.",
+        quelle="Eigene Messung scripts/21 auf qlib 2005-2020 (t_defl h=5: reversal_5d 3,8, "
+               "mom_konsistenz 4,0, vol_schub_6m_neg 5,2, vol_z_1d 2,6; paarweise wenig korreliert); "
+               "de Groot/Huij/Zhou 2012 (Umkehr nur auf Large Caps netto)",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="scripts/22 --variante kurz (H=5) und kurz10 gegen reversal_rein; scripts/24 "
+                            "--variante kurz mit H in {2,5,10,21}; Kosten 10/20/40 bps; Top 20 und Top 10; "
+                            "Universum Top 800 nach Umsatz. Bestehen: Netto-CAGR > SPY bei 20 bps UND "
+                            "kurz > reversal_rein in >= 75 % der Jahre.",
+        erwartung="Brutto-Vorsprung 2-3x der reinen Umkehr; netto bei 10 bps positiv, bei 40 bps tot. "
+                  "H=10 wahrscheinlich der Kompromiss zwischen Signalstaerke und Kosten.",
+        skript="scripts/22_labor_portfolio.py --variante kurz; scripts/24_labor_haltedauer.py --variante kurz",
     ),
 ]
 
