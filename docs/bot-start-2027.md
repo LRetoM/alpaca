@@ -32,7 +32,7 @@ Erwarteter Umschlag: 12–18 Rundläufe je Position und Jahr, Kosten
 
 ```bash
 cd ~/Documents/alpaca            # oder wo das Repo liegt
-.venv/bin/python scripts/00_selftest.py      # 61 Prüfungen, ohne Keys
+.venv/bin/python scripts/00_selftest.py      # 65 Prüfungen, ohne Keys
 .venv/bin/python scripts/09_selfcheck.py     # Projektverfassung
 .venv/bin/python scripts/01_check_setup.py   # Keys, Konto, Uhr
 ```
@@ -66,6 +66,10 @@ $P scripts/21_labor_faktoren.py --panel projekt --min-dollar-volume 25000000
 $P scripts/22_labor_portfolio.py --panel projekt --variante kombi2 --top-n 50 --min-dollar-volume 25000000
 $P scripts/24_labor_haltedauer.py --panel projekt --variante kombi2 --top-n 50 --min-dollar-volume 25000000
 $P scripts/31_simulate_ranking.py --panel projekt --symbole 800          # ECHTER Engine-Pfad mit Kosten
+$P scripts/23_labor_ml_ranking.py --panel projekt --horizont 21 --min-dollar-volume 25000000 --top-n 50   # ML gegen Handmix, gleiches Universum
+$P scripts/23_labor_ml_ranking.py --panel projekt --horizont 21 --min-dollar-volume 25000000 --top-n 50 --regime trend_ok
+$P scripts/31_simulate_ranking.py --panel projekt --symbole 800 --stop-atr 3 --exit-rank 0.2 --verlaengern 0.9 --ml-pred results/labor/ml_pred_projekt_h21.parquet
+$P scripts/33_trade_autopsie.py                                    # Pflicht nach jedem Replay
 $P scripts/29_labor_dynamisch.py --panel projekt --min-dollar-volume 25000000 --top-n 30
 $P scripts/30_labor_muster.py --panel projekt
 $P scripts/27_hypothesen_anmelden.py --anmelden
@@ -79,6 +83,12 @@ $P scripts/27_hypothesen_anmelden.py --anmelden
   Größere Abweichung = Fehler in einem der beiden Pfade, erst klären.
 - `21_`: `vol_schub_6m_neg` und `mom_konsistenz` mit ≥ 75 % positiven
   Jahren (HYP-17 bestätigt oder verworfen).
+- `23_`: **ML ≥ Handmix + 2 Punkte auf demselben Universum** (Zeile „ML minus
+  bester Handmix“) → Score-Quelle `ml` für den Bot; sonst Handmix. Das ist die
+  Entscheidung, die qlib (+5) und S&P (−0,2, ohne Volumen) offen lassen
+  (masterplan §6.10).
+- `31_` mit `--verlaengern 0.9 --exit-rank 0.2`: CAGR ≥ `22_`-Referenz − 2 Punkte
+  (masterplan §6.9: ohne Verlängerung fehlten 5 Punkte).
 
 Nicht bestanden → **kein Start.** Dann zurück zum Masterplan §9.2.
 

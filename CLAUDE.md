@@ -86,6 +86,7 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 | Hypothesenkatalog + Registrierung | `src/alpaca_bot/hypothesen_2027.py`, `scripts/27_` |
 | **Gedächtnis: Befundregister** (jeder Lauf eine Zeile, Versuchszähler, Zufallsschwelle) | `src/alpaca_bot/befunde.py`, `scripts/32_befunde.py`, gerendert `docs/befunde-2027.md` |
 | **Lehren: Fehlschlag → Ursache → Regel → Verankerung** | `docs/lehren-2027.md` |
+| **Prognosemodell** (LightGBM auf dem Faktorzoo, Score-Quelle `ml` der Engine) | `src/alpaca_bot/modell.py`, `EngineConfig.score_quelle`, `scripts/23_` (Walk-forward, `ml_pred_*.parquet`), Plan §7.2 |
 | **Trade-Autopsie** (warum ein Replay verliert: Ausstiegsgrund, Haltedauer, Score, Monat, Jahr) | `scripts/33_trade_autopsie.py` → `results/labor/autopsie_*.md` + Register |
 | Kosten, Breakeven | `src/alpaca_bot/costs.py` |
 | Schatten, Flotte, Auswertung | `shadow.py`, `fleet.py`, `shadow_eval.py`, `scripts/16_–18_` |
@@ -96,7 +97,7 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 ## 4. Wie eine Session arbeitet
 
 ```bash
-.venv/bin/python scripts/00_selftest.py        # 61 Prüfungen, keine Keys
+.venv/bin/python scripts/00_selftest.py        # 65 Prüfungen, keine Keys
 .venv/bin/python scripts/09_selfcheck.py       # Projektverfassung
 # Panels einmal bauen (Mac: aus dem Projektcache)
 .venv/bin/python scripts/20_labor_daten.py --quelle projekt --pfad <cache.parquet> --name projekt

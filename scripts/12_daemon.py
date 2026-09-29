@@ -50,6 +50,9 @@ def main() -> int:
                    help="Plaetze (Standard: 15 bei reversal, 50 bei ranking)")
     p.add_argument("--max-new", type=int, default=None,
                    help="Kaeufe je Lauf (Standard: 3 bei reversal, 10 bei ranking)")
+    p.add_argument("--score-quelle", choices=["mix", "ml"], default="mix",
+                   help="ranking: Handmix (mix) oder gespeichertes LightGBM-Modell (ml, models/)")
+    p.add_argument("--modell", default=None, help="Modellname fuer --score-quelle ml (Standard: juengstes lgbm_h21_*)")
     p.add_argument("--strategy", default="reversal",
                    choices=["reversal", "momentum", "ranking"],
                    help="'ranking' = Multi-Wochen-Auswahl aus masterplan-2027 §7 "
@@ -104,7 +107,8 @@ def main() -> int:
         positions = args.positions or 50
         max_new = args.max_new or 10
         engine = EngineConfig.for_ranking(max_positions=positions,
-                                          deploy_to_target=args.voll_investiert)
+                                          deploy_to_target=args.voll_investiert,
+                                          score_quelle=args.score_quelle, ml_modell=args.modell)
     elif args.strategy == "reversal":
         positions = args.positions or 15
         max_new = args.max_new or 3

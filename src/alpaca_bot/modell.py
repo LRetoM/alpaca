@@ -171,8 +171,56 @@ def score_panel(modell: Modell, faktoren: dict[str, pd.DataFrame], maske: pd.Dat
     lang = merkmalstabelle({m: faktoren[m] for m in modell.merkmale}, maske, tage=tage)
     if lang.empty:
         return pd.DataFrame(index=maske.index if tage is None else tage, columns=maske.columns, dtype="float32")
-    lang["pred"] = modell.vorhersagen(lang.fillna(0.5))
+    lang["pred"] = modell.vorhersagen(lang)   # NaN bleibt NaN - LightGBM kennt fehlende Werte, wie im Training
     return lang.pivot(index="tag", columns="symbol", values="pred").reindex(columns=maske.columns)
+
+
+def _naiv_normiert(idx) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(idx)
+    if idx.tz is not None:
+        idx = idx.tz_convert("UTC").tz_localize(None)
+    return idx.normalize()
+
+
+def signale_fuer_snapshot(bars: dict[str, pd.DataFrame], market: pd.Series | None, modell: Modell,
+                          weights=None, *, min_preis: float = 5.0, min_dollar_volume: float = 25_000_000,
+                          ) -> dict[str, pd.DataFrame]:
+    """Live-Weg der Score-Quelle 'ml' - EIN Rechenweg mit dem Labor.
+
+    Dieselben Merkmale (`labor.faktorzoo`), dieselbe Vorverarbeitung
+    (Rangperzentile ueber das zugelassene Universum des Tages), Vorhersage
+    nur fuer den letzten vollstaendigen Tag, angehaengt als Spalte
+    `ml_score` an die gewohnten Ranking-Signale. Alle anderen Tage bleiben
+    NaN - die Engine liest ohnehin nur die letzte Zeile.
+    """
+    from . import labor
+    from .signals import RankingWeights, build_ranking_frame
+
+    weights = weights or RankingWeights()
+    frames = {sym: build_ranking_frame(df, market, weights) for sym, df in bars.items()}
+    felder = ("open", "high", "low", "close", "volume")
+    lang = pd.concat({sym: df[[c for c in felder if c in df.columns]] for sym, df in bars.items()},
+                     names=["symbol", "timestamp"])
+    panel = labor.panel_aus_multiindex(lang, quelle="live")
+    for f in felder:
+        m = getattr(panel, f, None)
+        if m is not None:
+            m.index = _naiv_normiert(m.index)
+    spy = None
+    if market is not None:
+        spy = pd.Series(np.asarray(market, dtype=float), index=_naiv_normiert(market.index))
+        spy = spy[~spy.index.duplicated()].reindex(panel.close.index).ffill()
+    faktoren = labor.faktorzoo(panel, spy=spy)
+    maske = labor.liquides_universum(panel, min_preis=min_preis, min_dollar_volume=min_dollar_volume)
+    letzter = panel.close.index[-1]
+    scores = score_panel(modell, faktoren, maske, tage=[letzter])
+    for sym, fr in frames.items():
+        fr["ml_score"] = np.nan
+        if fr.empty or sym not in scores.columns:
+            continue
+        if _naiv_normiert(fr.index[-1:])[0] == letzter:
+            fr.iloc[-1, fr.columns.get_loc("ml_score")] = float(scores.loc[letzter, sym])
+    return frames
 
 
 # ---------------------------------------------------------------------------
@@ -196,14 +244,15 @@ def _synthetisches_panel(n_sym: int = 120, n_tage: int = 900, signal: float = 0.
     return {"m1": m1, "m2": m2, "rausch": rausch}, fwd, maske
 
 
-def selftest() -> bool:
+def selftest(leise: bool = False) -> bool:
     import tempfile
 
     ok = True
 
     def check(label, cond):
         nonlocal ok
-        print(f"  {'OK ' if cond else 'FEHLER'} {label}")
+        if not leise or not cond:
+            print(f"  {'OK ' if cond else 'FEHLER'} {label}")
         ok &= bool(cond)
 
     fak, fwd, maske = _synthetisches_panel(signal=0.02)
@@ -212,7 +261,8 @@ def selftest() -> bool:
           lang[["m1", "m2", "rausch"]].max().max() <= 1.0 and lang["y"].min() > 0
           and lang.groupby("tag").size().min() >= 50)
     bis = pd.Timestamp("2017-07-01")
-    modell = trainieren(lang, ["m1", "m2", "rausch"], horizont=5, bis=bis, quelle="selftest")
+    schnell = {**LGBM_PARAMETER, "n_estimators": 80}     # Selbsttest: schnell, nicht schoen
+    modell = trainieren(lang, ["m1", "m2", "rausch"], horizont=5, bis=bis, quelle="selftest", parameter=schnell)
     check("Embargo: letzte Trainingszeile liegt >= Embargo vor 'bis'",
           pd.Timestamp(modell.trainiert_bis) <= bis - pd.Timedelta(days=embargo_tage(5)))
     test = lang[lang["tag"] >= bis].copy()
@@ -223,7 +273,7 @@ def selftest() -> bool:
           modell.wichtigkeit["m1"] > modell.wichtigkeit["rausch"])
     fak0, fwd0, maske0 = _synthetisches_panel(signal=0.0, seed=11)
     lang0 = merkmalstabelle(fak0, maske0, ziel=fwd0)
-    m0 = trainieren(lang0, ["m1", "m2", "rausch"], horizont=5, bis=bis)
+    m0 = trainieren(lang0, ["m1", "m2", "rausch"], horizont=5, bis=bis, parameter=schnell)
     t0 = lang0[lang0["tag"] >= bis].copy()
     t0["pred"] = m0.vorhersagen(t0)
     ic0 = t0.groupby("tag").apply(lambda g: g["pred"].corr(g["y"], method="spearman")).mean()
@@ -237,7 +287,8 @@ def selftest() -> bool:
     sp = score_panel(modell, fak, maske, tage=list(maske.index[-3:]))
     check("score_panel: Panel Tag x Symbol, alle zugelassenen Symbole bewertet",
           sp.shape == (3, maske.shape[1]) and sp.notna().all().all())
-    print(f"  Selbsttest {'bestanden' if ok else 'FEHLGESCHLAGEN'}")
+    if not leise:
+        print(f"  Selbsttest {'bestanden' if ok else 'FEHLGESCHLAGEN'}")
     return ok
 
 

@@ -25,7 +25,7 @@ Die Umgebung steht (`.venv` mit allen Paketen). Nur die Keys fehlen:
 
 ```bash
 cp .env.example .env      # dann Keys eintragen
-.venv/bin/python scripts/00_selftest.py      # 61 Prüfungen, ohne Keys
+.venv/bin/python scripts/00_selftest.py      # 65 Prüfungen, ohne Keys
 .venv/bin/python scripts/01_check_setup.py   # mit Keys
 ```
 
@@ -37,7 +37,7 @@ cp .env.example .env      # dann Keys eintragen
 
 | Skript | Zweck |
 |---|---|
-| `00_selftest.py` | 61 Prüfungen des gesamten Codes (inkl. Ranking-Strategie, Risiko-Dach). Keine Keys nötig. |
+| `00_selftest.py` | 65 Prüfungen des gesamten Codes (Ranking-Strategie, Verlängerung, ML-Score, Risiko-Dach, Register). Keine Keys nötig. |
 | `01_check_setup.py` | Keys, Konto, Marktdaten, Börsenstatus |
 | `02_market_overview.py` | Täglicher Überblick: Trend, RSI, Vola, Korrelationen |
 | `03_backtest.py` | Strategien testen, immer gegen Buy & Hold |
@@ -87,8 +87,10 @@ cp .env.example .env      # dann Keys eintragen
 | [ratelimit.py](src/alpaca_bot/ratelimit.py) | Alle API-Limits an einer Stelle, mit Tageszählern |
 | [selfcheck.py](src/alpaca_bot/selfcheck.py) | Projektverfassung, maschinell geprüft |
 | **[labor.py](src/alpaca_bot/labor.py)** | **Labor 2027: Panels, Faktorzoo, vektorisierte Rangportfolios, Regime, Bereinigung** |
-| **[hypothesen_2027.py](src/alpaca_bot/hypothesen_2027.py)** | **19 vorangemeldete Hypothesen mit Messvorschrift und Erwartung** |
+| **[hypothesen_2027.py](src/alpaca_bot/hypothesen_2027.py)** | **24 vorangemeldete Hypothesen mit Messvorschrift und Erwartung** |
 | **[risiko.py](src/alpaca_bot/risiko.py)** | **Risiko-Dach: Drawdown-Sperre 20 %, Tagesverlust 5 %, Equity-Verlauf, Einzahlungen** |
+| **[befunde.py](src/alpaca_bot/befunde.py)** | **Befundregister: jeder Lauf eine Zeile, Versuchszähler, Zufallsschwelle, Bericht `docs/befunde-2027.md`** |
+| **[modell.py](src/alpaca_bot/modell.py)** | **LightGBM-Prognose auf dem Faktorzoo (Rangperzentile, Embargo, Speichern/Laden, `score_panel`), `python -m alpaca_bot.modell` = Selbsttest** |
 | [finra.py](src/alpaca_bot/finra.py) | FINRA Short Interest und Reg-SHO-Shortvolumen mit Veröffentlichungsverzug |
 | [shadow.py](src/alpaca_bot/shadow.py) · [fleet.py](src/alpaca_bot/fleet.py) · [shadow_eval.py](src/alpaca_bot/shadow_eval.py) | Schattenbetrieb, Flotte, Auswertung |
 | [rl/](src/alpaca_bot/rl/) | DQN: Umgebung, Double-DQN-Agent, Walk-Forward-Training |

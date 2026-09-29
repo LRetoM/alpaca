@@ -328,6 +328,9 @@ def main() -> int:
           bester not in verk_v and verk_v.get(schlecht) == "zeitausstieg", str(verk_v))
     check("Ohne Verlaengerung: beide gehen am Zeitausstieg",
           len([d for d in eng.decide(snap, reif) if d.action == "sell"]) == 2)
+    eng_n = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6, max_new_per_day=3))
+    check("Tagesdeckel: hoechstens max_new_per_day neue Positionen je Tag (gestaffelte Kohorten)",
+          len(eng_n.decide(snap, PortfolioState(cash=100_000, equity=100_000))) == 3)
     # Score-Quelle "ml": die Vorhersage IST der Rang - und ohne Spalte gibt es keine Kaeufe
     from alpaca_bot.signals import build_ranking_frame
     frames = {s: build_ranking_frame(df, spy, eng.cfg.ranking_weights) for s, df in bars.items()}
@@ -401,6 +404,22 @@ def main() -> int:
                 check("Unbekanntes Urteil wird abgelehnt", True)
         finally:
             befunde.REGISTER = alt_register
+
+    print("\n[16] Prognosemodell (LightGBM: gepflanztes Signal, Nulltest, Embargo, Speichern, Live-Signale)")
+    from alpaca_bot import modell as _modell
+
+    check("modell.selftest: Signal wird OOS gefunden, ohne Signal nichts, Embargo, Laden identisch",
+          _modell.selftest(leise=True))
+    _fak, _fwd, _maske = _modell._synthetisches_panel(n_sym=60, n_tage=700, signal=0.02, seed=3)
+    _lang = _modell.merkmalstabelle(_fak, _maske, ziel=_fwd)
+    _m = _modell.trainieren(_lang, ["m1", "m2", "rausch"], horizont=5,
+                            parameter={**_modell.LGBM_PARAMETER, "n_estimators": 40})
+    _m.merkmale = ["mom_konsistenz", "mom_12_1", "reversal_5d"]   # Zoo-Namen, damit signale_fuer_snapshot sie findet
+    _sig = _modell.signale_fuer_snapshot(bars, spy, _m, min_preis=1.0, min_dollar_volume=1e6)
+    check("signale_fuer_snapshot: ml_score nur in der letzten Zeile, fuer zugelassene Symbole",
+          all("ml_score" in fr.columns for fr in _sig.values())
+          and sum(fr["ml_score"].iloc[-1] == fr["ml_score"].iloc[-1] for fr in _sig.values()) >= 30
+          and all(fr["ml_score"].iloc[:-1].isna().all() for fr in _sig.values()))
 
     print("\n[12] Konfiguration")
     from alpaca_bot.config import ConfigError, get_settings

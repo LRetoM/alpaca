@@ -428,6 +428,22 @@ def run_once(
 
         # --- 2. Lage erfassen ---
         snapshot = build_snapshot(symbols, verbose=verbose)
+        if engine.cfg.strategy == "ranking" and engine.cfg.score_quelle == "ml":
+            # Score-Quelle ml: dieselben Merkmale und dasselbe Modell wie im Labor.
+            # Ohne Modell bleibt `signals` leer -> die Engine findet keine
+            # Kandidaten und kauft nichts (sicherer Ausfall, Verkaeufe laufen weiter).
+            from . import modell as _modell
+            name = engine.cfg.ml_modell or _modell.neuestes("lgbm_h21")
+            if not name:
+                run.warn("Score-Quelle ml ohne gespeichertes Modell - keine Kaeufe",
+                         verzeichnis=str(_modell.MODELL_DIR))
+            else:
+                m = _modell.laden(name)
+                snapshot.signals = _modell.signale_fuer_snapshot(
+                    snapshot.bars, snapshot.market, m, engine.cfg.ranking_weights,
+                    min_preis=engine.cfg.min_price, min_dollar_volume=engine.cfg.min_dollar_volume)
+                run.log("modell", name=name, horizont=m.horizont, trainiert_bis=m.trainiert_bis,
+                        bewertet=int(sum(fr["ml_score"].notna().any() for fr in snapshot.signals.values())))
         portfolio = build_portfolio(snapshot)
         run.log("lage", stichtag=str(snapshot.as_of.date()),
                 symbole=len(snapshot.bars), kapital=portfolio.equity,

@@ -261,6 +261,16 @@ class EngineConfig:
     reenter_cooldown_days: int = 3
     sizing: str = "vola"
     score_quelle: str = "mix"
+    max_new_per_day: int | None = None
+    """Hoechstens so viele NEUE Positionen je Handelstag - gestaffelte Kohorten statt
+    einer Klumpen-Kohorte. Grund (masterplan §6.9): Dieselbe Strategie als einzelne
+    42-Tage-Kohorte streut je nach Startversatz zwischen 7,9 % und 18,0 % CAGR; die
+    Momentum-Literatur (Jegadeesh/Titman) mittelt das mit ueberlappenden Kohorten weg.
+    Mit Deckel 3-5 baut sich die Engine diese Staffelung selbst. None = kein Deckel.
+    Gilt in Simulation UND Live (dort zusaetzlich der Deckel des Laufs)."""
+    ml_modell: str | None = None
+    """Name des gespeicherten Modells (models/<name>.txt/.json) fuer score_quelle='ml';
+    None = das juengste `lgbm_h21_*`."""
     renew_rank_pct: float | None = None
     """Verlaengerung (Strategie 'ranking'): Nach `max_hold_days` wird NUR verkauft, wenn
     das Rangperzentil der Position UNTER diesem Wert liegt - solange sie im Kaufbereich
@@ -372,6 +382,8 @@ class EngineConfig:
             "sizing": self.sizing,
             "score_quelle": self.score_quelle,
             "renew_rank_pct": self.renew_rank_pct,
+            "ml_modell": self.ml_modell,
+            "max_new_per_day": self.max_new_per_day,
             "min_hold_days": self.min_hold_days,
             "min_rank_pct": self.min_rank_pct,
             "exit_rank_pct": self.exit_rank_pct,
@@ -881,6 +893,8 @@ class Engine:
         blocked = blocked or set()
         held = set(portfolio.positions) - being_sold
         slots = cfg.max_positions - len(held)
+        if cfg.max_new_per_day is not None:
+            slots = min(slots, int(cfg.max_new_per_day))
         if slots <= 0:
             return []
 

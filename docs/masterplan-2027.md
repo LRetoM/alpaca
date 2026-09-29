@@ -711,11 +711,54 @@ Rang entscheidet, wie lange gehalten wird. Sim und Live rechnen es gleich
 (keine Zählerpflege nötig — nach der Höchstfrist gilt „halten, solange im
 Kaufbereich“). Replays mit Verlängerung laufen; Ergebnis hier.
 
-| Verlängerung (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | MaxDD | Verlängerungen |
+| Verlängerung (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | MaxDD | Zeitausstiege |
 |---|---|---|---|
-| ohne Stop, verlängern ab Perzentil 0,90 | _läuft_ | | |
-| ohne Stop, verlängern ab 0,80 | _läuft_ | | |
-| **Stop 3 ATR**, verlängern ab 0,90 (Kandidat Live-Standard) | _läuft_ | | |
+| Basis ohne Verlängerung (ohne Stop) | 8,5 % | −20,5 % | 1.269 |
+| ohne Stop, verlängern ab Perzentil 0,90 | 6,6 % | −27,9 % | 1.196 |
+| ohne Stop, verlängern ab 0,80 | 7,9 % | −31,4 % | 1.097 |
+| Stop 3 ATR, verlängern ab 0,90 | 8,0 % | −19,1 % | 897 |
+
+**Auch das war es nicht.** Die Verlängerung greift selten (nur 6–14 %
+weniger Zeitausstiege — nach 63 Tagen steht kaum eine Aktie noch im
+Top-Dezil) und verschlechtert, wo sie greift. Die Sieger-Theorie aus dem
+Bestandsabgleich war eine plausible Geschichte, kein Täter. Was der
+Abgleich wirklich zeigte, kam erst mit dem letzten Experiment heraus:
+
+**Der Täter ist die Kohorten-Lotterie.** Die vektorisierte Referenz
+rechnet 42 überlappende Kohorten (jeden Tag ein Zweiundvierzigstel des
+Kapitals neu) — die Standardkonstruktion der Momentum-Literatur seit
+Jegadeesh/Titman 1993, gerade *weil* sie den Startzeitpunkt wegmittelt.
+Die Engine mit Zeitausstieg bildet dagegen eine oder wenige Klumpen-
+Kohorten (alle 50 Plätze werden am selben Tag frei und neu besetzt).
+Dieselbe Strategie als **einzelne 42-Tage-Kohorte**, vektorisiert
+gerechnet, je nach Startversatz:
+
+| Startversatz (Tage) | 0 | 3 | 6 | 9 | 12 | 15 | 18 | 21 | 24 | 27 | 30 | 33 | 36 | 39 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAGR | 13,2 | 12,2 | 8,5 | 9,6 | 7,9 | 11,4 | 9,8 | 15,3 | 14,8 | 18,0 | 15,6 | 14,1 | 15,2 | 14,7 |
+| MaxDD | −19 | −24 | −32 | −33 | −38 | −39 | −39 | −35 | −35 | −36 | −38 | −40 | −19 | −22 |
+
+Mittel 12,9 % (= gestaffelte Referenz 12,7 %), **Spanne 7,9–18,0 %,
+Streuung 2,9 Punkte**; MaxDD −19 % bis −40 %. Die Engine-Läufe (6,5 / 7,3 /
+7,5 / 8,5 %) sind eine schlechte Ziehung aus dieser Verteilung, keine
+schlechtere Strategie — und die Jahreswerte, die zwischen den
+Engine-Fassungen um 20 Punkte streuten (2024: 18 % gegen 38 %), sind
+dasselbe Phänomen. Lehre: **Ein einzelner Engine-Replay hat ±3 Punkte
+CAGR und ±10 Punkte MaxDD Ziehungsrauschen.** Wer die Engine gegen die
+Referenz misst, muss die Staffelung mitbauen oder über Startversätze
+mitteln.
+
+Heilung, als Engine-Regel gebaut (`max_new_per_day`, Simulation und Live
+identisch): höchstens 3–5 neue Positionen je Tag — dann staffelt sich die
+Engine ihre Kohorten selbst (50 Plätze / 3 je Tag ≈ 17 Kohorten). Preis:
+Nach einer Regime-Sperre dauert die Wiederbefüllung 10–17 Handelstage
+(die Referenz braucht 42). Replays mit Deckel 3 und 5 laufen:
+
+| Tagesdeckel (S&P, 21–63 Tage, Rangverlust < 0,20) | CAGR | MaxDD | Deutung |
+|---|---|---|---|
+| Stop 3 ATR, Deckel 3 | _läuft_ | | Kandidat Live-Standard |
+| Stop 3 ATR, Deckel 5 | _läuft_ | | |
+| ohne Stop, Deckel 3 | _läuft_ | | Vergleich zur Referenz 12,9 % |
 
 Für die Engine-Voreinstellung heißt das heute: **Stop bleibt bei 3 ATR**
 (Drawdown-Halbierer, CAGR-neutral), Rangverlust-Schwelle 0,20 nach dem
@@ -774,6 +817,26 @@ verträgt. Damit ist der **Projektcache (2018–2026, 2.168 Symbole MIT
 Volumen) das entscheidende dritte Panel** — Stufe 1 in
 `docs/bot-start-2027.md` bekommt `23_ --panel projekt` als Pflichtlauf mit
 Bestehensregel „ML ≥ Handmix + 2 Punkte auf demselben Universum“.
+
+**qlib MIT Regime-Tor (trend_ok), gleiche Vorhersagen, gleiches
+Universum:** ML 7,8 % gegen momentum 10,2 %, ranking_v2 8,5 %, ranking
+6,1 % (SPY 14,5 %, Univ.EW 13,9 %). **Mit Tor verliert der ML-Ranker
+2,4 Punkte gegen den besten Handmix — ohne Tor gewinnt er 5.** Der ganze
+Vorsprung sitzt also in den Phasen, die das Tor sperrt: 2009 (+24 %
+Jahresrendite ohne Tor), 2020 (+35 %). Der ML-Ranker ist, so gelesen,
+kein besserer Momentum-Ranker, sondern ein **Erholungs-Ranker**: Seine
+wichtigsten Merkmale (ruhiges Volumen, niedrige Vola, Abstand zum
+52-Wochen-Tief) beschreiben „gefallene Qualität, die keiner beachtet“ —
+das trägt nach Abstürzen, wenn Momentum leer ausgeht. Achtung, ungetestet:
+2008 liegt VOR dem ersten Testjahr (Walk-forward braucht drei Jahre
+Training); ob der Ranker ohne Tor einen echten Bärenmarkt übersteht, ist
+**nicht gemessen** (MaxDD ohne Tor −40,6 %; 2018 −10 %, 2011 −7 %).
+
+Was daraus zu prüfen ist (aus den gespeicherten Vorhersagen, ohne neues
+Training, `35_`): (a) ML ohne Tor, aber mit Vola-Ziel 0,25 — Drawdown-
+Schutz ohne Sperre; (b) Hybrid: Tor zu → ML-Auswahl mit Vola-Ziel, Tor
+auf → Momentum-Handmix; (c) Hysterese-Tor. Bestehensregel für jede
+Fassung: CAGR ≥ momentum+trend_ok + 2 Punkte UND MaxDD ≤ −30 %.
 
 Wenn der ML-Ranker auf dem dritten Panel hält, wird er der Score der
 Engine (Architektur §7: `build_ranking_frame` liefert die Merkmale, ein
