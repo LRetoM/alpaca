@@ -79,7 +79,10 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 | Entscheidungslogik (EIN Pfad) | `src/alpaca_bot/engine.py`, `signals.py` |
 | Historien-Replay mit Kosten | `src/alpaca_bot/simulate.py`, `scripts/10_simulate.py` |
 | Faktor-IC (Schleifen-Version) | `src/alpaca_bot/research.py`, `scripts/11_factor_lab.py` |
-| **Labor 2027 (Panels, Faktorzoo, Rangportfolio, Regime)** | `src/alpaca_bot/labor.py`, `scripts/20_…26_` |
+| **Labor 2027 (Panels, Faktorzoo, Rangportfolio, Regime)** | `src/alpaca_bot/labor.py`, `scripts/20_…31_` |
+| **Der Bot 2027: Strategie „ranking“** | `signals.build_ranking_frame`, `EngineConfig.for_ranking`, `scripts/12_daemon.py --strategy ranking`, Anleitung `docs/bot-start-2027.md` |
+| **Risiko-Dach** (Drawdown-Sperre, Tagesverlust) | `src/alpaca_bot/risiko.py`, eingehängt in `daemon.step()` |
+| Short Interest, Reg SHO | `src/alpaca_bot/finra.py`, `scripts/28_` |
 | Hypothesenkatalog + Registrierung | `src/alpaca_bot/hypothesen_2027.py`, `scripts/27_` |
 | Kosten, Breakeven | `src/alpaca_bot/costs.py` |
 | Schatten, Flotte, Auswertung | `shadow.py`, `fleet.py`, `shadow_eval.py`, `scripts/16_–18_` |

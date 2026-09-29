@@ -390,3 +390,125 @@ def rank_candidates(
             ranked.append((sym, val))
     ranked.sort(key=lambda kv: -kv[1])
     return ranked[:top_n]
+
+
+# ===========================================================================
+# Strategie "ranking" - Multi-Wochen-Auswahl aus den bestaetigten Faktoren
+# ===========================================================================
+@dataclass
+class RankingWeights:
+    """Gewichte der Strategie 'ranking' (masterplan-2027 §6.5-6.7, §7).
+
+    Bausteine, gemessen auf 8.061 US-Aktien 2005-2020 (scripts/21):
+
+        mom_konsistenz   Anteil positiver Monate der letzten 12 (ohne den
+                         letzten) - robusteste Momentum-Form, 81 % positive
+                         Jahre, daempft den Momentum-Crash 2009
+        vol_ruhig        Umsatz der letzten 6 Monate UNTER dem eigenen
+                         Vorjahresmass - staerkster Fund im Zoo (IC +0,018
+                         auf 21 Tagen, 87 % positive Jahre); in-sample
+                         gefunden, out-of-sample-Bestaetigung ist HYP-2027-17
+        mom_12_1_vola    12-1-Momentum geteilt durch Volatilitaet
+        reversal_5d      Kurzfrist-Umkehr als Timing-Beimischung - Standard
+                         0, weil sie den Umschlag treibt (masterplan §6.7)
+
+    Die Kombination ist ein Z-Score-Mix ueber den TAGES-QUERSCHNITT aller
+    zulaessigen Kandidaten (Engine._querschnitt_scores), nicht je Symbol -
+    deshalb liefert build_ranking_frame() die ROHEN Bausteine, und die
+    Engine rechnet den Score. Gewichte bewusst rund (1 / 1 / 0,5 / 0).
+    """
+
+    mom_konsistenz: float = 1.0
+    vol_ruhig: float = 1.0
+    mom_12_1_vola: float = 0.5
+    reversal_5d: float = 0.0
+
+    market_regime_filter: bool = True
+    """Neue Kaeufe nur, wenn SPY ueber seinem 200-Tage-Schnitt liegt.
+    Gemessen (masterplan §6.6/6.7): halbiert den Drawdown, kostet in
+    Erholungsjahren. Offene Positionen laufen mit Stop weiter."""
+    max_volatility: float = 1.00
+    min_price: float = 5.0
+    """Kurs-Untergrenze hoeher als bei der Umkehr: Spread ist hier alles."""
+
+    FAKTOREN = ("mom_konsistenz", "vol_ruhig", "mom_12_1_vola", "reversal_5d")
+
+    def gewichte(self) -> dict[str, float]:
+        return {k: float(getattr(self, k)) for k in self.FAKTOREN if getattr(self, k) != 0}
+
+
+def build_ranking_frame(
+    df: pd.DataFrame,
+    market: pd.Series | None = None,
+    weights: RankingWeights | None = None,
+) -> pd.DataFrame:
+    """Rohe Ranking-Bausteine je Symbol - strikt kausal, identisch zu labor.faktorzoo.
+
+    `score` bleibt hier NaN: Er entsteht erst im Querschnitt aller Kandidaten
+    eines Tages (Engine._querschnitt_scores). Ein Rang je Symbol ueber die
+    eigene Historie waere etwas anderes als das, was in scripts/22 gemessen
+    wurde - und gemessen wurde der Querschnitt.
+    """
+    w = weights or RankingWeights()
+    c = df["close"].astype(float)
+    out = pd.DataFrame(index=df.index)
+    r1 = c.pct_change()
+
+    m_ret = c.pct_change(21)
+    out["mom_konsistenz"] = sum(
+        (m_ret.shift(21 * k) > 0).astype(float) for k in range(1, 12)
+    ) / 11.0
+    # Ohne genug Historie ist der Wert 0 statt NaN - deshalb explizit NaN
+    out.loc[c.shift(252).isna(), "mom_konsistenz"] = np.nan
+
+    vola63 = r1.rolling(63, min_periods=50).std() * np.sqrt(252)
+    out["mom_12_1"] = c.shift(21) / c.shift(252) - 1
+    out["mom_12_1_vola"] = out["mom_12_1"] / vola63.replace(0, np.nan)
+
+    if "volume" in df.columns:
+        v = df["volume"].astype(float)
+        logv = np.log(v.replace(0, np.nan))
+        out["vol_ruhig"] = -(
+            logv.rolling(126, min_periods=100).mean()
+            - logv.shift(126).rolling(252, min_periods=200).mean()
+        )
+        out["dollar_volume"] = (v * c).rolling(20).mean()
+    else:
+        out["vol_ruhig"] = np.nan
+        out["dollar_volume"] = np.nan
+
+    out["reversal_5d"] = -(c / c.shift(5) - 1)
+
+    vol = ind.realized_volatility(c, 20)
+    out["volatility"] = vol
+    out["atr"] = ind.atr(df, 14) if {"high", "low"}.issubset(df.columns) else np.nan
+    out["atr_pct"] = out["atr"] / c
+
+    gate = ((vol < w.max_volatility) & (c >= w.min_price)).astype(float)
+    if w.market_regime_filter and market is not None:
+        mkt = market.reindex(df.index).ffill()
+        out["markt_ok"] = (mkt > ind.sma(mkt, 200)).astype(float)
+        gate = gate * out["markt_ok"].fillna(0.0)
+    else:
+        out["markt_ok"] = 1.0
+    out["zulaessig"] = gate
+    out["score"] = np.nan   # Querschnitt, siehe Engine
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def explain_ranking(row: pd.Series, score: float, pct: float) -> dict:
+    """Zerlegt eine Ranking-Entscheidung fuer das Protokoll."""
+    def _f(k, nd=3):
+        v = row.get(k)
+        return round(float(v), nd) if v is not None and pd.notna(v) else None
+    return {
+        "score": round(float(score), 4),
+        "rang_pct": round(float(pct), 3),
+        "mom_konsistenz": _f("mom_konsistenz"),
+        "vol_ruhig": _f("vol_ruhig"),
+        "mom_12_1_vola": _f("mom_12_1_vola"),
+        "reversal_5d": _f("reversal_5d", 4),
+        "markt_ok": bool(row.get("markt_ok", 1)),
+        "volatilitaet": _f("volatility"),
+        "atr_pct": _f("atr_pct", 4),
+    }

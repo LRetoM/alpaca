@@ -127,7 +127,8 @@ def vorhersagen_je_horizont(p: labor.Panel, maske: pd.DataFrame, horizonte: list
 # ---------------------------------------------------------------------------
 def dynamisch_simulieren(preds: dict[int, pd.DataFrame], p: labor.Panel, maske: pd.DataFrame,
                          *, top_n: int, kosten_bps: float, max_tage: int, min_edge: float,
-                         fest_h: int | None = None) -> tuple[pd.Series, dict]:
+                         fest_h: int | None = None,
+                         gewichte: dict[int, float] | None = None) -> tuple[pd.Series, dict]:
     """Tag fuer Tag: Erwartung je Tag ranken, dynamisch halten, ehrlich buchen.
 
     Ausfuehrung: Entscheidung auf Schluss t, Einstieg Eroeffnung t+1 (falls
@@ -147,8 +148,12 @@ def dynamisch_simulieren(preds: dict[int, pd.DataFrame], p: labor.Panel, maske: 
     # erwartete Netto-Rendite je Tag und bester Horizont, je Tag/Symbol
     rate = None
     best_h = None
+    gew = gewichte or {h: 1.0 for h in hs}
     for h in hs:
-        r_h = (preds[h] - kosten) / h
+        # Verlaesslichkeitsgewichtung: ein Horizont mit doppeltem IC zaehlt doppelt.
+        # Ohne sie gewinnt der 5-Tage-Horizont fast immer - nicht weil er mehr
+        # verspricht, sondern weil seine Prognose am staerksten streut.
+        r_h = gew[h] * (preds[h] - kosten) / h
         if rate is None:
             rate, best_h = r_h.copy(), pd.DataFrame(h, index=idx, columns=c.columns, dtype="float32")
         else:
@@ -348,6 +353,11 @@ def main() -> int:
     etfs = {"SPY", "QQQ", "IWM", "DIA", "VTI", "EEM", "EFA", "TLT", "GLD", "HYG", "USO", "BNO"}
     p_akt = panel.filtern([s for s in panel.symbole if s not in etfs])
     maske = labor.liquides_universum(p_akt, min_dollar_volume=args.min_dollar_volume)
+    # Speicher: nur Symbole behalten, die an >= 10 % der Tage zugelassen sind -
+    # alle anderen tragen weder zum Querschnitt noch zum Portfolio bei.
+    haeufig = maske.columns[maske.mean(axis=0) >= 0.10]
+    p_akt = p_akt.filtern(list(haeufig))
+    maske = maske[list(haeufig)]
     preds = vorhersagen_je_horizont(p_akt, maske, args.horizonte, stichprobe=args.stichprobe,
                                     erstes_testjahr=args.erstes_testjahr, spy=spy, n_jobs=args.n_jobs)
     if not preds:
@@ -362,9 +372,18 @@ def main() -> int:
         print(f"      h={h:>3}: IC {ic.mean():+.4f}  t {t:+.1f} (deflationiert {t / np.sqrt(h):+.1f})  Tage {len(ic)}")
 
     ergebnisse = {}
+    ics = {}
+    for h, w in preds.items():
+        ic = labor.ic_je_tag(w, labor.vorwaertsrendite(p_akt, h), maske)
+        ics[h] = max(float(ic.mean()), 1e-4)
+    gew_ic = {h: ics[h] / max(ics.values()) for h in ics}
     r_dyn, s_dyn = dynamisch_simulieren(preds, p_akt, maske, top_n=args.top_n, kosten_bps=args.kosten,
                                         max_tage=args.max_tage, min_edge=args.min_edge)
-    ergebnisse["dynamisch"] = (r_dyn, s_dyn)
+    ergebnisse["dyn_roh"] = (r_dyn, s_dyn)
+    r_dyn, s_dyn = dynamisch_simulieren(preds, p_akt, maske, top_n=args.top_n, kosten_bps=args.kosten,
+                                        max_tage=args.max_tage, min_edge=args.min_edge, gewichte=gew_ic)
+    ergebnisse["dyn_ic"] = (r_dyn, s_dyn)
+    print(f"\n  IC-Gewichte je Horizont: { {h: round(v, 2) for h, v in gew_ic.items()} }")
     for h in args.horizonte:
         r_f, s_f = dynamisch_simulieren(preds, p_akt, maske, top_n=args.top_n, kosten_bps=args.kosten,
                                         max_tage=args.max_tage, min_edge=args.min_edge, fest_h=h)
@@ -380,7 +399,8 @@ def main() -> int:
         print(f"  {name:<12}{s['cagr']:>8.1%}{spy_cagr:>8.1%}{s['sharpe']:>8.2f}{s['max_drawdown']:>8.1%}"
               f"{s['trades']:>8}{s['haltedauer_mittel']:>8.1f}{s['haltedauer_median']:>9.0f}{s['trefferquote']:>9.1%}"
               f"{s['gewinn_je_trade']:>9.2%}")
-    print(f"\n  Horizontwahl der Dynamik (Anteil je h): {s_dyn['h_verteilung']}")
+    print(f"\n  Horizontwahl dyn_roh: {ergebnisse['dyn_roh'][1]['h_verteilung']}")
+    print(f"  Horizontwahl dyn_ic : {s_dyn['h_verteilung']}")
     if spy is not None:
         print("\n  Jahrestabelle dynamisch:")
         print(_jahre(r_dyn, spy).round(3).to_string())

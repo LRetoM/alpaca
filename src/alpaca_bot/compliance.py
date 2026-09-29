@@ -35,6 +35,25 @@ PDT_MAX_DAY_TRADES = 3
 PDT_WINDOW_DAYS = 5
 
 
+def pdt_rule_active() -> bool:
+    """Gilt die PDT-Regel fuer dieses Konto noch?
+
+    FINRA hat die Pattern-Day-Trader-Regel (Rule 4210) mit Wirkung zum
+    04.06.2026 abgeschafft (SEC-Zustimmung 14.04.2026); Broker haben bis
+    20.10.2027 Zeit zur Umsetzung, Alpaca hat ein neues Intraday-Margin-
+    Modell angekuendigt. Weil der Uebergang je Broker und Konto verschieden
+    laeuft, bleibt die Pruefung STANDARDMAESSIG AN - sie schadet nicht, sie
+    bremst nur. Erst nach Pruefung am eigenen Konto (Alpaca-Dashboard,
+    `account.pattern_day_trader`, Margin-Modell) in der .env abschalten:
+
+        PDT_RULE_ACTIVE=false
+    """
+    import os
+
+    raw = os.getenv("PDT_RULE_ACTIVE", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 class ComplianceError(RuntimeError):
     """Eine Broker-Regel wuerde verletzt. Die Order wird nicht gesendet."""
 
@@ -73,10 +92,12 @@ def check_account(account: dict | None = None) -> ComplianceStatus:
 
     equity = float(account.get("equity") or account.get("portfolio_value") or 0.0)
     used = int(account.get("daytrade_count") or 0)
-    below = equity < PDT_EQUITY_THRESHOLD
+    below = equity < PDT_EQUITY_THRESHOLD and pdt_rule_active()
     left = max(0, PDT_MAX_DAY_TRADES - used) if below else None
 
     warnings_, blocks = [], []
+    if not pdt_rule_active():
+        warnings_.append("PDT-Regel per PDT_RULE_ACTIVE=false abgeschaltet (FINRA-Aenderung 04.06.2026).")
 
     if account.get("trading_blocked"):
         blocks.append("Konto ist fuer den Handel gesperrt.")

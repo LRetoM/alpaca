@@ -316,6 +316,23 @@ class Daemon:
         state = self.recover()
         print(f"  [{dt.datetime.now():%H:%M:%S}] Kapital "
               f"${state['kapital']:,.2f} | {state['positionen_broker']} Positionen")
+
+        # --- Risiko-Dach: ueber der Engine, vor jeder Entscheidung ---
+        # Drawdown-Sperre und Tagesverlust-Bremse blockieren NEUE Kaeufe;
+        # Verkaeufe (Stops, Rangverlust, Zeit) laufen immer weiter.
+        max_new = self.cfg.max_new_positions
+        try:
+            from .risiko import RisikoDach
+
+            frei = RisikoDach().pruefe_konto(
+                float(state["kapital"]), n_positionen=int(state["positionen_broker"]))
+            print("      " + str(frei).replace("\n", "\n      "))
+            if not frei.ok:
+                max_new = 0
+        except Exception as e:  # noqa: BLE001 - das Dach darf den Lauf nie stoppen ...
+            # ... aber ein kaputtes Dach ist selbst ein Risiko: dann keine Kaeufe.
+            print(f"      Risiko-Dach nicht pruefbar ({type(e).__name__}: {e}) - keine neuen Kaeufe")
+            max_new = 0
         if state["verwaist_entfernt"]:
             print(f"      verwaiste Metadaten entfernt: "
                   f"{', '.join(state['verwaist_entfernt'])}")
@@ -326,7 +343,7 @@ class Daemon:
         result = live.run_once(
             self.cfg.symbols, self.cfg.engine,
             dry_run=self.cfg.dry_run,
-            max_new_positions=self.cfg.max_new_positions,
+            max_new_positions=max_new,
             verbose=True,
         )
 

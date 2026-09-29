@@ -10,6 +10,7 @@ dass ein System sich selbst betrügt.
 |---|---|
 | **[CLAUDE.md](CLAUDE.md)** | **Projekt-Brief: Ziel, Regeln, Stand, Arbeitsweise — zuerst lesen** |
 | **[docs/masterplan-2027.md](docs/masterplan-2027.md)** | **Der Plan bis Januar 2027: Befunde, Hypothesen, Messungen, Bauplan, erwartete Zahlen** |
+| **[docs/bot-start-2027.md](docs/bot-start-2027.md)** | **Betriebsanleitung: Strategie „ranking“ vom Trockenlauf bis zum Live-Schalter** |
 | [docs/leitfaden.md](docs/leitfaden.md) | Einstieg: kostenlose Datenquellen, was KI im Trading kann |
 | [docs/strategie-analyse.md](docs/strategie-analyse.md) | Die Mathematik (`IR ≈ IC × √BR`), Testprotokoll, Survivorship-Bias |
 | [docs/kompendium.md](docs/kompendium.md) | Alle Strategien, Chartmuster und Indikatoren — nach Evidenz bewertet |
@@ -42,6 +43,7 @@ cp .env.example .env      # dann Keys eintragen
 | `03_backtest.py` | Strategien testen, immer gegen Buy & Hold |
 | `04_train_model.py` | ML mit Walk-Forward-Validierung |
 | `05_paper_trade.py` | Handeln — ohne `--live` nur Vorschau |
+| `12_daemon.py --strategy ranking` | **Der Bot 2027** (Multi-Wochen-Ranking, Regime-Tor, Risiko-Dach) |
 | `06_event_study.py` | **Hätten wir den Ausbruch vorher erkannt?** Inkl. Negativtests |
 | `07_journal_report.py` | Welche Begründung hat sich bewährt? Slippage-Abgleich |
 | `08_train_rl.py` | DQN trainieren — Urteil per Timing-Test |
@@ -56,6 +58,10 @@ cp .env.example .env      # dann Keys eintragen
 | **`25_labor_overnight.py`** | Overnight- gegen Intraday-Prämie, Breakeven je Ausführung |
 | **`26_labor_orb_intraday.py`** | ORB auf „Stocks in Play“ (Daytrading-Test, Alpaca-Minutenbars), `--selftest` |
 | **`27_hypothesen_anmelden.py`** | Hypothesenkatalog 2027 im Register voranmelden |
+| **`28_labor_short_interest.py`** | Short Interest (FINRA) als Faktor, PIT-sicher, `--selftest` |
+| **`29_labor_dynamisch.py`** | Dynamische Haltedauer: ein Modell je Horizont, Prognose entscheidet je Aktie |
+| **`30_labor_muster.py`** | Chartmuster als Faktoren + Explosions-Ereignisstudie mit Kontrollgruppe |
+| **`31_simulate_ranking.py`** | Strategie „ranking“ durch die echte Engine mit allen Kosten (Replay-Test) |
 
 ---
 
@@ -79,7 +85,9 @@ cp .env.example .env      # dann Keys eintragen
 | [ratelimit.py](src/alpaca_bot/ratelimit.py) | Alle API-Limits an einer Stelle, mit Tageszählern |
 | [selfcheck.py](src/alpaca_bot/selfcheck.py) | Projektverfassung, maschinell geprüft |
 | **[labor.py](src/alpaca_bot/labor.py)** | **Labor 2027: Panels, Faktorzoo, vektorisierte Rangportfolios, Regime, Bereinigung** |
-| **[hypothesen_2027.py](src/alpaca_bot/hypothesen_2027.py)** | **17 vorangemeldete Hypothesen mit Messvorschrift und Erwartung** |
+| **[hypothesen_2027.py](src/alpaca_bot/hypothesen_2027.py)** | **19 vorangemeldete Hypothesen mit Messvorschrift und Erwartung** |
+| **[risiko.py](src/alpaca_bot/risiko.py)** | **Risiko-Dach: Drawdown-Sperre 20 %, Tagesverlust 5 %, Equity-Verlauf, Einzahlungen** |
+| [finra.py](src/alpaca_bot/finra.py) | FINRA Short Interest und Reg-SHO-Shortvolumen mit Veröffentlichungsverzug |
 | [shadow.py](src/alpaca_bot/shadow.py) · [fleet.py](src/alpaca_bot/fleet.py) · [shadow_eval.py](src/alpaca_bot/shadow_eval.py) | Schattenbetrieb, Flotte, Auswertung |
 | [rl/](src/alpaca_bot/rl/) | DQN: Umgebung, Double-DQN-Agent, Walk-Forward-Training |
 

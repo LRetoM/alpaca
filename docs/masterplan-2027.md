@@ -459,9 +459,44 @@ deinem Projektcache. Deshalb ist §8 Schritt 0 nicht verhandelbar: Erst wenn
 `22_` auf dem Cache mit Univ.EW-Spalte gelaufen ist, wissen wir, ob die
 Auswahl Alpha hat oder nur Beta.
 
-Weitere Läufe (momentum Top 50, reversal_rein, Haltedauer-Kurve, S&P-Läufe)
-liefen beim Schreiben noch; ihre Logs liegen unter `results/labor/logs/`
-und sind mit denselben Befehlen auf deinem Mac reproduzierbar.
+**Alle Varianten im liquiden Universum, Top 50, 20 bps, 2006–2020** (SPY 9,3 %
+CAGR / −55 % MaxDD; Univ.EW 8,7 %):
+
+| Variante | H | Regime | CAGR | Sharpe | MaxDD | Umschlag/J |
+|---|---|---|---|---|---|---|
+| reversal_rein (wie der heutige Bot) | 5 | kein | 1,3 % | 0,19 | **−75 %** | 100× |
+| reversal_rein | 5 | SMA200 | −5,9 % | −0,32 | −70 % | 75× |
+| kurz (Mehrfaktor) | 5 | kein | 2,4 % | 0,22 | −63 % | 100× |
+| kurz10 | 10 | kein | 4,6 % | 0,31 | −53 % | 50× |
+| kurz (Haltedauer-Kurve) | 21 | kein | 6,7 % | 0,39 | | 24× |
+| kurz (Haltedauer-Kurve) | 42 | kein | 7,0 % | 0,40 | | 12× |
+| momentum (12-1 + Konsistenz) | 21 | kein | 4,8 % | 0,31 | −58 % | 24× |
+| **momentum** | 21 | **SMA200** | **7,4 %** | **0,45** | **−37 %** | 18× |
+| kombi2 | 21 | kein | 5,1 % | 0,35 | −53 % | 24× |
+| **kombi2** | 21 | **SMA200** | 5,9 % | **0,48** | **−24 %** | 18× |
+| kombi2, Top 20 | 21 | SMA200 | 5,5 % | 0,44 | −25 % | 18× |
+
+Die Haltedauer-Kurve der kurzen Spur ist eindeutig: **Netto-CAGR steigt
+monoton mit der Haltedauer** (2 Tage −13,6 %, 5 Tage 2,4 %, 10 Tage 4,6 %,
+21 Tage 6,7 %, 42 Tage 7,0 %). Der Umschlag frisst den Vorsprung — dasselbe
+Bild wie beim Umkehr-Bot, nur mit Zahlen für jede Stufe.
+
+**Dieselben Varianten auf dem S&P-Panel 2016–2026** (Obergrenze, SPY 14,8 %,
+Univ.EW 16,1 %): momentum Top 50 ohne Regime **22,3 %** (Sharpe 0,96, MaxDD
+−41 %), mit SMA200 14,5 % (Sharpe 0,83, MaxDD −29 %); kurz_preis Top 50
+H=5 13,5 %, H=10 16,9 %, **H=21 20,7 %, H=42 21,1 %** (Sharpe 1,06). Auch
+hier: **länger halten gewinnt**, auf beiden Datensätzen, in jedem Jahr-
+zehnt, bei jeder Kostenstufe.
+
+**Was daraus die Strategie „ranking“ macht (§7, implementiert in
+`signals.build_ranking_frame` und `EngineConfig.for_ranking`):**
+Haltedauer 21–63 Tage (Mindesthaltedauer 21, Rangverlust-Ausstieg,
+Zeitausstieg 63), Top 50 aus dem liquiden Universum, Regime-Tor SMA200,
+Score aus Momentum-Konsistenz + ruhigem Volumen + vola-skaliertem
+Momentum. Ehrliche Erwartung aus den beiden Datensätzen: **zwischen „SPY
+minus 2 Punkte bei halbem Drawdown“ (2006–2020, breit) und „SPY plus 5–7
+Punkte“ (2016–2026, S&P, mit Bias)** — die Wahrheit für 2018–2026 auf
+deinem Cache steht noch aus (bot-start-2027.md, Stufe 1).
 
 ### 6.8 Dynamische Haltedauer (Skript 29) — Mechanik geprüft, Zahlen folgen
 
@@ -502,6 +537,17 @@ Einzelaktien:**
 Horizontwahl der Dynamik: 56 % h=5, 19 % h=10, 12 % h=21, 13 % länger.
 Jahre: 2020 +72 %, 2021 +55 %, **2022 −22 % (SPY −18 %)**, 2023 +48 %,
 2024 +35 %, 2025 +41 %.
+
+**Zweite Fassung, IC-gewichtet** (`rate_h = IC_h · E[r_h] / h`): CAGR 27,3 %,
+Sharpe 1,00, Horizontwahl kippt auf 75 % h=63. Sie liegt gleichauf mit der
+rohen Dynamik und weiter unter der festen 21-Tage-Fassung (29,2 %, 1,12).
+**Befund:** Auf diesen Daten bringt die dynamische Horizontwahl nichts
+gegenüber „21 Tage halten, Rang prüfen“ — und das ist genau das, was die
+Engine-Strategie tut (Mindesthaltedauer 21, Rangverlust-Ausstieg, Zeit 63).
+Der Ausstieg ist damit bereits „dynamisch nach Prognose“: nicht die Uhr,
+sondern der tägliche Rang entscheidet, ob eine Position bleibt. Was fehlt
+und offen bleibt, ist der *Einstieg* nach horizontabhängiger Erwartung;
+HYP-19 bleibt Kandidat, nicht Kern.
 
 Drei Lehren:
 

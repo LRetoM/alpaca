@@ -46,9 +46,14 @@ def main() -> int:
     p.add_argument("--status", action="store_true", help="Nur Zustand anzeigen")
     p.add_argument("--interval", type=int, default=900,
                    help="Sekunden zwischen Laeufen waehrend der Handelszeit")
-    p.add_argument("--positions", type=int, default=15)
-    p.add_argument("--max-new", type=int, default=3)
-    p.add_argument("--strategy", default="reversal", choices=["reversal", "momentum"])
+    p.add_argument("--positions", type=int, default=None,
+                   help="Plaetze (Standard: 15 bei reversal, 50 bei ranking)")
+    p.add_argument("--max-new", type=int, default=None,
+                   help="Kaeufe je Lauf (Standard: 3 bei reversal, 10 bei ranking)")
+    p.add_argument("--strategy", default="reversal",
+                   choices=["reversal", "momentum", "ranking"],
+                   help="'ranking' = Multi-Wochen-Auswahl aus masterplan-2027 §7 "
+                        "(Momentum-Konsistenz + ruhiges Volumen, Top 50, Regime-Tor)")
     # Standardverhalten des Bots: das freie Kapital wird bis zum Zielanteil
     # eingesetzt, und ueberschuessiges Kapital fliesst in Nachkaeufe von
     # Gewinnern, statt bei vollen Plaetzen ungenutzt liegenzubleiben
@@ -95,21 +100,29 @@ def main() -> int:
     else:
         symbols = universe.BENCHMARK_SETS[args.universe]
 
-    engine = (
-        EngineConfig.for_reversal(max_positions=args.positions,
-                                  deploy_to_target=args.voll_investiert,
-                                  allow_topup=args.nachkauf)
-        if args.strategy == "reversal"
-        else EngineConfig(max_positions=args.positions,
-                          deploy_to_target=args.voll_investiert,
-                          allow_topup=args.nachkauf)
-    )
+    if args.strategy == "ranking":
+        positions = args.positions or 50
+        max_new = args.max_new or 10
+        engine = EngineConfig.for_ranking(max_positions=positions,
+                                          deploy_to_target=args.voll_investiert)
+    elif args.strategy == "reversal":
+        positions = args.positions or 15
+        max_new = args.max_new or 3
+        engine = EngineConfig.for_reversal(max_positions=positions,
+                                           deploy_to_target=args.voll_investiert,
+                                           allow_topup=args.nachkauf)
+    else:
+        positions = args.positions or 15
+        max_new = args.max_new or 3
+        engine = EngineConfig(max_positions=positions,
+                              deploy_to_target=args.voll_investiert,
+                              allow_topup=args.nachkauf)
 
     cfg = DaemonConfig(
         symbols=symbols,
         dry_run=not args.live,
         interval_seconds=args.interval,
-        max_new_positions=args.max_new,
+        max_new_positions=max_new,
         engine=engine,
     )
 

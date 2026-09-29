@@ -35,11 +35,14 @@ import numpy as np
 import pandas as pd
 
 from .signals import (
+    RankingWeights,
     ReversalWeights,
     SignalWeights,
+    build_ranking_frame,
     build_reversal_frame,
     build_signal_frame,
     explain,
+    explain_ranking,
     explain_reversal,
 )
 
@@ -295,8 +298,26 @@ class EngineConfig:
     0.0 = ab Break-even. Verhindert, in eine bereits verlustreiche Position
     nachzukaufen."""
 
+    # --- nur Strategie "ranking" (masterplan-2027 §7) ---
+    min_hold_days: int = 0
+    """Mindesthaltedauer in Handelstagen, bevor der Rangverlust-Ausstieg
+    greifen darf. Stop, Ziel und Zeitausstieg gelten immer. Bei 'ranking'
+    21: Der Score wurde auf 21-Tage-Renditen gemessen, ein Ausstieg nach
+    drei Tagen wegen eines Rangwechsels waere Umschlag ohne Gegenwert."""
+
+    min_rank_pct: float = 0.90
+    """Kauf nur aus dem obersten Perzentil des Tages-Querschnitts (0,90 =
+    beste 10 %). Bei 800 Kandidaten sind das 80, aus denen die freien
+    Plaetze nach Score gefuellt werden."""
+
+    exit_rank_pct: float = 0.50
+    """Rangverlust-Ausstieg: faellt eine Position unter dieses Perzentil
+    (nach `min_hold_days`), traegt die These nicht mehr. Bewusst weit unter
+    der Kaufschwelle (Hysterese), sonst wird staendig getauscht."""
+
     weights: SignalWeights = field(default_factory=SignalWeights)
     reversal_weights: ReversalWeights = field(default_factory=ReversalWeights)
+    ranking_weights: RankingWeights = field(default_factory=RankingWeights)
 
     def __post_init__(self) -> None:
         if self.max_position_pct is None:
@@ -332,7 +353,46 @@ class EngineConfig:
             "min_dollar_volume": self.min_dollar_volume,
             "min_price": self.min_price,
             "reenter_cooldown_days": self.reenter_cooldown_days,
+            "min_hold_days": self.min_hold_days,
+            "min_rank_pct": self.min_rank_pct,
+            "exit_rank_pct": self.exit_rank_pct,
         }
+
+    @classmethod
+    def for_ranking(cls, **overrides) -> EngineConfig:
+        """Voreinstellungen fuer die Multi-Wochen-Auswahl (masterplan-2027 §7).
+
+        Die Zahlen sind die GEMESSENEN Rahmenbedingungen, nicht optimierte
+        Werte: Universum >= 25 Mio. $/Tag und Kurs >= 5 $ (Top 20 aus 3.000
+        Werten verliert, §6.6), Top 50 (Breite), Haltedauer 21-63 Tage (der
+        Score wurde auf 21-42 Tagen gemessen), Stop 3 ATR, kein Gewinnziel
+        (Momentum wird nicht gedeckelt), Regime-Tor ueber SPY-SMA200, Kapital
+        bis zum Zielanteil eingesetzt mit 1/Vola-Gewichtung.
+
+        Erwarteter Umschlag ~12-18 Rundlaeufe je Jahr und Position, also
+        ~2-4 % Kosten p.a. bei 20 bps - der ganze Unterschied zum Umkehr-Bot
+        (100 Rundlaeufe, 10-20 % Kosten).
+        """
+        defaults = dict(
+            strategy="ranking",
+            max_positions=50,
+            min_hold_days=21,
+            max_hold_days=63,
+            min_rank_pct=0.90,
+            exit_rank_pct=0.50,
+            stop_atr=3.0,
+            target_atr=99.0,        # kein Gewinnziel
+            trail_after_atr=99.0,   # kein Trailing - der Rang entscheidet
+            min_score=float("-inf"),
+            exit_score=float("-inf"),
+            min_dollar_volume=25_000_000,
+            min_price=5.0,
+            deploy_to_target=True,
+            allow_topup=False,
+            reenter_cooldown_days=5,
+        )
+        defaults.update(overrides)
+        return cls(**defaults)
 
     @classmethod
     def for_reversal(cls, **overrides) -> EngineConfig:
@@ -482,9 +542,63 @@ class Engine:
                 snapshot.bars[symbol], snapshot.market, self.cfg.reversal_weights,
                 symbol=symbol, news=snapshot.news,
             )
+        if self.cfg.strategy == "ranking":
+            return build_ranking_frame(
+                snapshot.bars[symbol], snapshot.market, self.cfg.ranking_weights
+            )
         return build_signal_frame(
             snapshot.bars[symbol], snapshot.insider.get(symbol), self.cfg.weights
         )
+
+    # -- Querschnitts-Score (nur Strategie "ranking") -------------------------
+    def _querschnitt_scores(
+        self, snapshot: MarketSnapshot, portfolio: PortfolioState
+    ) -> dict[str, dict]:
+        """Z-Score-Mix ueber ALLE zulaessigen Kandidaten eines Tages.
+
+        Genau so wurde die Strategie gemessen (labor.kombinieren): jeder
+        Baustein wird ueber den Tages-Querschnitt standardisiert (Mittel 0,
+        Streuung 1, gekappt bei +-3), gewichtet addiert, und der Rang als
+        Perzentil ausgewiesen. Gehaltene Positionen bekommen ihren Rang
+        immer - auch wenn sie heute nicht mehr zulaessig waeren (dann
+        Perzentil 0, damit der Rangverlust-Ausstieg greift).
+        """
+        cfg = self.cfg
+        gew = cfg.ranking_weights.gewichte()
+        zeilen: dict[str, pd.Series] = {}
+        for sym, df in snapshot.bars.items():
+            if len(df) < 260:
+                continue
+            frame = self._signals(sym, snapshot)
+            if frame.empty:
+                continue
+            zeilen[sym] = frame.iloc[-1]
+        if not zeilen:
+            return {}
+        tab = pd.DataFrame(zeilen).T
+        for k in gew:
+            tab[k] = pd.to_numeric(tab.get(k), errors="coerce")
+        dvol = pd.to_numeric(tab.get("dollar_volume"), errors="coerce").fillna(0.0)
+        zul = (pd.to_numeric(tab.get("zulaessig"), errors="coerce").fillna(0.0) > 0) \
+            & (dvol >= cfg.min_dollar_volume) & tab[list(gew)].notna().all(axis=1)
+        kand = tab[zul]
+        out: dict[str, dict] = {}
+        if len(kand) >= 30:
+            score = pd.Series(0.0, index=kand.index)
+            for k, w in gew.items():
+                s = kand[k].astype(float)
+                sd = s.std()
+                z = ((s - s.mean()) / sd).clip(-3, 3) if sd and np.isfinite(sd) and sd > 0 else s * 0.0
+                score = score + w * z
+            pct = score.rank(pct=True)
+            for sym in kand.index:
+                out[sym] = {"score": float(score[sym]), "pct": float(pct[sym]),
+                            "row": kand.loc[sym]}
+        # Gehaltene Positionen ohne Zulassung: Rang 0, Score -inf
+        for sym in portfolio.positions:
+            if sym not in out and sym in tab.index:
+                out[sym] = {"score": float("-inf"), "pct": 0.0, "row": tab.loc[sym]}
+        return out
 
     # -- Hauptmethode -------------------------------------------------------
     def decide(
@@ -498,6 +612,13 @@ class Engine:
         """
         snapshot.validate()
         decisions: list[Decision] = []
+
+        # Ranking: der Score entsteht im Querschnitt ALLER Kandidaten des
+        # Tages - einmal rechnen, dann fuer Ausstiege und Einstiege nutzen.
+        self._qs: dict[str, dict] = (
+            self._querschnitt_scores(snapshot, portfolio)
+            if self.cfg.strategy == "ranking" else {}
+        )
 
         exits = self._check_exits(snapshot, portfolio)
         decisions.extend(exits)
@@ -664,6 +785,13 @@ class Engine:
             row = frame.iloc[-1]
             score = float(row.get("score", 0.0))
             pnl = pos.unrealized_pct(price)
+            rang_pct = None
+            if cfg.strategy == "ranking":
+                info = self._qs.get(sym)
+                score = float(info["score"]) if info else float("-inf")
+                rang_pct = float(info["pct"]) if info else 0.0
+                if not np.isfinite(score):
+                    score = -9.0
 
             reason: str | None = None
             if price <= pos.stop_price:
@@ -672,6 +800,11 @@ class Engine:
                 reason = "gewinnziel_erreicht"
             elif pos.bars_held >= cfg.max_hold_days:
                 reason = "zeitausstieg"
+            elif cfg.strategy == "ranking":
+                # Rangverlust erst nach der Mindesthaltedauer - Hysterese
+                # gegen staendiges Tauschen (exit_rank_pct << min_rank_pct).
+                if pos.bars_held >= cfg.min_hold_days and rang_pct < cfg.exit_rank_pct:
+                    reason = "rangverlust"
             elif score < cfg.exit_score:
                 reason = "these_traegt_nicht_mehr"
 
@@ -688,6 +821,7 @@ class Engine:
                             "gewinn_pct": round(pnl, 4),
                             "tage_gehalten": pos.bars_held,
                             "score_jetzt": round(score, 3),
+                            "rang_pct": (round(rang_pct, 3) if rang_pct is not None else None),
                             "einstieg": round(pos.entry_price, 4),
                             "stop": round(pos.stop_price, 4),
                             "ziel": round(pos.target_price, 4),
@@ -720,22 +854,38 @@ class Engine:
 
         # Alle Kandidaten bewerten und in eine Rangliste bringen.
         candidates: list[tuple[str, float, pd.Series, float]] = []
-        for sym, df in snapshot.bars.items():
-            if sym in held or sym in blocked or len(df) < 260:
-                continue
-            price = snapshot.last_price(sym)
-            if price is None or price < cfg.min_price:
-                continue
+        if cfg.strategy == "ranking":
+            # Kandidaten kommen aus dem Querschnitt: nur oberstes Perzentil,
+            # Zulassung (Regime, Kurs, Umsatz) ist dort bereits geprueft.
+            for sym, info in self._qs.items():
+                if sym in held or sym in blocked or sym in portfolio.positions:
+                    continue
+                if info["pct"] < cfg.min_rank_pct or not np.isfinite(info["score"]):
+                    continue
+                price = snapshot.last_price(sym)
+                if price is None or price < cfg.min_price:
+                    continue
+                row = info["row"].copy()
+                row["score"] = info["score"]
+                row["rang_pct"] = info["pct"]
+                candidates.append((sym, float(info["score"]), row, price))
+        else:
+            for sym, df in snapshot.bars.items():
+                if sym in held or sym in blocked or len(df) < 260:
+                    continue
+                price = snapshot.last_price(sym)
+                if price is None or price < cfg.min_price:
+                    continue
 
-            frame = self._signals(sym, snapshot)
-            row = frame.iloc[-1]
-            score = float(row.get("score", 0.0))
-            if not np.isfinite(score) or score < cfg.min_score:
-                continue
-            dvol = float(row.get("dollar_volume", 0) or 0)
-            if dvol < cfg.min_dollar_volume:
-                continue
-            candidates.append((sym, score, row, price))
+                frame = self._signals(sym, snapshot)
+                row = frame.iloc[-1]
+                score = float(row.get("score", 0.0))
+                if not np.isfinite(score) or score < cfg.min_score:
+                    continue
+                dvol = float(row.get("dollar_volume", 0) or 0)
+                if dvol < cfg.min_dollar_volume:
+                    continue
+                candidates.append((sym, score, row, price))
 
         candidates.sort(key=lambda x: -x[1])
         chosen = candidates[:slots]
@@ -804,8 +954,12 @@ class Engine:
             stop = price - cfg.stop_atr * atr if atr > 0 else price * 0.90
             target = price + cfg.target_atr * atr if atr > 0 else price * 1.25
 
-            reasons = (explain_reversal(row) if cfg.strategy == "reversal"
-                       else explain(row, cfg.weights))
+            if cfg.strategy == "reversal":
+                reasons = explain_reversal(row)
+            elif cfg.strategy == "ranking":
+                reasons = explain_ranking(row, score, float(row.get("rang_pct", 0.0)))
+            else:
+                reasons = explain(row, cfg.weights)
             reasons["rang"] = len(out) + 1
             reasons["stop_abstand_pct"] = round(1 - stop / price, 4)
             reasons["ziel_abstand_pct"] = round(target / price - 1, 4)

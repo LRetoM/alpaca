@@ -180,7 +180,7 @@ def run(
     # als kausal nachgewiesen ist: build(voll).loc[:T] == build(bis_T). Die
     # Momentaufnahme bekommt jeden Tag nur den Schnitt bis heute, und
     # snapshot.validate() prueft das bei jedem einzelnen Aufruf nach.
-    from .signals import build_reversal_frame, build_signal_frame
+    from .signals import build_ranking_frame, build_reversal_frame, build_signal_frame
 
     ecfg = engine.cfg
     if verbose:
@@ -189,6 +189,11 @@ def run(
     if ecfg.strategy == "reversal":
         signal_frames = {
             sym: build_reversal_frame(df, market, ecfg.reversal_weights)
+            for sym, df in per_symbol.items()
+        }
+    elif ecfg.strategy == "ranking":
+        signal_frames = {
+            sym: build_ranking_frame(df, market, ecfg.ranking_weights)
             for sym, df in per_symbol.items()
         }
     else:

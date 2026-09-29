@@ -95,6 +95,11 @@ def main() -> int:
     p_akt = panel.filtern([s for s in panel.symbole if s not in etfs])
     maske = labor.liquides_universum(p_akt, min_preis=args.min_preis,
                                      min_dollar_volume=args.min_dollar_volume)
+    # Speicher: nur Symbole behalten, die an >= 10 % der Tage zugelassen sind -
+    # alle anderen tragen weder zum Querschnitt noch zum Portfolio bei.
+    haeufig = maske.columns[maske.mean(axis=0) >= 0.10]
+    p_akt = p_akt.filtern(list(haeufig))
+    maske = maske[list(haeufig)]
     faktoren = labor.faktorzoo(p_akt, spy=spy)
     fwd = labor.vorwaertsrendite(p_akt, args.horizont)
     print(f"  {len(faktoren)} Merkmale, baue lange Tabelle (jede {args.stichprobe}. Zeile) ...")
