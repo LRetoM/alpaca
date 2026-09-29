@@ -8,9 +8,13 @@ dass ein System sich selbst betrügt.
 
 | Dokument | Inhalt |
 |---|---|
+| **[CLAUDE.md](CLAUDE.md)** | **Projekt-Brief: Ziel, Regeln, Stand, Arbeitsweise — zuerst lesen** |
+| **[docs/masterplan-2027.md](docs/masterplan-2027.md)** | **Der Plan bis Januar 2027: Befunde, Hypothesen, Messungen, Bauplan, erwartete Zahlen** |
 | [docs/leitfaden.md](docs/leitfaden.md) | Einstieg: kostenlose Datenquellen, was KI im Trading kann |
 | [docs/strategie-analyse.md](docs/strategie-analyse.md) | Die Mathematik (`IR ≈ IC × √BR`), Testprotokoll, Survivorship-Bias |
 | [docs/kompendium.md](docs/kompendium.md) | Alle Strategien, Chartmuster und Indikatoren — nach Evidenz bewertet |
+| [docs/schattenbetrieb.md](docs/schattenbetrieb.md) | Schattenflotte: Lernen ohne zu handeln, Regime, Musterspeicher |
+| [docs/mehrbot-plan.md](docs/mehrbot-plan.md) | Risiko-Dach, Kapazität, Ausführungsmessung, Mehr-Bot-Betrieb |
 
 ---
 
@@ -42,6 +46,16 @@ cp .env.example .env      # dann Keys eintragen
 | `07_journal_report.py` | Welche Begründung hat sich bewährt? Slippage-Abgleich |
 | `08_train_rl.py` | DQN trainieren — Urteil per Timing-Test |
 | `09_selfcheck.py` | **Vor jeder Änderung ausführen.** Code gegen die Projektverfassung |
+| `10_simulate.py` · `11_factor_lab.py` | Historien-Replay mit der Engine · Faktor-IC (Schleifen-Version) |
+| `12_daemon.py` … `18_health_check.py` | Dauerbetrieb, Berichte, Schattenflotte, Gesundheitsprüfung |
+| **`20_labor_daten.py`** | **Labor 2027:** Panels aus Projektcache / Qlib / CSV bauen |
+| **`21_labor_faktoren.py`** | Faktorzoo: Querschnitts-IC je Horizont und Jahr (inkl. Volumen, Sprünge, Illiquidität) |
+| **`22_labor_portfolio.py`** | Rangportfolios netto nach Kosten, 4 Regimefassungen, Jahrestabelle gegen SPY |
+| **`23_labor_ml_ranking.py`** | LightGBM-Ranker, walk-forward jährlich, OOS-IC |
+| **`24_labor_haltedauer.py`** | Haltedauer-Kostenkurve: ab welchem H trägt ein Signal netto? |
+| **`25_labor_overnight.py`** | Overnight- gegen Intraday-Prämie, Breakeven je Ausführung |
+| **`26_labor_orb_intraday.py`** | ORB auf „Stocks in Play“ (Daytrading-Test, Alpaca-Minutenbars), `--selftest` |
+| **`27_hypothesen_anmelden.py`** | Hypothesenkatalog 2027 im Register voranmelden |
 
 ---
 
@@ -64,6 +78,9 @@ cp .env.example .env      # dann Keys eintragen
 | [compliance.py](src/alpaca_bot/compliance.py) | PDT-Regel, Daytrade-Zähler, API-Budget-Preflight |
 | [ratelimit.py](src/alpaca_bot/ratelimit.py) | Alle API-Limits an einer Stelle, mit Tageszählern |
 | [selfcheck.py](src/alpaca_bot/selfcheck.py) | Projektverfassung, maschinell geprüft |
+| **[labor.py](src/alpaca_bot/labor.py)** | **Labor 2027: Panels, Faktorzoo, vektorisierte Rangportfolios, Regime, Bereinigung** |
+| **[hypothesen_2027.py](src/alpaca_bot/hypothesen_2027.py)** | **17 vorangemeldete Hypothesen mit Messvorschrift und Erwartung** |
+| [shadow.py](src/alpaca_bot/shadow.py) · [fleet.py](src/alpaca_bot/fleet.py) · [shadow_eval.py](src/alpaca_bot/shadow_eval.py) | Schattenbetrieb, Flotte, Auswertung |
 | [rl/](src/alpaca_bot/rl/) | DQN: Umgebung, Double-DQN-Agent, Walk-Forward-Training |
 
 ---

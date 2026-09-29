@@ -1,0 +1,532 @@
+# Masterplan 2027: Vom Umkehr-Bot zum kostentragfähigen System
+
+> Stand: 2026-09-29. Geschrieben nach vollständiger Durchsicht aller Docs,
+> aller Module, der Commit-Historie seit Juli 2026, einer Web-Recherche zu
+> Strategien und Datenquellen, und nach eigenen Messungen auf drei frei
+> verfügbaren Datensätzen (siehe §6). Alle Zahlen in §6 sind reproduzierbar
+> mit `scripts/20_…26_`.
+>
+> Ehrlichkeitsvermerk vorweg: Der Rechner, auf dem dieser Plan entstand,
+> hatte keinen Zugang zu Yahoo, Alpaca, FRED oder SEC. Die Messungen laufen
+> deshalb auf Ersatzdaten (Qlib-US-Sammlung bis 11/2020, S&P-500-Schlusskurse
+> 2016–2026, Lean-Beispieldaten für SPY/QQQ/IWM). **Der erste Schritt auf
+> deinem Mac ist, dieselben Skripte auf dem Projektcache mit 2.168 Symbolen
+> laufen zu lassen** (§8, Schritt 0). Erst diese Zahlen zählen.
+
+---
+
+## Inhalt
+
+0. [Kurzfassung in zehn Sätzen](#0-kurzfassung-in-zehn-sätzen)
+1. [Was in den letzten Monaten gebaut und gemessen wurde](#1-was-in-den-letzten-monaten-gebaut-und-gemessen-wurde)
+2. [Warum das heutige System nicht besser als ein ETF ist](#2-warum-das-heutige-system-nicht-besser-als-ein-etf-ist)
+3. [Was sich seit dem Sommer geändert hat (Regulierung, Broker)](#3-was-sich-seit-dem-sommer-geändert-hat-regulierung-broker)
+4. [Der Ideenraum: was die Evidenz hergibt](#4-der-ideenraum-was-die-evidenz-hergibt)
+5. [Der Hypothesenkatalog 2027](#5-der-hypothesenkatalog-2027)
+6. [Eigene Messungen — Ergebnisse](#6-eigene-messungen--ergebnisse)
+7. [Die Zielarchitektur 2027](#7-die-zielarchitektur-2027)
+8. [Bauplan mit Zeitachse bis Januar 2027](#8-bauplan-mit-zeitachse-bis-januar-2027)
+9. [Welche Zahlen wir uns erhoffen — und ab wann wir abbrechen](#9-welche-zahlen-wir-uns-erhoffen--und-ab-wann-wir-abbrechen)
+10. [Was bewusst nicht gemacht wird](#10-was-bewusst-nicht-gemacht-wird)
+
+---
+
+## 0. Kurzfassung in zehn Sätzen
+
+1. Die Infrastruktur ist fertig und besser als bei 95 % aller Privatprojekte:
+   eine Engine für Backtest, Papierdepot und Schattenflotte, PIT-Wächter,
+   Kostenmodell, Journal, Lebenslauf, neun laufende Schattenbots.
+2. Die **Strategie** darauf ist die Schwachstelle: Kurzfrist-Umkehr mit fünf
+   Tagen Haltedauer verdient +0,11 % je Trade und zahlt 0,14 % Kosten je
+   Rundlauf. Das ist mathematisch verloren, egal wie gut das Signal wird.
+3. Der Hebel heißt deshalb nicht „besseres Signal“, sondern **weniger
+   Umschlag und mehr Vorsprung je Trade**: Haltedauer 3–6 Wochen statt 5
+   Tage, Auswahl aus Momentum, Volumen und Ereignissen statt aus RSI(2).
+4. Die drei stärksten Kandidaten mit freier Datenbasis sind:
+   **Querschnitts-Momentum mit Konsistenzfilter**, das
+   **High-Volume-Return-Premium** (ungewöhnliches Volumen der letzten Woche)
+   und **Post-Earnings-Drift über die Ergebnistagsrendite** (ohne
+   Analystendaten, Termine aus EDGAR 8-K).
+5. Für den Daytrading-Wunsch gibt es genau **einen** wissenschaftlich sauber
+   dokumentierten Ansatz: Opening-Range-Breakout auf den 20 Aktien mit dem
+   höchsten relativen Volumen der ersten fünf Minuten (Sharpe 2,4–2,8 im
+   Paper). Er wird als kontrollierter Test gebaut — mit der Erwartung, dass
+   IEX-Daten und Kosten den Großteil davon auffressen.
+6. Die **Overnight-Prämie** (Schluss→Eröffnung) ist bei QQQ/IWM brutto 12–13 %
+   p.a. mit Breakeven 2,6 bps je Ausführung; mit Auktionsorders bei Alpaca
+   (kein Spread) ist das ein billiger Nebentest, kein Kern.
+7. **Regimefilter** (SPY über SMA200, VIX unter 25) und **Volatilitäts-Sizing**
+   sind die zwei Hebel, die den Drawdown steuern; sie kosten in
+   Erholungsjahren (2020) und zahlen in Bärenjahren (2022).
+8. Die **PDT-Regel ist seit 04.06.2026 abgeschafft**; `compliance.py` weiß
+   das noch nicht. Für den Daytrading-Test ist der Weg frei, für den Rest
+   ändert es nichts.
+9. Zeitplan: Oktober 2026 messen auf deinen Daten, November bauen und in
+   der Schattenflotte voranmelden, Dezember Papierdepot mit der neuen
+   Engine-Konfiguration, **Januar 2027 Start** — klein, mit Risiko-Dach.
+10. Realistische Erwartung nach Kosten: **SPY + 3 bis 6 Prozentpunkte p.a.**
+    bei Sharpe 0,8–1,2 und maximalem Drawdown von 20–30 % für die
+    Multi-Wochen-Strategie; für den ORB-Test Sharpe > 1 als Bestehensgrenze.
+    „Zuverlässig hohe Margen mit Daytrading“ verspricht dieser Plan nicht,
+    weil kein ehrlicher Datensatz sie hergibt.
+
+---
+
+## 1. Was in den letzten Monaten gebaut und gemessen wurde
+
+### 1.1 Gebaut (26 Commits seit dem Initial-Commit)
+
+| Baustein | Datei | Zustand |
+|---|---|---|
+| Entscheidungs-Engine, EIN Pfad für alles | `engine.py` | fertig, zustandslos, Lookahead strukturell unmöglich |
+| Historien-Replay Tag für Tag mit Kosten, PDT, Kurslücken | `simulate.py` | fertig |
+| Live-Pfad, Daemon als Dienst, Wiederanlauf | `live.py`, `daemon.py`, `install_service.sh` | fertig, läuft im Papierdepot |
+| Journal: Entscheidung → Begründung → Ergebnis | `journal.py` | fertig |
+| Trade-Lebenslauf (MAE/MFE/Nachlauf) | `lifecycle.py` | fertig |
+| Schattenbetrieb + Flotte + gepaarter Vergleich | `shadow.py`, `fleet.py`, `shadow_eval.py` | fertig, 9 Bots seit 29.07.2026 |
+| Hypothesenregister, Musterspeicher | `hypotheses.py`, `patterns.py` | fertig, bisher leer |
+| Faktor-Labor (Schleifen-IC) | `research.py`, `11_factor_lab.py` | fertig, einmal gelaufen |
+| EDGAR Form 4, News-Merkmale | `edgar.py`, `news.py`, `news_features.py` | gebaut, **nicht historisch getestet** |
+| Kosten mit Prüfdatum, Breakeven | `costs.py` | fertig |
+| PIT-Wächter, Drei-Umschlag-Protokoll | `pit.py` | fertig |
+| Datenintegrität, Health-Check | `data_integrity.py`, `18_health_check.py` | fertig |
+| DQN mit Timing-Test | `rl/` | gebaut, Ergebnis nicht dokumentiert |
+| **Neu (dieser Plan):** Labor 2027 | `labor.py`, `scripts/20_–27_` | fertig, siehe §6 |
+
+### 1.2 Gemessen — die Zahlen, die bleiben
+
+| Befund | Zahl | Quelle |
+|---|---|---|
+| Erster Anlauf (Momentum-Mehrfaktor, 17 Tage Haltedauer) | IC −0,05, **−127 Prozentpunkte** gegen Buy & Hold | `research.py` Docstring |
+| Umkehr-Faktoren auf 2.162 Symbolen, 9 Jahre | reversal_3d IC +0,018, rsi2 +0,016, 100 % positive Jahre | `signals.ReversalWeights` |
+| Dieselben Faktoren auf 150 liquidesten Werten | **nicht nachweisbar** (rsi2: 29 % positive Jahre) | `universe.load_universe` |
+| Umkehr-Strategie 5 Jahre, 400 Symbole, netto | **+7,4 %** gesamt gegen **+80,7 %** SPY; Kosten 72–109 % des Brutto | `docs/schattenbetrieb.md` §0.2 |
+| Score-Schwelle 0,35 → 0,75 | Trefferquote **sinkt** 52,0 % → 49,2 % | dito |
+| Vorsprung je Trade vs. Breakeven | +0,11 % vs. 0,142 % (5 bps Spread) | `docs/mehrbot-plan.md` §0 |
+| Eröffnung vs. 09:50-Kurs | −0,58 bps, t = −0,18 (kein Effekt) | `docs/schattenbetrieb.md` §0.1 |
+| Investitionsgrad bei 15/15 Positionen | 53,9 % statt 90 % (Vola-Skalierung) | dito §5.3 |
+| Schattenflotte: wirkungslose Varianten | B03 (Ziel) identisch mit Basis; B06 (Regime) im Testfenster nie aktiv | dito |
+| Handelbares Universum bei ≥ 1 Mio. $/Tag | 2.189 von 8.464 Symbolen | `docs/mehrbot-plan.md` §10 |
+| Live-Ausführungsmessung | 30 Orders, davon 14 auswertbar, Referenzpreis-Fehler behoben (Commits 107f982, 9c26b6a) | Commit-Log |
+
+### 1.3 Was gebaut, aber nie ausgewertet wurde
+
+- **PEAD-Historientest** (§0.3 im Schattenplan): offen.
+- **News-Faktor-IC** (`f_news` mit Gewicht 0,10 im Live-Bot seit 03.08.2026): **ungetestet im Einsatz** — ein bewusster Regelbruch, der protokolliert ist (`news_aktiv`-Flag).
+- **Insider-Cluster** (`edgar.py`, 372 Form-4-Meldungen im Cache): nur in der verworfenen Momentum-Strategie verkabelt, nie als Ereignisstudie gemessen.
+- **Ereignisstudie** (`06_event_study.py`): Skript existiert, Ergebnis nirgends dokumentiert.
+- **DQN** (`08_train_rl.py`): Ergebnis nirgends dokumentiert.
+- **Regime-Schnitte** im Schatten: erst ab ~60 Handelstagen belastbar, also ab ~Ende Oktober 2026.
+
+---
+
+## 2. Warum das heutige System nicht besser als ein ETF ist
+
+Es ist schlechter. Drei Ursachen, alle gemessen, alle strukturell:
+
+**Ursache 1 — Der Zeithorizont ist falsch.** Ein IC von 0,018 auf 3–5 Tagen
+ist echt, aber er ist eine *Quintil-Spanne* von ein paar Zehntelprozent je
+Trade. Bei 5 Tagen Haltedauer und 15 Positionen entstehen ~600 Rundläufe im
+Jahr. Jeder kostet 0,14 %. Das sind 80–90 % Kapital pro Jahr an Kosten,
+gegen einen Bruttovorsprung von vielleicht 60–70 %. Das Verhältnis kann
+kein Signal der Welt drehen.
+
+**Ursache 2 — Long-only Umkehr steht im Bullenmarkt oft in Cash.** Umkehr-
+Kandidaten sind gefallene Werte; in einem Markt, der 15 % p.a. steigt,
+verpasst man den Markt selbst. Der Regimefilter verhindert Käufe im Crash,
+kauft aber auch nicht die Erholung.
+
+**Ursache 3 — Der Score sortiert oben nicht.** Trefferquote fällt mit dem
+Score. Eine Rangliste, die oben schlechter wird, ist ein Zufallsgenerator
+mit Vorfilter.
+
+Was daraus folgt, ist der ganze Plan: **weniger handeln, länger halten,
+anders auswählen** — und die Auswahl auf Merkmale stützen, deren Wirkung auf
+3–8 Wochen dokumentiert ist, nicht auf 3 Tage.
+
+---
+
+## 3. Was sich seit dem Sommer geändert hat (Regulierung, Broker)
+
+| Änderung | Datum | Bedeutung für uns | Quelle |
+|---|---|---|---|
+| **PDT-Regel abgeschafft** (FINRA Rule 4210, SEC-Zustimmung) | Zustimmung 14.04.2026, wirksam 04.06.2026, Broker bis 20.10.2027 | Daytrading unter 25.000 $ ist erlaubt. `compliance.py` prüft noch die alte Regel → am eigenen Konto verifizieren, dann anpassen. Die Projektverfassung in `selfcheck.py` nennt PDT noch als Ausschlussgrund. | Schwab, QuantInsti, Alpaca-Blog |
+| Alpaca 24/5-Handel (Overnight-Session, Blue Ocean ATS) | 2026 | Nur Limit-Orders, dünn. Für uns nur relevant als Datenquelle, nicht als Handelsweg. | Alpaca Docs |
+| Alpaca Krypto-Gebühren | Maker 0,15 % / Taker 0,25 % | Krypto-Momentum braucht ≥ 1 Woche Haltedauer, sonst tot. | Alpaca Docs |
+| SEC Section 31 | 20,60 $/Mio. seit 04.04.2026 | in `costs.py` hinterlegt, jährlich prüfen | FeeSchedule |
+| FINRA Short Interest | halbmonatlich, Archiv ab 2014, kostenlos | neue freie Signalquelle (HYP-10) | FINRA |
+| FINRA Reg-SHO-Tagesvolumen | täglich seit 2009, kostenlos | Literatur: nur Nowcast, kein Signal — als Negativtest | FINRA, Equibles 2025 |
+| EDGAR 8-K Item 2.02 | seit 2004, sekundengenau | die freie Quelle für Ergebnistermine (HYP-03) | SEC |
+
+---
+
+## 4. Der Ideenraum: was die Evidenz hergibt
+
+Bewertung nach drei Kriterien: Evidenz (repliziert, lebt noch), Kosten-
+Tragfähigkeit bei Alpaca, Datenverfügbarkeit im kostenlosen Rahmen.
+
+| Idee | Evidenz | Kosten-tragfähig? | Daten frei? | Urteil |
+|---|---|---|---|---|
+| Querschnitts-Momentum 12-1, 3–6 Wochen | ★★★★★ | ja (Umschlag ~12–24×/J) | ja | **Kern** |
+| High-Volume-Return-Premium (1 Woche) | ★★★★☆ (GKM 2001, Wang 2021) | ja bei H ≥ 21 | ja | **Kern-Zusatz** |
+| PEAD über EAR (ohne Analysten) | ★★★★★ | ja (H = 42–63) | ja (8-K) | **Kern-Zusatz** |
+| Regimefilter SMA200 / VIX | ★★★★☆ | kostet nichts | ja | **Pflicht** |
+| Vola-Targeting / 1/Vola-Sizing | ★★★★★ | kostet nichts | ja | **Pflicht** |
+| ORB auf Stocks in Play (Daytrading) | ★★★☆☆ (2 Paper, 1 Team) | **fraglich** (IEX, Slippage) | ja (Alpaca Minuten) | **ein Test** |
+| Overnight-Prämie QQQ/IWM mit Auktionsorders | ★★★★☆ brutto, netto strittig | nur mit MOO/MOC | ja | Nebentest |
+| Insider-Cluster (Form 4) | ★★★★☆ | ja (selten, lange Haltedauer) | ja | Zusatzbaustein |
+| Short Interest als Ausschluss | ★★★★☆ | ja | ja (FINRA) | Zusatzbaustein |
+| ML-Ranker (LightGBM) über Faktorzoo | ★★★★☆ | wie das Ranking | ja | ab Nov 2026 |
+| Kurzfrist-Umkehr (heutiger Bot) | ★★★☆☆ | **nein** (gemessen) | ja | nur auf Large Caps mit H ≥ 10 |
+| 52-Wochen-Hoch kurzfristig | ★★☆☆☆ (eigene Messung negativ 2016–2026) | — | ja | verworfen |
+| Low-Vol als Auswahlfaktor | ★★☆☆☆ (2016–2026 negativ) | — | ja | nur als Sizing |
+| Intraday-Momentum SPY (letzte 30 min) | ★★☆☆☆ (post-2020 schwach) | nein | ja | Negativtest |
+| Reg-SHO-Tagesshortvolumen | ★☆☆☆☆ | — | ja | Negativtest |
+| Krypto-Momentum (BTC/ETH) | ★★★☆☆ | nur wöchentlich | ja | Diversifikation, später |
+| News-Ton | ★☆☆☆☆ | — | Kontingent | verworfen |
+| Chartformationen, Fibonacci, Elliott | ☆ | — | — | verworfen |
+| HFT, Market Making, Level 2 | unerreichbar | — | nein | verworfen |
+
+---
+
+## 5. Der Hypothesenkatalog 2027
+
+Vollständig, mit Messvorschrift und Erwartung, in
+`src/alpaca_bot/hypothesen_2027.py`; Registrierung mit
+`scripts/27_hypothesen_anmelden.py --anmelden`. Hier die Kurzform:
+
+| ID | Prio | These | Skript | Bestehensgrenze |
+|---|---|---|---|---|
+| HYP-01 | 1 | Momentum 12-1 + Konsistenz, Top 20, H=21, über SMA200 schlägt SPY netto bei kleinerem DD | 22 momentum | +2 %-Pkt CAGR, DD < SPY, 2022 besser als SPY |
+| HYP-02 | 1 | Volumen-Schub 1 Woche sagt 4-Wochen-Rendite voraus; Kombi > Kombi ohne Volumen | 21, 22 kombi | IC > 0,01, ≥ 75 % Jahre, Kombi-Vorteil t > 2 |
+| HYP-03 | 1 | PEAD über Ergebnistagsrendite (EAR), Termine aus 8-K | 22 ear + EDGAR | +3 %-Pkt netto, H=42 |
+| HYP-04 | 1 | ORB nur auf Top-20-Relativvolumen ist netto profitabel | 26 | Sharpe > 1 netto UND Top-RV > Zufallsauswahl (t > 3) |
+| HYP-05 | 1 | Regimefilter senkt MaxDD ≥ ⅓ bei ≤ 2 %-Pkt CAGR-Verlust | 22 (4 Regime) | wie formuliert |
+| HYP-06 | 2 | LightGBM-Ranker: OOS-IC ≥ 0,03, Sharpe > 1 | 23 | wie formuliert |
+| HYP-07 | 2 | Overnight QQQ/IWM mit Auktionsorders netto positiv | 25 + Papierhandel | Fill-Kosten < 1 bps gemessen |
+| HYP-08 | 2 | Insider-Cluster +2–5 % über 6 Monate | 06 (Erweiterung) | t > 2 gegen Kontrollgruppe |
+| HYP-09 | 2 | Umkehr trägt nur Large Cap + H ≥ 10 | 24 reversal | Netto-CAGR steigt mit H |
+| HYP-10 | 2 | Short Interest als Ausschlussfilter; Reg-SHO-Tagesvolumen wertlos | 28 (neu) | SI-IC < −0,01; SHO-IC ≈ 0 |
+| HYP-11 | 3 | 52-W-Hoch kurzfristig negativ, langfristig positiv | 21 h=126/252 | — |
+| HYP-12 | 3 | Low-Vol nur als Sizing nützlich | 22 --vola-ziel | Sharpe +20 % |
+| HYP-13 | 3 | Krypto-Momentum wöchentlich überlebt 25 bps | 29 (neu) | Sharpe > 0,5 |
+| HYP-14 | 3 | News-Frequenz hat IC, Ton nicht | 30 (neu) | news_z t > 2 |
+| HYP-15 | 3 | Sektorneutralität senkt DD in Rotationsphasen | labor-Erweiterung | DD −5 %-Pkt |
+| HYP-16 | 3 | Intraday-Momentum SPY tot | 31 (neu) | Widerlegung erwartet |
+
+Mit 16 Hypothesen plus 9 Flottenbots plus den bisherigen Versuchen liegt der
+Versuchszähler bei ~30 → Zufallsschwelle **sqrt(2·ln 30) + 0,5 ≈ 3,1 Sigma**.
+Ein t-Wert von 2,5 ist ab jetzt kein Befund mehr.
+
+---
+
+## 6. Eigene Messungen — Ergebnisse
+
+### 6.1 Datenbasis (Ersatz, weil Yahoo/Alpaca gesperrt waren)
+
+| Panel | Inhalt | Zeitraum | Bias |
+|---|---|---|---|
+| `qlib` | 8.061 US-Aktien, OHLCV (Qlib/Yahoo-Sammlung, GitHub-Release) | 2004-01 – 2020-11 | Survivorship (Liste von 11/2020), **kein 2022** |
+| `sp500_close` | 629 heutige S&P-500-Werte, nur bereinigte Schlusskurse | 2016-01 – 2026-09 | **Index-Aufnahme-Bias** (heutige Mitglieder) |
+| `lean` | SPY, QQQ (Lücke 2005–2010), IWM, OHLCV, splitbereinigt | 1998 – 2021-03 | keiner |
+| VIX | CBOE Tagesschluss | 1990 – 2026-09 | keiner |
+
+Zulassung je Tag: Kurs ≥ 3 $ und Median-Umsatz ≥ 1 Mio. $/Tag über 60 Tage,
+**rollierend** (kein Blick auf spätere Liquidität). Kosten 10/20/40 bps je
+Rundlauf. Einstieg immer zur Eröffnung des Folgetags.
+
+### 6.2 Faktorzoo — S&P 500 2016–2026 (nur Kursfaktoren, 21 Tage)
+
+| Faktor | IC | t_defl | Jahre positiv | schlechtestes Jahr | Lesart |
+|---|---|---|---|---|---|
+| mom_12_1 | +0,017 | +0,9 | 80 % | −0,042 (2021) | positiv, in 2021 (Rotation) negativ |
+| mom_konsistenz | +0,012 | +0,9 | 82 % | −0,046 (2016) | stabiler als mom_12_1, kleiner |
+| mom_12_1_vola | +0,016 | +0,9 | 90 % | −0,034 | **stabilste Momentum-Fassung** |
+| reversal_5d (h=5) | +0,013 | +1,6 | 100 % | +0,002 | echt, aber winzig — bestätigt §1.2 |
+| reversal_21d | +0,015 | +1,0 | 73 % | −0,044 | instabil |
+| abstand_52w_tief | +0,025 | +1,6 | 64 % | −0,021 | Erholungs-Effekt, 2020/2024 stark |
+| naehe_52w_hoch | **−0,015** | −0,8 | 18 % | −0,080 | **kurzfristig invertiert** (HYP-11) |
+| vola_niedrig | **−0,032** | −1,7 | 27 % | −0,107 | Bullenmarkt-Beta, nicht als Faktor (HYP-12) |
+| rel_staerke_63 | −0,009 | −0,6 | 36 % | −0,069 | Rauschen bis negativ |
+
+Alle t-Werte sind klein, weil 500 Namen wenig Breite sind und die
+Deflation um sqrt(21) hart ist. Die Richtung ist informativ, die Größe nicht.
+
+### 6.3 Rangportfolio Momentum, S&P 500 2016–2026 (Obergrenze!)
+
+Top 20, H=21, Kosten 20 bps, Einstieg Eröffnung T+1:
+
+| Regime | CAGR | SPY | Sharpe | MaxDD | SPY DD | Umschlag/J |
+|---|---|---|---|---|---|---|
+| kein | **31,6 %** | 14,8 % | 1,07 | −45 % | −34 % | 23,6 |
+| SPY > SMA200 | 21,3 % | 14,8 % | 0,94 | −34 % | −34 % | 17,6 |
+| VIX < 25 | 20,3 % | 14,8 % | 0,89 | −30 % | −34 % | 20,2 |
+| beides | 17,1 % | 14,8 % | 0,85 | −26 % | −34 % | 16,3 |
+
+Jahre (kein Regime): 2018 +0,2 % (SPY −4,6 %), 2020 +46,6 % (+18,3 %),
+2021 +24,0 % (+28,7 %), **2022 −3,8 % (−18,2 %)**, 2024 +82 % (+25 %).
+
+**Warum das zu gut ist:** Die Liste enthält Werte wie PLTR, VST, SMCI, die
+*wegen* ihres Anstiegs in den Index kamen. Momentum wählt sie vor der
+Aufnahme aus — ein Lookahead über die Universumsdefinition. Die Zahlen sind
+eine Obergrenze; die ehrliche Größenordnung liefert `qlib` (§6.5) und danach
+dein Projektcache. Was trotzdem bleibt: Der Regimefilter senkt den Drawdown
+in jeder Fassung (HYP-05 vorläufig bestätigt), und 2022 ist mit Momentum
+deutlich besser als der Markt.
+
+### 6.4 Overnight-Prämie (Lean, splitbereinigt, 2000–2021)
+
+| Symbol | Overnight brutto CAGR / Sharpe | Intraday CAGR | Buy & Hold | Breakeven je Ausführung |
+|---|---|---|---|---|
+| SPY | +4,0 % / 0,39 | +0,7 % | +4,8 % | **0,9 bps** |
+| QQQ | +12,7 % / 0,84 | −6,0 % | +5,9 % | 2,6 bps |
+| IWM | +13,4 % / 1,01 | −4,9 % | +7,9 % | 2,7 bps |
+
+Netto bei 1 bps je Seite: SPY −1,1 %, QQQ +7,2 %, IWM +7,8 % (Sharpe 0,5–0,6).
+Bei 2 bps: QQQ +1,9 %, IWM +2,5 %. Bedingt „nur über SMA200“: IWM Sharpe
+1,28 brutto, 0,86 bei 1 bps. **Urteil:** Bei Spread-Ausführung tot (deckt
+sich mit Alpha Architect). Mit Auktionsorders (Alpaca `cls`/`opg`, kein
+Spread, nur SEC/TAF ≈ 0,3 bps) rechnerisch positiv — deshalb HYP-07 als
+Papierhandels-Test mit gemessenen Fill-Abweichungen, nicht als Backtest.
+Vorbehalt: Daten enden 03/2021; ob die Prämie 2022–2026 noch besteht, muss
+der Projektcache zeigen.
+
+### 6.5 Breites Universum (qlib, 2005–2020): Faktorzoo
+
+8.061 Symbole, davon je Tag ~2.500–3.500 zugelassen (Kurs ≥ 3 $, Umsatz
+≥ 1 Mio. $). 20 Faktoren × 5 Horizonte, 1.720 s Rechenzeit. Sortiert nach
+deflationiertem t-Wert, Horizont 21 Tage (der Multi-Wochen-Fall):
+
+| Faktor | IC h=5 | IC h=21 | IC h=42 | t_defl h=21 | Jahre positiv | schlechtestes Jahr | Q5−Q1 p.a. (h=21) | Urteil |
+|---|---|---|---|---|---|---|---|---|
+| **vol_schub_6m_neg** („ruhige“ Aktien) | +0,012 | **+0,018** | **+0,023** | **+3,9** | **87 %** | −0,008 | +3,2 % | **stärkster Fund** |
+| **mom_konsistenz** | +0,017 | +0,019 | +0,023 | +2,2 | 81 % | −0,054 (2016) | +2,4 % | robusteste Momentum-Form |
+| mom_12_1_vola | +0,017 | +0,019 | +0,020 | +1,6 | 67 % | −0,080 (2009) | +3,7 % | Momentum-Crash 2009 |
+| mom_12_1 | +0,017 | +0,017 | +0,016 | +1,3 | 67 % | −0,108 (2009) | +1,4 % | dito, schwächer |
+| reversal_5d | **+0,020** | +0,011 | +0,006 | +1,1 (h=5: **+3,8**) | 94 % (h=5) | −0,001 | +13,7 % (h=5, brutto) | echt, nur kurz, hoher Umschlag |
+| rsi2_invers | +0,012 | +0,006 | +0,002 | +0,8 (h=5: +3,0) | 88 % (h=5) | −0,002 | +9,9 % (h=5, brutto) | wie reversal_5d |
+| vol_z_1d (Volumenschock 1 Tag) | +0,005 | +0,003 | +0,003 | +0,8 (h=5: +2,6) | 81 % (h=5) | −0,015 | +2,8 % (h=5) | klein, positiv |
+| naehe_52w_hoch | +0,012 | +0,014 | +0,023 | +1,0 | 69 % | **−0,111 (2009)** | −1,8 % | Crash-anfällig |
+| vola_niedrig / atr_niedrig | +0,015 | +0,011 | +0,016 | +0,7 | 69 % | −0,067 | −3,5 % (Quintil!) | IC positiv, Quintilspanne negativ → nur Sizing |
+| **vol_schub_1w** (High-Volume-Premium GKM) | +0,003 | +0,002 | +0,002 | +0,5 | 56 % | −0,016 | +0,9 % | **praktisch tot** in liquiden Werten |
+| turnover_trend (20d vs 120d) | −0,004 | −0,005 | −0,008 | −1,1 | 50 % | −0,039 | −0,5 % | eher negativ |
+| **ear_proxy** (Sprung mit Volumen, 5 Tage) | **−0,010** | −0,010 | −0,008 | −1,2 (h=5: **−2,3**) | 31 % | −0,044 | −2,5 % | **Sprünge kehren um** — kein PEAD ohne echte Termine |
+| **gap_volumen** (Gap-up mit Volumen) | **−0,013** | −0,010 | −0,009 | −1,3 (h=5: **−3,4**) | **6 %** | −0,036 | −2,8 % | **Gaps nicht jagen** |
+| **amihud** (Illiquidität) | −0,014 | −0,016 | −0,022 | −2,3 (h=5: **−4,0**) | 38 % | −0,055 | ≈ 0 | illiquide Werte meiden |
+
+Sieben Lehren daraus, alle direkt handlungsrelevant:
+
+1. **Volumen zählt — aber andersherum als erwartet.** Nicht die „lauten“
+   Aktien der letzten Woche laufen (GKM-Premium: IC +0,002, tot), sondern die
+   **ruhigen** über sechs Monate (IC +0,018–0,023, 87 % positive Jahre,
+   schlechtestes Jahr −0,008). Das ist der stabilste Faktor im ganzen Zoo,
+   er ist billig zu handeln (H = 42 sinnvoll) und wenig mit Momentum
+   korreliert. → **HYP-17**, Bestätigung out-of-sample auf 2016–2026 Pflicht.
+2. **Momentum ja, aber als Konsistenz.** Der Anteil positiver Monate im
+   letzten Jahr (mom_konsistenz) hat 81 % positive Jahre und ein
+   schlechtestes Jahr von −0,054; rohes 12-1-Momentum hat 2009 −0,108. Die
+   Konsistenz-Form dämpft den Momentum-Crash.
+3. **Kurzfrist-Umkehr ist echt und trotzdem tot.** Auf 5 Tagen die
+   höchsten t-Werte (3,8), Quintilspanne +13,7 % p.a. brutto — long-only die
+   Hälfte, also ~0,14 % je 5-Tage-Trade: **exakt die +0,11 % je Trade, die
+   das Projekt im Sommer gemessen hat, gegen 0,14 % Kosten.** Auf 21 Tagen
+   ist der IC schon halbiert. Der Effekt lässt sich nicht „länger halten“.
+4. **Sprünge kehren um.** Der naive PEAD-Ersatz (großer Tagesreturn mit
+   Volumen) hat negativen IC. PEAD lebt nur *am Ergebnistermin*; ohne
+   8-K-Daten ist HYP-03 nicht prüfbar und wird nicht behauptet.
+5. **Gap-ups mit Volumen sind ein Verkaufs-, kein Kaufsignal** (6 %
+   positive Jahre). Für einen Bot heißt das: nie am Tag nach einer
+   Nachrichtenexplosion einsteigen — genau die „News nach dem Sprung“-Falle.
+6. **Illiquidität kostet doppelt**: negativer IC und weiter Spread.
+   Universum eher 800 als 2.000 Werte.
+7. **Low-Vol als Auswahl ist ein Trugschluss**: positiver IC, aber negative
+   Quintilspanne (das oberste Quintil ist zu langweilig, um SPY zu
+   schlagen). Nur als Positionsgröße (1/Vola) nutzen.
+
+### 6.6 Breites Universum (qlib, 2006–2020): Rangportfolios, Haltedauer, ML
+
+*(Läufe gestartet; Ergebnisse werden hier nachgetragen, Logs unter
+`results/labor/logs/`.)*
+
+### 6.6 Selbsttests
+
+- `scripts/00_selftest.py`: 47/47 bestanden (nach Einbau von `labor.py`).
+- `scripts/09_selfcheck.py`: 9 Prüfungen, 0 Verstöße.
+- `scripts/26_labor_orb_intraday.py --selftest`: 6/6 bestanden (Auslöser,
+  Stop-Begrenzung, Short-Sperre, relatives Volumen, Top-N, Zufallsmarkt ≈ 0).
+- `scripts/27_hypothesen_anmelden.py --anmelden --db <test>`: 16 Einträge.
+
+---
+
+## 7. Die Zielarchitektur 2027
+
+```
+                     ┌──────────────────────────────────────────┐
+                     │  RISIKO-DACH (risiko.py, mehrbot-plan §5) │  Drawdown 20 % → Sperre
+                     │  Tagesverlust 5 %, Brutto ≤ 1,0, Sektor ≤ 35 % │
+                     └───────────────┬──────────────────────────┘
+                                     │
+        ┌────────────────────────────┼─────────────────────────────┐
+        ▼                            ▼                             ▼
+┌──────────────────┐     ┌────────────────────────┐     ┌────────────────────┐
+│ BUCH A  Multi-   │     │ BUCH B  ORB-Daytrading │     │ BUCH C  Overnight  │
+│ Wochen-Ranking   │     │ (nur wenn HYP-04 hält) │     │ Auktion (HYP-07)   │
+│ 70–100 % Kapital │     │ ≤ 20 % Kapital, 0 über │     │ ≤ 20 %, QQQ/IWM    │
+│ Momentum+Volumen │     │ Nacht, Hebel ≤ 4 intra │     │ MOC → MOO          │
+│ +EAR, H=21–42,   │     │ Top 20 Rel.-Volumen    │     │ nur über SMA200    │
+│ Regime, 1/Vola   │     └────────────────────────┘     └────────────────────┘
+└──────────────────┘
+        ▲ dieselbe Engine.decide(), neue Strategie "ranking" in signals.py
+```
+
+**Buch A ist der Kern.** Es ersetzt die Umkehr-Strategie in `EngineConfig`
+durch eine Strategie `ranking` mit:
+
+- Score = Z-Score-Mix aus `mom_12_1`, `mom_konsistenz`, `vol_schub_1w`,
+  `ear` (sobald EDGAR-8-K-Lader steht), Gewichte rund (1 / 0,5 / 1 / 1).
+- Universum: Top 1.200 nach Dollar-Volumen, Kurs ≥ 5 $ (Spread!).
+- Auswahl: Top 20–30, Rebalancing wöchentlich, Haltedauer-Minimum 21 Tage,
+  Ausstieg bei Rangverlust (< Perzentil 60) oder Zeit (63 Tage), Stop 3 ATR.
+- Regime: neue Käufe nur bei SPY > SMA200 UND VIX < 25; bestehende
+  Positionen laufen mit Stop weiter (kein Panikverkauf am Filtertag).
+- Sizing: 1/Vola relativ (`deploy_to_target=True`), Deckel 10 % je Position,
+  Zielinvestition 90 %.
+- Erwarteter Umschlag: 12–20 Rundläufe je Position und Jahr → ~2–4 % des
+  Kapitals an Kosten bei 20 bps. Bei einem Bruttovorsprung von 5–8 % p.a.
+  bleibt etwas übrig — das ist der ganze Unterschied zu heute.
+
+**Buch B und C sind Tests mit Kapitaldeckel**, nicht Bestandteile des Kerns.
+Sie bekommen je einen Schattenbot mit eigener Buchführung (`bot_id`), damit
+ihr Beitrag messbar bleibt (Attribution, `docs/mehrbot-plan.md` §7).
+
+**Datenpipeline (alles kostenlos):**
+
+| Daten | Quelle | Takt | Modul |
+|---|---|---|---|
+| Tagesbars 1.200 Symbole | Alpaca (Handel) / yfinance (Forschung) | täglich | `data.py`, `datasources.py` |
+| 5-Minuten-Bars für ORB | Alpaca IEX (oder `delayed_sip` historisch) | täglich, gecacht | `26_` |
+| Ergebnistermine | EDGAR 8-K Item 2.02 (Filing-Index, Volltext-Suche) | täglich | `edgar.py` **Erweiterung** |
+| Insider | EDGAR Form 4 | täglich | `edgar.py` (fertig) |
+| Short Interest | FINRA Equity Short Interest Files | halbmonatlich | **neu** `finra.py` |
+| VIX, Zinskurve, HY-Spread | CBOE CSV, FRED (`T10Y3M`, `BAMLH0A0HYM2`) | täglich | **neu** `makro.py` |
+| News-Frequenz | Alpaca News | täglich (Kontingent!) | `news.py` (fertig) |
+
+---
+
+## 8. Bauplan mit Zeitachse bis Januar 2027
+
+### Schritt 0 — Oktober, Woche 1–2: Messen auf deinen Daten (kein Code im Live-Pfad)
+
+| # | Aufgabe | Befehl | Bestanden, wenn |
+|---|---|---|---|
+| 0.1 | Panel aus Projektcache bauen | `20_labor_daten.py --quelle projekt --pfad <yfinance_2168_*_8y.parquet> --name projekt` | 2.000+ Symbole, 8 Jahre, OHLCV |
+| 0.2 | Faktorzoo | `21_labor_faktoren.py --panel projekt` | Jahrestabelle inkl. 2020, 2022 gelesen |
+| 0.3 | Portfolios | `22_labor_portfolio.py --panel projekt --variante {momentum,kombi,kombi_ohne_volumen,volumen,ear,reversal}` | Tabelle in §6.7 dieses Docs |
+| 0.4 | Haltedauer | `24_labor_haltedauer.py --panel projekt --variante {reversal,kombi}` | Kurve zeigt, ab welchem H der Umschlag nicht mehr das Problem ist |
+| 0.5 | ML-Ranker | `23_labor_ml_ranking.py --panel projekt --horizont 21` | OOS-IC je Jahr |
+| 0.6 | Overnight | `25_labor_overnight.py --panel projekt --symbole SPY QQQ IWM` | Breakeven 2016–2026 |
+| 0.7 | ORB | `26_labor_orb_intraday.py --start 2024-01-02 --ende 2024-12-31` (1 Jahr, ~2.000 Requests) | Sharpe, Trades je Tag, RV-Band-Tabelle |
+| 0.8 | Hypothesen registrieren | `27_hypothesen_anmelden.py --anmelden` | Register zeigt 16 Einträge |
+| 0.9 | PDT-Status am Konto prüfen | `01_check_setup.py` + Alpaca-Dashboard | Feld `pattern_day_trader` / Margin-Modell dokumentiert |
+
+Entscheidung am Ende von Schritt 0: **Welche zwei bis drei Faktoren tragen
+auf deinen Daten netto?** Nur die kommen in Schritt 1.
+
+### Schritt 1 — Oktober, Woche 3–4: Neue Datenlader
+
+| # | Aufgabe | Datei | Prüfung |
+|---|---|---|---|
+| 1.1 | EDGAR 8-K Item 2.02 → Ergebnistermine je Symbol mit Einreichungszeit | `edgar.py: earnings_dates()` | Für 50 Symbole gegen yfinance-Kalender abgleichen (≥ 90 % Treffer ± 1 Tag) |
+| 1.2 | FINRA Short Interest (Archiv ab 2014) | `finra.py` | 20 Stichtage, SI/Float je Symbol, `pit.asof_join` mit +1 Tag |
+| 1.3 | Makro (VIX, T10Y3M, HY-Spread) mit Cache | `makro.py` | `regime_serien` läuft live |
+| 1.4 | Sektor je Symbol (GICS aus `datasets/s-and-p-500-companies`, sonst SIC aus EDGAR) | `universe.py` | Feld in `reasons` (mehrbot-plan §9.4) |
+| 1.5 | EAR-Faktor und SI-Faktor in `labor.faktorzoo` | `labor.py` | PIT-Audit bestanden |
+| 1.6 | Messen wie 0.2–0.3 mit den neuen Faktoren | `21_`, `22_` | HYP-03, HYP-10 entschieden |
+
+### Schritt 2 — November: Strategie „ranking“ in der Engine, Schatten voranmelden
+
+| # | Aufgabe | Datei | Prüfung |
+|---|---|---|---|
+| 2.1 | `build_ranking_frame()` mit den Siegern aus Schritt 0/1 | `signals.py` | `pit.audit_feature_function` |
+| 2.2 | `EngineConfig.for_ranking()` (H_min 21, max_hold 63, stop 3 ATR, exit_rank) | `engine.py` | `simulate.py` 2016–2026 reproduziert `22_`-Ergebnis ± 2 %-Pkt CAGR |
+| 2.3 | Regime als Kauf-Tor, Vola-Sizing relativ | `engine.py` | Investitionsgrad 85–90 % bei Regime an |
+| 2.4 | Risiko-Dach | `risiko.py` (mehrbot-plan §5) | Sperre auslösen/lösen im Trockenlauf |
+| 2.5 | Schattenbots anmelden: `R00_ranking_basis`, `R01_ohne_volumen`, `R02_ohne_regime`, `R03_H42`, `R04_top30` — **eine Achse je Bot** | `18_fleet.py --anmelden` | Divergenz-Diagnose: kein Bot identisch mit Basis |
+| 2.6 | ORB als Schattenbuch (kein Handel), täglich nach Schluss ausgewertet | `26_` + `shadow.py` Erweiterung | Trades je Tag, RV-Band, netto |
+| 2.7 | Overnight-Papierhandel QQQ/IWM mit `cls`/`opg`, 4 Wochen | `05_paper_trade.py` Erweiterung | gemessene Fill-Abweichung zum Auktionspreis |
+
+### Schritt 3 — Dezember: Papierdepot mit „ranking“, Umkehr-Bot stilllegen
+
+| # | Aufgabe | Prüfung |
+|---|---|---|
+| 3.1 | Daemon auf `for_ranking()` umstellen, Umkehr nur noch im Schatten | 10 Handelstage ohne Regelverstoß (`audit.py`) |
+| 3.2 | Slippage über ≥ 30 Orders messen | Median < 8 bps (mehrbot-plan Sperrbedingung) |
+| 3.3 | Schattenvergleich R00 gegen B00 (alt) gepaart | t über Schwelle nach ≥ 40 Tagen — sonst weiter messen |
+| 3.4 | Tresor öffnen: `22_` auf 2025–2026 (letzte 20 %) **einmal** | Ergebnis akzeptieren |
+
+### Schritt 4 — Januar 2027: Start
+
+- Kapital klein (Totalverlust verkraftbar), Risiko-Dach aktiv, Regime an.
+- Buch B (ORB) nur, wenn HYP-04 in Schritt 0.7 UND im Schatten (2.6) hält.
+- Buch C (Overnight) nur, wenn 2.7 Fill-Kosten < 1 bps zeigt.
+- Wochenbericht aus `13_tagesbericht.py` + `17_shadow_report.py`.
+
+**Was den Zeitplan sprengen darf:** Nichts davon ist verhandelbar außer der
+Reihenfolge innerhalb eines Schritts. Wer Schritt 0 auslässt, wiederholt
+den Fehler vom Frühjahr (Strategie gebaut, dann gemessen).
+
+---
+
+## 9. Welche Zahlen wir uns erhoffen — und ab wann wir abbrechen
+
+### 9.1 Erwartung (kalibriert VOR den Messungen auf deinem Cache)
+
+| Buch | Brutto p.a. | Kosten p.a. | **Netto p.a.** | Sharpe | MaxDD | Bezug |
+|---|---|---|---|---|---|---|
+| A Multi-Wochen-Ranking, kein Regime | SPY + 6–9 %-Pkt | 2–4 % | **SPY + 3–6 %-Pkt** | 0,8–1,1 | ≈ SPY | Literatur ÷ 2 (McLean-Pontiff), §6.3 ÷ 3 (Bias) |
+| A mit Regime + Vola-Sizing | SPY + 3–6 %-Pkt | 2–3 % | SPY + 1–4 %-Pkt | 0,9–1,3 | **−20 bis −28 %** | §6.3 Regimefassungen |
+| B ORB Stocks in Play (≤ 20 % Kapital) | 15–40 % auf das Teilkapital | 5–15 % | **0–20 %** auf Teilkapital | 0,5–1,5 | −15 % | Paper 2,4–2,8 Sharpe × IEX-Abschlag |
+| C Overnight QQQ/IWM Auktion (≤ 20 %) | 8–12 % | 1–3 % | 4–8 % | 0,6–0,9 | −25 % | §6.4 |
+| **Gesamt** | | | **SPY + 3–7 %-Pkt** | **1,0–1,3** | **−20 bis −30 %** | |
+
+In Zahlen bei 12 % SPY-Jahr: 15–19 % netto. In einem Jahr wie 2022 (SPY −18 %):
+−5 bis −12 % (Regime dämpft), nicht +20 %. **Das ist realistisch. Mehr
+verspricht kein Datensatz, den wir ehrlich prüfen können.**
+
+### 9.2 Abbruchkriterien (jetzt aufschreiben, nicht wenn es soweit ist)
+
+| Ereignis | Konsequenz |
+|---|---|
+| Schritt 0: kein Faktor mit ≥ 75 % positiven Jahren und Netto-Vorteil auf deinem Cache | Kein Bot 2027 mit dieser Auswahl; zurück zu HYP-06 (ML) und HYP-03 (EAR) |
+| Schritt 0.7: ORB Sharpe < 0,5 netto oder Top-RV nicht besser als Zufallsauswahl | Buch B gestrichen, keine zweite Runde |
+| Schritt 2.7: Auktions-Fills > 1 bps Abweichung | Buch C gestrichen |
+| Schritt 3.2: Slippage Median > 8 bps | Universum auf Top 600 verkleinern, erst dann Start |
+| Schritt 3.4: Tresor-Ergebnis unter SPY | Start verschoben; Strategie tot, nicht „nachjustieren“ |
+| Live: Konto-Drawdown > 20 % | Vollsperre (Risiko-Dach), Ursachenanalyse |
+| Live: 3 Monate hinter SPY um > 10 %-Pkt bei Regime an | Halbieren, Schatten entscheidet |
+
+---
+
+## 10. Was bewusst nicht gemacht wird
+
+- **Kein „alles einbeziehen“ auf einmal.** Jede Quelle (Short Interest,
+  Insider, News, Makro) kommt als ein Faktor mit eigener Messung. Zehn
+  ungeprüfte Merkmale in ein Modell zu werfen erzeugt einen Backtest, der
+  gut aussieht und nichts bedeutet.
+- **Keine Parameteroptimierung.** Gewichte bleiben rund, Haltedauern sind
+  21/42/63, Stops 2/3 ATR. Was mit runden Zahlen nicht trägt, trägt nicht.
+- **Kein Hebel im Multi-Wochen-Buch.** Der ORB-Test darf intraday hebeln,
+  hält aber nichts über Nacht.
+- **Keine Sekunden-Strategien**, keine Level-2-Daten, kein Market Making.
+- **Keine Regeländerung aus dem Papierdepot allein.** Der Schatten mit
+  gepaartem Test entscheidet, das Depot misst nur Ausführung.
+- **Kein Livegang vor dem 6-Monats-Papierbetrieb der neuen Konfiguration** —
+  Verfassung Regel 1. Das Papierdepot läuft seit Juli mit der *alten*
+  Strategie; die Uhr für „ranking“ beginnt in Schritt 3, also Dezember.
+  **Ein Livestart im Januar 2027 ist damit ein Start mit Testkapital im
+  Papier-plus-Kleinstbetrag-Modus, kein voller Livegang.** Wer das anders
+  will, ändert bewusst die Verfassung — nicht still.
+
+---
+
+*Dokumentation zu einem Softwareprojekt, keine Anlageberatung.*
