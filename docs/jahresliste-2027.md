@@ -44,16 +44,31 @@ Weitere Spalten in `results/labor/jahresliste.csv`: 60/40, Trendbot 10 %, Hybrid
 - **Nicht enthalten:** Zins auf ungenutztes Bargeld bei den Aktien-Bots (2009–2015 ~0; laut develop §G96 später +1,4 Punkte/Jahr auf
   den Cash-Anteil).
 
-## 3. Weitere Fenster (getrennte Quellen, nicht direkt vergleichbar)
+## 3. Bis 2026 — was im Container möglich ist und was nicht
 
-**S&P-500-Panel 2016 – 09/2026, Aktien-Momentum (Handmix, Stop 3, Tor), Engine-Replay, gemessene Kosten — Obergrenze wegen Survivorship:**
+**Der Nutzer hat recht:** Der Bot soll bis 2026 laufen, und ein Test, der 2020 endet, reicht nicht. Im Container gibt es aber nur
+ein Panel bis 2026 — `sp500_close`: **nur Schlusskurse, nur heutige S&P-500-Mitglieder (Survivorship), kein Volumen.** Alles mit
+Volumen (qlib, Lean) endet 2020/2021; der Projektcache (2.168 Symbole, 2018–2026) und der Alpaca-Vorrat (07/2020–2026) liegen
+auf dem Mac (`scripts/61_stufe1.py`, §5). Was sich hier bis 2026 rechnen lässt:
+
+**Aktien-Bot Momentum (Handmix, Stop 3, Tor), Engine-Replay, Kosten 12,2 + 5 bps — Obergrenze:**
 
 | | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Aktien-Momentum | +25,5 | −6,8 | +17,8 | +30,7 | +8,3 | −10,1 | +4,6 | +44,5 | +16,2 | +20,0 |
+| Aktien-Bot (S&P-Panel) | +25,5 | −6,8 | +17,8 | +30,7 | +8,3 | −10,1 | +4,6 | +44,5 | +16,2 | +20,0 |
 | SPY | +21,7 | −4,6 | +31,2 | +18,3 | +28,7 | −18,2 | +26,2 | +24,9 | +17,7 | +7,9 |
 
-CAGR 13,0 %, MaxDD −23,5 %, Sharpe 0,83 (SPY 14,7 % / −33,7 %). 2026 bis 28.09. Ehrlich gelesen 4 bis 8 Punkte zu schön (develop §G53).
+CAGR 2017–09/2026: Aktien-Bot **+14,4 %**, SPY +15,2 %; MaxDD −23,5 % gegen −33,7 %; Sharpe 0,88 gegen 0,87.
+
+**Gemessener Survivorship-Abstand:** Derselbe Bot macht in den gemeinsamen Jahren 2017 – 10.11.2020 auf dem S&P-Panel 16,5 % pro Jahr,
+auf dem qlib-Panel (mit ausgeschiedenen Aktien) 9,6 % — **6,9 Punkte pro Jahr Unterschied** (ein Fenster, vier Jahre, grobe Schätzung).
+Der ehrliche Wert für 2017–2026 liegt damit bei etwa **+7,5 % pro Jahr** und deckt sich mit den 7,4 % des qlib-Laufs 2009–2020.
+
+**Trendbot bis 2026 — nur mit Vorbehalt.** Im Container fehlen fünf der zehn ETFs (kein GLD, EFA, EEM, IWM, DIA, BIL). Eine Nachbildung mit
+SPY/QQQ/TLT/HYG/LQD wurde gegen den vollen Lauf geprüft und ist **nicht verlässlich**: auf 2016–2020 weicht sie um −1,8 bis +7,8 Punkte je
+Jahr ab (2018: +3,4 % statt −4,4 %; CAGR 9,1 % statt 5,6 %); auf 2022–2026 liegt sie mit rund 8 % weit unter den **14,4 % pro Jahr bei −14,8 %
+Rückgang, die develop auf echten Alpaca-Daten gemessen hat** (§G96/§G98, 02/2022 – 09/2026, mit BIL-Cash). Für den Trendbot gilt deshalb die
+Messung von develop; eine Mix-Zeile bis 2026 aus der Nachbildung wäre nicht belastbar und steht nicht in dieser Liste.
 
 **Umkehr-Bot (läuft heute im Papierdepot), Historien-Simulation aus develop §G11, 5 bps Spanne, Survivorship +2 bis +4 Punkte/Jahr:**
 
@@ -64,5 +79,25 @@ CAGR 13,0 %, MaxDD −23,5 %, Sharpe 0,83 (SPY 14,7 % / −33,7 %). 2026 bis 28.
 
 Über 8 Jahre +1,95 % CAGR bei 5 bps, **−2,84 % bei der gemessenen Spanne**; ehrlich eher −5 bis −7 % (develop §G54).
 
-**Trendbot auf eigenen Alpaca-Daten (develop §G90), 02/2022 – 09/2026:** CAGR 11,3 % (10 % Vola-Ziel), MaxDD −8,9 %, Sharpe 1,35; SPY 14,8 % / −22,1 %.
-Fenster mit Anleihen-Crash, der 60/40 begünstigt — nur 4,6 Jahre.
+**Nicht bis 2026 messbar im Container:** Hybrid/ML (braucht Volumen: `vol_schub_6m_neg` ist das wichtigste Merkmal), der volle Trendbot und
+jeder Bot auf einem Universum mit ausgeschiedenen Aktien. Das ist der Zweck von §5.
+
+## 4. Grenzen dieser Liste
+
+- Backtests. Ein Engine-Replay hat ±3 Punkte CAGR Ziehungsrauschen (Lehre §2.15).
+- qlib enthält auch ausgeschiedene Aktien; `sp500_close` nicht.
+- Bargeld bei den Aktien-Bots ohne Zins (2009–2015 ~0, später laut develop §G96 bis +1,4 Punkte/Jahr auf den Cash-Anteil).
+- Hybrid und Stop-Varianten sind auf denselben Daten entworfen, auf denen sie gemessen wurden.
+
+## 5. Stufe 1 auf dem Mac — der Test bis 2026 mit Volumen
+
+Ein Befehl (Dauer etwa 1 bis 1,5 Stunden), er baut das Panel aus dem Projektcache, rechnet die ML-Vorhersagen, die Engine-Replays mit gemessenen
+Kosten und gibt dieselbe Jahresliste aus — dann für 2019/2021 bis 2026 mit Volumen:
+
+```bash
+cd ~/Documents/alpaca
+.venv/bin/python scripts/61_stufe1.py --pfad "$HOME/Library/Application Support/alpaca-bot/data/cache/bars/yfinance_2168_*_8y.parquet"
+```
+
+Die Ausgabe steht danach in `results/labor/stufe1_projekt.txt`. Fehlende ETFs im Projektcache meldet der Runner; dann läuft der Trendbot nicht,
+und die Zahlen von develop (§G90/§G96) gelten weiter.

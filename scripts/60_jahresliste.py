@@ -15,7 +15,9 @@ Regeln der Liste (nach den Lehren §2.17 und develop §B4/§G53):
   * Nicht enthalten: Zins auf ungenutztes Bargeld bei den Aktien-Bots
     (2009-2015 ohnehin ~0, danach klein) - siehe zusammenfuehrung-develop.md.
 
-    python scripts/60_jahresliste.py
+    python scripts/60_jahresliste.py                 # qlib 2009-2020 (Vergleich aller Bots)
+    python scripts/60_jahresliste.py --bis2026       # sp500_close 2016-2026 (einziges Panel bis 2026 im Container)
+    python scripts/60_jahresliste.py --panel projekt # beliebiges Panel, z. B. Projektcache 2018-2026 auf dem Mac
 Ergebnis: results/labor/jahresliste.csv und docs/jahresliste-2027.md
 """
 
@@ -92,6 +94,101 @@ def trendbot_kurven() -> dict[str, pd.Series]:
     return out
 
 
+ETFS_BIS_2026 = ["SPY", "QQQ", "TLT", "HYG", "LQD"]     # alles, was das Panel bis 2026 an ETFs hat
+
+
+def bis_2026() -> int:
+    """Fenster 2016 - 09/2026 auf dem einzigen Panel, das bis 2026 reicht (sp500_close).
+
+    Grenzen, die im Ergebnis stehen muessen: nur Schlusskurse, nur heutige S&P-Mitglieder
+    (Survivorship), fuer den Trendbot nur fuenf ETFs statt zehn und Bargeld pauschal
+    verzinst (kein BIL). Die Verkleinerung des Trendbots wird an 2016-2020 gegen den
+    vollen Lauf auf dem qlib-Panel gemessen."""
+    q = labor.panel_aus_cache(PROJECT_ROOT / "data" / "labor" / "qlib").close
+    sp = labor.panel_aus_cache(PROJECT_ROOT / "data" / "labor" / "sp500_close").close
+    cfg = PHASE2_KANDIDATEN["dualmom_15"]
+    from dataclasses import replace
+    cfg_pauschal = replace(cfg, cash_symbol="", cash_rendite_pa=0.02)
+
+    voll = trendbot_kurven()["dualmom_15"]
+    klein_q = trend.run(q[ETFS_BIS_2026], cfg_pauschal, start="2004-06-01", end="2020-11-10").equity_curve.astype(float)
+    klein_sp = trend.run(sp[ETFS_BIS_2026], cfg_pauschal, start="2015-01-01", end="2026-09-28").equity_curve.astype(float)
+    r_voll = jahres_renditen(voll, "2016-01-01", "2020-12-31")
+    r_klein = jahres_renditen(klein_q, "2016-01-01", "2020-12-31")
+    print("\n  PRUEFUNG DER VERKLEINERUNG (Trendbot 15 %, qlib-Daten): voller Lauf (10 ETFs + BIL) gegen 5 ETFs + Pauschale")
+    for j in r_voll:
+        print(f"   {j}: voll {r_voll[j] * 100:+6.1f} %   klein {r_klein[j] * 100:+6.1f} %   Abstand {(r_klein[j] - r_voll[j]) * 100:+5.1f}")
+    cv, ck = kennzahlen(voll, "2016-01-01", "2020-11-10"), kennzahlen(klein_q, "2016-01-01", "2020-11-10")
+    print(f"   CAGR voll {cv['cagr'] * 100:.1f} %  klein {ck['cagr'] * 100:.1f} %   MaxDD voll {cv['maxdd'] * 100:.1f} %  klein {ck['maxdd'] * 100:.1f} %")
+
+    aktien = kurve(OUT / REPLAY_SP500)
+    spy = sp["SPY"].dropna(); spy = spy / spy.iloc[0]
+    a = klein_sp.pct_change(); b = aktien.pct_change().reindex(a.index)
+    mix = (1 + (0.5 * a + 0.5 * b.fillna(0)).loc["2016-01-04":]).cumprod()
+    reihen = {"SPY": spy, "Aktien-Bot Momentum (S&P-Panel)": aktien, "Trendbot 15 % (5 ETFs)": klein_sp, "Mix 50/50": mix}
+    von, bis = "2016-01-01", "2026-12-31"
+    tab = pd.DataFrame({n: pd.Series(jahres_renditen(k, von, bis)) for n, k in reihen.items()})
+    print("\n  JAHRESRENDITEN 2016 - 28.09.2026 (sp500_close, Kosten 12,2 + 5 bps; Aktien-Bot Survivorship-Obergrenze)")
+    print(f"  {'Jahr':<6}" + "".join(f"{n[:24]:>26}" for n in tab.columns))
+    for j in tab.index:
+        print(f"  {j:<6}" + "".join(f"{tab.loc[j, c] * 100:>+25.1f} %" for c in tab.columns))
+    kz = {n: kennzahlen(k, "2017-01-01", "2026-12-31") for n, k in reihen.items()}
+    print(f"  {'CAGR':<6}" + "".join(f"{kz[c]['cagr'] * 100:>+25.1f} %" for c in tab.columns) + "   (2017 - 09/2026)")
+    print(f"  {'MaxDD':<6}" + "".join(f"{kz[c]['maxdd'] * 100:>+25.1f} %" for c in tab.columns))
+    print(f"  {'Sharpe':<6}" + "".join(f"{kz[c]['sharpe']:>26.2f}" for c in tab.columns))
+    tab.to_csv(OUT / "jahresliste_bis2026.csv")
+    # Abstand S&P-Panel gegen qlib fuer denselben Bot in den gemeinsamen Jahren 2017-2020
+    qk = kurve(OUT / REPLAYS_QLIB["Aktien-Bot Momentum (Handmix, Stop 3, Tor)"])
+    rq, rs = jahres_renditen(qk, "2017-01-01", "2020-11-10"), jahres_renditen(aktien, "2017-01-01", "2020-11-10")
+    gq = np.prod([1 + v for v in rq.values()]) ** (1 / 3.86) - 1
+    gs = np.prod([1 + v for v in rs.values()]) ** (1 / 3.86) - 1
+    print(f"\n  SURVIVORSHIP-ABSTAND desselben Aktien-Bots 2017 - 10.11.2020: S&P-Panel {gs * 100:.1f} %/Jahr, qlib {gq * 100:.1f} %/Jahr "
+          f"-> Abstand {(gs - gq) * 100:.1f} Punkte/Jahr (ein Fenster, vier Jahre)")
+    return 0
+
+
+def panel_liste(name: str) -> int:
+    """Jahresliste fuer ein beliebiges Panel (z. B. `projekt` = Projektcache auf dem Mac, 2018-2026).
+
+    Liest die Replay-Kurven `simulate_ranking_<name>_*_s12.2_kapital.csv`, rechnet den Trendbot mit
+    den ETFs, die das Panel hat (BIL als Cash, falls vorhanden), und schreibt die Tabelle. Fehlende
+    Bausteine werden benannt, nicht ersetzt."""
+    p = labor.panel_aus_cache(PROJECT_ROOT / "data" / "labor" / name)
+    c = p.close
+    von = str(c.index[0].year + 1) + "-01-01"
+    bis = str(c.index[-1].date())
+    reihen: dict[str, pd.Series] = {}
+    if "SPY" in c.columns:
+        spy = c["SPY"].dropna(); reihen["SPY"] = spy / spy.iloc[0]
+    etfs = [x for x in dict.fromkeys(trend.UNIVERSEN["broad"] + ["BIL"]) if x in c.columns]
+    if len([x for x in etfs if x != "BIL"]) >= 5:
+        from dataclasses import replace
+        cfg = PHASE2_KANDIDATEN["dualmom_15"]
+        cfg = cfg if "BIL" in etfs else replace(cfg, cash_symbol="")
+        reihen[f"Trendbot dualmom_15 ({len(etfs) - ('BIL' in etfs)} ETFs)"] = trend.run(c[etfs], cfg).equity_curve.astype(float)
+    else:
+        print(f"  Trendbot NICHT gerechnet: nur {etfs} im Panel (>= 5 ETFs noetig)")
+    muster = {"Aktien-Bot Momentum (Handmix)": f"simulate_ranking_{name}_momentum_stop3_h21-63_x0.2_c5_vola_n3_s12.2_kapital.csv",
+              "Aktien-Bot Hybrid (Stop 3)": f"simulate_ranking_{name}_momentum_stop3_h21-63_x0.2_c5_vola_hybrid_n3_s12.2_kapital.csv",
+              "Aktien-Bot Hybrid (ohne Stop)": f"simulate_ranking_{name}_momentum_stop99_h21-63_x0.2_c5_vola_hybrid_n3_s12.2_kapital.csv"}
+    for lab, datei in muster.items():
+        if (OUT / datei).exists():
+            reihen[lab] = kurve(OUT / datei)
+        else:
+            print(f"  FEHLT: {lab}  ({datei})")
+    tab = pd.DataFrame({n: pd.Series(jahres_renditen(k, von, bis)) for n, k in reihen.items()})
+    kz = {n: kennzahlen(k, von, bis) for n, k in reihen.items()}
+    print(f"\n  JAHRESRENDITEN in %, Panel {name}, {von[:4]} - {bis}, Kosten 12,2 + 5 bps (letztes Jahr = Teiljahr)")
+    print(f"  {'Jahr':<8}" + "".join(f"{n[:27]:>29}" for n in tab.columns))
+    for j in tab.index:
+        print(f"  {j:<8}" + "".join(f"{tab.loc[j, c_] * 100:>+27.1f} %" if not pd.isna(tab.loc[j, c_]) else f"{'–':>29}" for c_ in tab.columns))
+    print(f"  {'CAGR':<8}" + "".join(f"{kz[c_]['cagr'] * 100:>+27.1f} %" for c_ in tab.columns))
+    print(f"  {'MaxDD':<8}" + "".join(f"{kz[c_]['maxdd'] * 100:>+27.1f} %" for c_ in tab.columns))
+    print(f"  {'Sharpe':<8}" + "".join(f"{kz[c_]['sharpe']:>29.2f}" for c_ in tab.columns))
+    tab.to_csv(OUT / f"jahresliste_{name}.csv")
+    return 0
+
+
 def main() -> int:
     kurven: dict[str, pd.Series] = {}
     t = trendbot_kurven()
@@ -148,4 +245,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(bis_2026() if "--bis2026" in sys.argv else panel_liste(sys.argv[sys.argv.index("--panel") + 1]) if "--panel" in sys.argv else main())
