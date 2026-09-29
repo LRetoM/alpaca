@@ -28,6 +28,36 @@ Erwarteter Umschlag: 12–18 Rundläufe je Position und Jahr, Kosten
 ~2–4 % p.a. bei 20 bps je Rundlauf. Das ist der Unterschied zum Umkehr-Bot
 (100 Rundläufe, 10–20 % p.a. Kosten).
 
+## 0a. Was sich am 2026-09-29 geändert hat (lesen, bevor §2 läuft)
+
+Das Labor hat an diesem Tag vier Dinge gemessen, die die Startkonfiguration
+verändern (Masterplan §6.9–6.13, Lehren §1):
+
+1. **Kohorten-Lotterie.** Ein Engine-Replay streut je nach Startversatz
+   ±3 Punkte CAGR. Deshalb `max_new_per_day` (Deckel 3–5 neue Positionen
+   je Tag) als Engine-Regel — gestaffelte Kohorten wie in der Literatur.
+   Replays laufen; der Wert kommt in `for_ranking`, sobald gemessen.
+2. **Rangverlust erst unter dem 20. Perzentil** (statt 50): +1 Punkt CAGR,
+   ein Drittel weniger Drawdown auf S&P; qlib +1,7. Kandidat für den Standard.
+3. **Stop bleibt bei 3 ATR** (halbiert den Drawdown, kostet keine CAGR).
+   Verlängerung statt Zeitausstieg: gemessen, hilft nicht, bleibt aus.
+4. **Score-Quelle.** Drei Fassungen, alle in der Engine gebaut:
+   `mix` (Handmix, heutiger Standard), `ml` (LightGBM auf dem Faktorzoo),
+   **`hybrid`** (über der SMA200 Handmix, darunter Modell — HYP-25). Auf
+   qlib 2009–2020 schafft nur der Hybrid mit Vola-Ziel 0,25 die vorab
+   registrierte Regel (14,0 % bei −30 % MaxDD; SPY 14,5 % bei −34 %).
+   **Welche Quelle der Bot bekommt, entscheidet Stufe 1 auf dem
+   Projektcache** — nicht dieses Dokument.
+
+Modell trainieren (nur für `ml`/`hybrid`, einmal im Januar, Stichtag Ende
+November):
+
+```bash
+$P scripts/34_modell_trainieren.py --panel projekt --horizont 21 --bis 2026-11-30
+# -> models/lgbm_h21_2026-11-30.txt/.json (klein, ins Repo)
+$P scripts/12_daemon.py --strategy ranking --score-quelle hybrid --once     # Trockenlauf
+```
+
 ## 1. Voraussetzungen
 
 ```bash
@@ -69,6 +99,8 @@ $P scripts/31_simulate_ranking.py --panel projekt --symbole 800          # ECHTE
 $P scripts/23_labor_ml_ranking.py --panel projekt --horizont 21 --min-dollar-volume 25000000 --top-n 50   # ML gegen Handmix, gleiches Universum
 $P scripts/23_labor_ml_ranking.py --panel projekt --horizont 21 --min-dollar-volume 25000000 --top-n 50 --regime trend_ok
 $P scripts/31_simulate_ranking.py --panel projekt --symbole 800 --stop-atr 3 --exit-rank 0.2 --verlaengern 0.9 --ml-pred results/labor/ml_pred_projekt_h21.parquet
+$P scripts/35_labor_ml_varianten.py --panel projekt --horizont 21 --min-dollar-volume 25000000   # Hybrid (HYP-25)
+$P scripts/31_simulate_ranking.py --panel projekt --symbole 800 --stop-atr 3 --exit-rank 0.2 --max-new 3 --ml-pred results/labor/ml_pred_projekt_h21.parquet --hybrid
 $P scripts/33_trade_autopsie.py                                    # Pflicht nach jedem Replay
 $P scripts/29_labor_dynamisch.py --panel projekt --min-dollar-volume 25000000 --top-n 30
 $P scripts/30_labor_muster.py --panel projekt
@@ -83,6 +115,8 @@ $P scripts/27_hypothesen_anmelden.py --anmelden
   Größere Abweichung = Fehler in einem der beiden Pfade, erst klären.
 - `21_`: `vol_schub_6m_neg` und `mom_konsistenz` mit ≥ 75 % positiven
   Jahren (HYP-17 bestätigt oder verworfen).
+- `35_` (nach `23_`): **hybrid_vola25 ≥ SPY − 1 UND ≥ momentum_trend + 2 UND MaxDD ≤ 0,9 × SPY**
+  → Score-Quelle `hybrid`; sonst gilt die nächste Zeile (HYP-25).
 - `23_`: **ML ≥ Handmix + 2 Punkte auf demselben Universum** (Zeile „ML minus
   bester Handmix“) → Score-Quelle `ml` für den Bot; sonst Handmix. Das ist die
   Entscheidung, die qlib (+5) und S&P (−0,2, ohne Volumen) offen lassen

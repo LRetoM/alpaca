@@ -34,7 +34,7 @@ Ein „Fund“, der die Schwelle nicht schafft, wird als *kandidat* geführt und
 muss auf einem zweiten, nicht benutzten Panel bestehen (qlib 2006–2020 ↔
 S&P 2016–2026 ↔ Projektcache 2018–2026), bevor er in die Engine darf.
 
-## 1. Die zehn wichtigsten Lehren (Kurzfassung)
+## 1. Die zwölf wichtigsten Lehren (Kurzfassung, Stand 2026-09-29 abends)
 
 1. **Kosten vor Signal.** Der Umkehr-Vorsprung (+0,11 % je Trade) lag unter
    dem Rundlauf-Breakeven (0,14 %). Regel: Erst die Haltedauer-Kurve (24_),
@@ -45,31 +45,33 @@ S&P 2016–2026 ↔ Projektcache 2018–2026), bevor er in die Engine darf.
 3. **IC ist notwendig, nicht hinreichend.** Positive ICs, verlierende
    Portfolios (Masterplan §6.6). Regel: Kein Faktor ohne 22_-Portfolio mit
    Kosten und **beiden** Benchmarks (SPY und Univ.EW).
-4. **Der Engine-Pfad ist eine eigene Messung.** Derselbe Score verliert im
-   Engine-Replay 5–6 Punkte gegen die vektorisierte Referenz (S&P: 7,5 %
-   gegen 12,9 %). Ursache laut Autopsie: der Rangverlust-Ausstieg
-   (HYP-21, Gegen-Test läuft). Regel: Jede Engine-Regel (Stop, Rangverlust,
-   Sperrfrist, Sizing) wird einzeln gegen die Referenz gemessen.
-5. **Der Stop ist kein CAGR-Killer.** HYP-20 ist in der Hauptaussage
-   widerlegt: Ohne Stop S&P +0,8 Punkte, qlib −0,5 Punkte — aber der
-   Drawdown steigt von −18 % auf −31 % (S&P) und von −30 % auf −45 % (qlib).
-   Regel: 3-ATR-Stop bleibt, bis Vola-Ziel (HYP-22) den Drawdown übernimmt.
-6. **Chartmuster sind keine Faktoren.** 27 Muster×Horizont-Kombinationen
-   (Ausbrüche, Gap-ups, Donchian, NR7, Hammer, Kreuzungen): alle Rauschen
-   oder schwach negativ; Ausbrüche kehren um. Regel: Keine Ausbruchskäufe.
-7. **Explosionen sind vorhersagbar, aber nicht verdienbar** (AUC 0,81, die
-   Merkmale sind Vola + Drawdown = Lotterie). Regel: Explosionsscore nur als
-   Ausschlussfilter prüfen (HYP-23), nie als Kaufsignal.
-8. **Dynamische Haltedauer ohne starkes Signal ist Dekoration.** IC-gewichtete
-   Horizontwahl (29_) schlägt feste 21 Tage nicht. Regel: Erst Signalstärke,
-   dann Dynamik.
-9. **Vola-Ziel halbiert den Drawdown bei gleicher CAGR** (qlib kombi2:
-   −52,9 % → −30,7 %). Regel: gehört ins Risiko-Dach (HYP-22, Bestätigung
-   auf zweitem Panel offen).
-10. **Survivorship macht aus 13 % 23 %.** S&P-Panel (heutige Mitglieder)
-    zeigt momentum 22 %, qlib (alle Aktien inkl. Delistings) 7 %. Regel:
-    Jede S&P-Zahl wird nur neben der qlib-Zahl gelesen; Erwartung für 2027
-    kommt aus qlib, nicht aus S&P.
+4. **Ein Engine-Replay ist eine Ziehung, keine Messung.** Dieselbe
+   Strategie als Klumpen-Kohorte streut je Startversatz 7,9–18,0 % CAGR
+   (§2.15). Regel: gestaffelte Einstiege (`max_new_per_day`), und Engine-
+   Zahlen nur mit ±3 Punkten Rauschen lesen.
+5. **Drei plausible Täter waren keine.** Stop (HYP-20), Rangverlust
+   (HYP-21), Sieger-Rauswurf (Verlängerung): alle einzeln entlastet. Regel:
+   Jeder Verdacht aus einer Autopsie braucht den isolierenden Lauf — und
+   das billigste Experiment (Referenz auf die Engine zubewegen) zuerst.
+6. **Der Stop ist ein Drawdown-Halbierer, kein CAGR-Killer** (S&P −18 %
+   statt −31 % bei −0,8 Punkten; qlib −30 % statt −45 % bei +0,5).
+   Rangverlust erst unter dem 20. Perzentil: +1 Punkt, −10 Punkte MaxDD.
+7. **Chartmuster sind keine Faktoren**, Ausbrüche kehren um; **Explosionen
+   sind vorhersagbar, aber nicht verdienbar** (Vola + Drawdown = Lotterie).
+8. **Die ML-Prognose ist ein Erholungs-Ranker, kein besserer Momentum-
+   Ranker.** Ohne Regime-Tor +5 Punkte gegen den Handmix, mit Tor −2,4;
+   der Vorsprung sitzt in 2009 und 2020. Auf dem S&P-Panel (ohne Volumen)
+   kein Vorsprung. Regel: ML für die Phase, in der Momentum nichts hat
+   (Hybrid/Vola-Ziel statt Tor, `35_`), Entscheidung auf dem Projektcache.
+9. **Dynamische Haltedauer trägt nur, wo die Horizonte verschiedene Aktien
+   bevorzugen** (qlib +4–6 Punkte, S&P −2). Zweite Stufe, nicht erste.
+10. **Vola-Ziel halbiert den Drawdown — auf dem richtigen Niveau** (0,25
+    für einen 50-Aktien-Momentumkorb; 0,15 bremst dauerhaft).
+11. **Regime-Tor: halber Drawdown, verpasste V-Erholungen** — und ein
+    schnellerer Wiedereinstieg (Hysterese) ändert daran nichts (+0,1 auf
+    S&P). Was nach dem Tief oben steht, ist das Problem, nicht der Zeitpunkt.
+12. **Survivorship macht aus 13 % 23 %.** Jede S&P-Zahl wird nur neben der
+    qlib-Zahl gelesen; die Erwartung für 2027 kommt aus qlib.
 
 ## 2. Fehlschläge im Einzelnen — Ursache, Regel, Verankerung
 
@@ -239,6 +241,50 @@ Format: **Was scheiterte** · Messung · Warum · Regel · Verankert in · Statu
   sich Varianten.
 - Verankert: CLAUDE.md §Arbeitsweise, 31_ Dateinamen.
 - Status: erledigt.
+
+### 2.15 Die Kohorten-Lotterie — der wirkliche Täter hinter der Engine-Lücke
+- Messung: Dieselbe Strategie (`ranking_preis`, Top 50, 42 Tage, trend_ok,
+  20 bps) als **einzelne** Kohorte statt 42 gestaffelter: CAGR je nach
+  Startversatz **7,9–18,0 %** (Mittel 12,9 %, Streuung 2,9), MaxDD −19 bis
+  −40 %. Die Engine-Replays (6,5 / 7,3 / 7,5 / 8,5 %) sind eine Ziehung aus
+  dieser Verteilung. Verlängerung (2.13) gemessen: greift kaum (6–14 %
+  weniger Zeitausstiege) und hilft nicht (6,6–8,0 %).
+- Warum: Der Zeitausstieg macht alle Plätze am selben Tag frei; die
+  Engine wird zur Klumpen-Kohorte, deren Ergebnis vom Zufall des Starttags
+  abhängt. Die Momentum-Literatur staffelt genau deshalb (Jegadeesh/Titman
+  1993: überlappende Portfolios).
+- Regel: **Ein einzelner Engine-Replay hat ±3 Punkte CAGR und ±10 Punkte
+  MaxDD Ziehungsrauschen** — nie eine Engine-Zahl gegen eine Referenzzahl
+  lesen, ohne die Staffelung mitzubauen oder über Startversätze zu mitteln.
+  Und: `max_new_per_day` (3–5) als Engine-Regel, damit sich die Kohorten
+  von selbst staffeln — in Simulation und Live gleich.
+- Verankert: `EngineConfig.max_new_per_day`, 31_ `--max-new`, Selbsttest;
+  Masterplan §6.9 (Tabelle der Startversätze).
+- Status: Replays mit Deckel 3/5 laufen; Bestehen: CAGR ≥ Referenz − 2.
+- Lehre über die Lehre: Drei plausible Täter (Stop, Rangverlust, Sieger-
+  Rauswurf) wurden nacheinander mit isolierenden Läufen entlastet, bevor
+  das Experiment gefunden war, das den wahren Mechanismus zeigt (die
+  Referenz so umbauen, dass sie sich wie die Engine verhält — nicht
+  umgekehrt). Der billigste Test war der letzte. Nächstes Mal zuerst
+  fragen: *Welches Experiment kann die Referenz auf die Engine zubewegen?*
+
+### 2.16 Der ML-Vorsprung lebt in den Phasen, die das Regime-Tor sperrt
+- Messung qlib 2009–2020, gleiche Vorhersagen, gleiches Universum: ohne
+  Tor ML 15,7 % gegen Handmix 9–10 % (+5); **mit Tor ML 7,8 % gegen
+  momentum 10,2 % (−2,4)**. 2009 ohne Tor +24 %, 2020 +35 %.
+- Warum: Die wichtigsten Merkmale (ruhiges Volumen, niedrige Vola,
+  Abstand zum 52-Wochen-Tief) beschreiben gefallene Qualität — das trägt
+  in Erholungen, wenn Momentum leer ausgeht. In Trendphasen ist Momentum
+  der bessere Ranker. Nicht gemessen: 2008 (vor dem ersten Testjahr).
+- Regel: ML nicht als Ersatz des Handmix, sondern als **Fassung für die
+  Phase, in der der Handmix nichts hat** — Hybrid und Vola-Ziel statt Tor
+  werden aus den gespeicherten Vorhersagen geprüft (`35_`), Bestehensregel
+  vorab: CAGR ≥ momentum+Tor + 2 UND MaxDD ≤ −30 %.
+- Verankert: Masterplan §6.10, `35_labor_ml_varianten.py`, HYP-06, HYP-25.
+- Status: **gemessen.** Hybrid 18,4 % (SPY 14,5 %, momentum_trend 10,2 %),
+  mit Vola-Ziel 0,25: 14,0 % bei MaxDD −30,0 % — erste Fassung, die eine
+  vorab registrierte Regel besteht. In-sample entworfen → HYP-25 mit
+  Bestehensregel für den Projektcache (2020 und 2022 als Aus-Phasen).
 
 ### 2.13 Die Gewinne sitzen in wenigen Namen — und die Regeln zwingen sie raus
 - Messung (Autopsie `33_`, Konzentration): S&P-Replay ohne Stop — die

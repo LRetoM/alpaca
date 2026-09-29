@@ -31,54 +31,52 @@
 
 ---
 
-## 0. Kurzfassung in zehn Sätzen
+## 0. Kurzfassung in zehn Sätzen (Stand 2026-09-29 abends, nach 239 Befunden)
 
-1. Die Infrastruktur ist fertig und besser als bei 95 % aller Privatprojekte:
-   eine Engine für Backtest, Papierdepot und Schattenflotte, PIT-Wächter,
-   Kostenmodell, Journal, Lebenslauf, neun laufende Schattenbots.
-2. Die **Strategie** darauf ist die Schwachstelle: Kurzfrist-Umkehr mit fünf
-   Tagen Haltedauer verdient +0,11 % je Trade und zahlt 0,14 % Kosten je
-   Rundlauf. Das ist mathematisch verloren, egal wie gut das Signal wird.
-3. Der Hebel heißt deshalb nicht „besseres Signal“, sondern **mehr Vorsprung
-   je Trade als Kosten je Trade**. Auf Einzelaktien geht das auf zwei Wegen,
-   die beide gebaut werden: **kurz** (5–10 Tage, Mehrfaktor statt reiner
-   Umkehr, nur die liquidesten 800 Werte, Kosten ≤ 20 bps) und **mittel**
-   (3–6 Wochen, Konsistenz-Momentum plus ruhiges Volumen). Welcher Weg mehr
-   verdient, entscheidet die Haltedauer-Kurve (§6.6), nicht die Vorliebe.
-4. Die stärksten Bausteine auf Einzelaktien (gemessen auf 8.061 US-Aktien,
-   2005–2020, §6.5): **ruhiges Volumen** (sechs Monate unter dem eigenen
-   Vorjahresumsatz — stabilster Faktor im Zoo), **Momentum-Konsistenz**
-   (Anteil positiver Monate), **5-Tage-Umkehr** (stärkster Kurzfrist-Faktor,
-   t = 3,8) und der **1-Tages-Volumenschock**. Das Wochen-Volumenpremium aus
-   der Literatur ist in liquiden Werten tot; Gap-ups mit Volumen kehren um.
-   PEAD braucht echte Ergebnistermine (EDGAR 8-K) — der Proxy taugt nicht.
-5. Für den Daytrading-Wunsch gibt es genau **einen** wissenschaftlich sauber
-   dokumentierten Ansatz: Opening-Range-Breakout auf den 20 Aktien mit dem
-   höchsten relativen Volumen der ersten fünf Minuten (Sharpe 2,4–2,8 im
-   Paper). Er wird als kontrollierter Test gebaut — mit der Erwartung, dass
-   IEX-Daten und Kosten den Großteil davon auffressen.
-6. **ETFs sind nicht das Ziel.** SPY und VIX dienen nur als Regime-Anzeiger
-   (wann Einzelaktien gekauft werden dürfen). Die Overnight-Prämie bei
-   QQQ/IWM (brutto 12–13 % p.a., Breakeven 2,6 bps je Ausführung) bleibt
-   ein Nebentest mit Auktionsorders und kleinem Kapitaldeckel — mehr nicht.
-7. **Regimefilter** (SPY über SMA200, VIX unter 25) und **Volatilitäts-Sizing**
-   sind die zwei Hebel, die den Drawdown steuern; sie kosten in
-   Erholungsjahren (2020) und zahlen in Bärenjahren (2022).
-8. Die **PDT-Regel ist seit 04.06.2026 abgeschafft**; `compliance.py` weiß
-   das noch nicht. Für den Daytrading-Test ist der Weg frei, für den Rest
-   ändert es nichts.
-9. Zeitplan: Oktober 2026 messen auf deinen Daten, November bauen und in
-   der Schattenflotte voranmelden, Dezember Papierdepot mit der neuen
-   Engine-Konfiguration, **Januar 2027 Start** — klein, mit Risiko-Dach.
-10. Realistische Erwartung nach Kosten: **SPY + 3 bis 8 Prozentpunkte p.a.**
-    bei Sharpe 0,8–1,3 und maximalem Drawdown von 20–30 % für das
-    Einzelaktien-Ranking (kurz oder mittel, je nach §6.6); für den ORB-
-    Daytrading-Test Sharpe > 1 als Bestehensgrenze. Gewinnmaximierung heißt
-    hier: konzentrierter (Top 10 statt 20), kürzer (wenn die Kurve es
-    erlaubt), und voll investiert im richtigen Regime — nicht: mehr
-    handeln. „Zuverlässig hohe Margen mit Daytrading“ verspricht dieser Plan
-    nicht, weil kein ehrlicher Datensatz sie hergibt; er baut den Test, der
-    es zeigen oder widerlegen kann.
+1. Die Infrastruktur ist fertig: eine Engine für Backtest, Papierdepot und
+   Schattenflotte, PIT-Wächter, Kostenmodell, Journal, Risiko-Dach — und
+   seit heute ein **Gedächtnis** (Befundregister, Trade-Autopsie, Lehren),
+   das jeden Lauf und jeden Fehlschlag als Regel behält (§6.13, CLAUDE.md §4).
+2. Die **Umkehr-Strategie** (5 Tage) ist mathematisch verloren: +0,11 % je
+   Trade gegen 0,14 % Kosten je Rundlauf. Der Hebel ist Vorsprung je Trade
+   über Kosten je Trade — also **Wochen statt Tage**: Netto-CAGR steigt
+   monoton mit der Haltedauer bis 42 Tage (§6.7).
+3. Die tragenden Bausteine auf Einzelaktien (8.061 US-Aktien 2006–2020,
+   liquides Universum ≥ 25 Mio $/Tag, Top 50): **Momentum-Konsistenz** und
+   **ruhiges Volumen**; Chartmuster, Ausbrüche, Explosionsjagd und
+   Saisonregeln sind gemessen und verworfen (§6.11, Lehren §2).
+4. **Ehrlich gerechnet schlägt kein Handmix SPY in der CAGR** (qlib
+   2009–2020: momentum + Regime-Tor 10,2 % gegen SPY 14,3 %); der sichere
+   Gewinn der Handmixe ist der halbe Drawdown (Tor) — und das Vola-Ziel
+   0,25 halbiert ihn noch einmal bei gleicher CAGR (§6.12).
+5. Die einzige Fassung, die SPY auf dem breiten Panel schlägt, hat eine
+   **LightGBM-Prognose** im Score — und ihr Vorsprung sitzt genau in den
+   Phasen unter der SMA200 (2009, 2020): Das Modell ist ein
+   **Erholungs-Ranker**, Momentum der Trend-Ranker (§6.10).
+6. Daraus der **Hybrid** (HYP-25): über der SMA200 Momentum-Handmix,
+   darunter Modell, immer investiert, Drawdown über Vola-Ziel 0,25 — auf
+   qlib 2009–2020 **18,4 % ohne / 14,0 % mit Vola-Ziel bei −30 % MaxDD**
+   (SPY 14,5 % bei −34 %). Erste Fassung, die eine vorab registrierte Regel
+   besteht; in-sample entworfen, deshalb entscheidet der Projektcache.
+7. Der Engine-Pfad rechnet dasselbe wie das Labor — sobald man weiß, dass
+   ein **einzelner Replay ±3 Punkte Kohorten-Lotterie** ist (§6.9). Stop
+   3 ATR bleibt (Drawdown-Halbierer), Rangverlust erst unter dem 20.
+   Perzentil (+1 Punkt, −10 Punkte MaxDD), Tagesdeckel 3–5 neue Positionen
+   (Staffelung); Verlängerung, Sperre, Sizing: gemessen, unwichtig.
+8. Der Bot ist **startbar**: `12_daemon.py --strategy ranking --score-quelle
+   mix|ml|hybrid`, Modell aus `34_`, Risiko-Dach, PDT-Schalter, 70 Selbst-
+   prüfungen; Stufe 1 (`docs/bot-start-2027.md`) auf dem Projektcache
+   entscheidet die Score-Quelle mit vorab registrierten Bestehensregeln.
+9. Zeitplan: Oktober messen auf deinen Daten (23_/35_/31_ mit Hybrid),
+   November Modell trainieren und Schatten voranmelden, Dezember
+   Papierdepot, **Januar 2027 Start** — klein, mit Risiko-Dach.
+10. Realistische Erwartung nach Kosten (§9.1, nachkalibriert): Handmix +
+    Tor ≈ **SPY − 2 bis SPY + 1 Punkt bei halbem Drawdown**; Hybrid mit
+    Vola-Ziel, falls er auf dem Projektcache besteht, **SPY + 0 bis + 4
+    Punkte bei −25 bis −30 % MaxDD**. „Weit über einem Welt-ETF“ gibt kein
+    ehrlicher Datensatz her; „SPY-Rendite bei deutlich weniger Schmerz,
+    mit der Chance auf mehr in Erholungen“ schon — und das ist über zehn
+    Jahre der bessere Bot.
 
 ---
 
@@ -832,11 +830,42 @@ das trägt nach Abstürzen, wenn Momentum leer ausgeht. Achtung, ungetestet:
 Training); ob der Ranker ohne Tor einen echten Bärenmarkt übersteht, ist
 **nicht gemessen** (MaxDD ohne Tor −40,6 %; 2018 −10 %, 2011 −7 %).
 
-Was daraus zu prüfen ist (aus den gespeicherten Vorhersagen, ohne neues
-Training, `35_`): (a) ML ohne Tor, aber mit Vola-Ziel 0,25 — Drawdown-
-Schutz ohne Sperre; (b) Hybrid: Tor zu → ML-Auswahl mit Vola-Ziel, Tor
-auf → Momentum-Handmix; (c) Hysterese-Tor. Bestehensregel für jede
-Fassung: CAGR ≥ momentum+trend_ok + 2 Punkte UND MaxDD ≤ −30 %.
+**Engine-Pfad mit ML-Score (31_ `--ml-pred`, qlib, Stop 3 ATR, Rangverlust
+< 0,20, Tor an):** 7,8 % über 2009–2020 (6,2 % inkl. drei Jahren ohne
+Vorhersagen), MaxDD −22 %, 1.770 Trades — **deckungsgleich mit der
+vektorisierten ML-Fassung mit Tor (7,8 %)**. Der Live-Weg der Score-Quelle
+`ml` (Faktorzoo → Rangperzentile → Modell → `ml_score`) rechnet also, was
+das Labor gemessen hat; die Kohorten-Lotterie (§6.9) hat hier zufällig
+nicht zugeschlagen.
+
+**Die Fassungen aus den gespeicherten Vorhersagen (`35_`, qlib 2009–2020,
+Top 50, 21 Tage, 20 bps; Bestehensregel vorab: CAGR ≥ momentum_trend + 2
+UND MaxDD ≤ −30 %):**
+
+| Fassung | CAGR | Sharpe | MaxDD | Expo | Urteil |
+|---|---|---|---|---|---|
+| ml_kein | 15,7 % | 0,70 | −40,6 % | 79 % | kandidat |
+| ml_trend / ml_hyst | 7,8 % | 0,49 | −30,7 % | 66 % | verworfen |
+| ml_vola25 | 12,1 % | 0,67 | −33,7 % | 79 % | verworfen |
+| **hybrid** (Tor auf → Momentum, zu → ML) | **18,4 %** | 0,75 | −40,1 % | 87 % | kandidat |
+| **hybrid_vola25** | **14,0 %** | 0,71 | **−30,0 %** | 87 % | **bestanden** |
+| momentum_trend (Referenz) | 10,2 % | 0,56 | −32,5 % | 74 % | — |
+| momentum_kein | 11,8 % | 0,56 | −38,4 % | 99 % | — |
+| SPY | 14,5 % | | −33,7 % | | |
+
+Der Hybrid ist besser als jede seiner Hälften (18,4 gegen 15,7 und 11,8):
+Momentum ist in Trendphasen der bessere Ranker, das Modell in Erholungen —
+und der Hybrid nimmt jeweils den, der dort etwas hat. Mit Vola-Ziel 0,25
+ist er die **erste Fassung des Labors, die eine vorab registrierte
+Bestehensregel schafft**: SPY-Rendite (14,0 gegen 14,5) bei geringerem
+Drawdown (−30 gegen −34) und Sharpe 0,71. Ehrlich dazu: die Idee entstand
+aus denselben Daten (in-sample entworfen), 2008 liegt vor dem ersten
+Testjahr, und der Versuchszähler steht bei 97 Varianten (Schwelle 3,5
+Sigma). Deshalb **HYP-2027-25** mit Bestehensregel für das dritte Panel
+(Projektcache 2018–2026, enthält 2020 und 2022 als echte Aus-Phasen) — das
+ist der Lauf, der 2027 entscheidet. Die Engine kann den Hybrid schon
+rechnen (`score_quelle="hybrid"`, §7.2), das Vola-Ziel kommt ins
+Risiko-Dach.
 
 Wenn der ML-Ranker auf dem dritten Panel hält, wird er der Score der
 Engine (Architektur §7: `build_ranking_frame` liefert die Merkmale, ein
@@ -1041,8 +1070,11 @@ den Handmix nicht um ≥ 2 Punkte schlägt, bleibt §7.1 mit Handmix. Wenn ja:
    `vorhersagen(merkmale_heute)`. Modelle liegen in `models/lgbm_h21_<datum>.txt`
    im Repo (klein), Training jährlich im Januar auf allen Daten bis
    Ende November (Embargo), Protokoll im Register.
-3. **Engine**: Strategie `"ml"` — `_querschnitt_scores` nimmt die
-   Modellvorhersage als Score statt des Z-Score-Mixes; alles andere
+3. **Engine**: `score_quelle` = `"mix"` (Handmix), `"ml"` (Modell) oder
+   **`"hybrid"`** (über der SMA200 Handmix, darunter Modell, Einstiege
+   immer erlaubt — das Vola-Ziel übernimmt den Schutz); gebaut, Selbsttest.
+   `_querschnitt_scores` nimmt die Vorhersage als Score statt des
+   Z-Score-Mixes; alles andere
    (Regime-Tor, Top-Dezil, 50 Plätze, 21–63 Tage, Rangverlust 0,20, Stop
    3 ATR, Risiko-Dach, Vola-Ziel) bleibt. So ist der Wechsel eine Zeile
    in der Konfiguration, und der Replay 31_ vergleicht beide Scores auf
@@ -1080,6 +1112,13 @@ deinem Cache vorn liegt. Der Handmix ist der Rückfall, nicht der Plan.
 Entscheidung am Ende von Schritt 0: **Welche zwei bis drei Faktoren tragen
 auf deinen Daten netto?** Nur die kommen in Schritt 1.
 
+**Ergänzung 2026-09-29 zu Schritt 0:** `23_ --panel projekt` (Vorhersagen),
+`35_ --panel projekt` (Hybrid gegen Handmix, Bestehensregel HYP-25),
+`31_ --ml-pred … --hybrid --max-new 3` (Engine-Pfad), `33_` (Autopsie),
+`32_ --bericht` (Register ins Repo). Alles steht in `docs/bot-start-2027.md`
+§2 mit den Bestehensregeln. Erst wenn die Tabelle voll ist, wird die
+Score-Quelle gewählt.
+
 ### Schritt 1 — Oktober, Woche 3–4: Neue Datenlader
 
 | # | Aufgabe | Datei | Prüfung |
@@ -1102,6 +1141,13 @@ auf deinen Daten netto?** Nur die kommen in Schritt 1.
 | 2.5 | Schattenbots anmelden: `K00_kurz_basis`, `K01_kurz_H10`, `K02_kurz_top20`, `M00_mittel_basis`, `M01_mittel_ohne_volumen`, `M02_mittel_ohne_regime` — **eine Achse je Bot**, Vergleich kurz gegen mittel gepaart | `18_fleet.py --anmelden` | Divergenz-Diagnose: kein Bot identisch mit Basis |
 | 2.6 | ORB als Schattenbuch (kein Handel), täglich nach Schluss ausgewertet | `26_` + `shadow.py` Erweiterung | Trades je Tag, RV-Band, netto |
 | 2.7 | Overnight-Papierhandel QQQ/IWM mit `cls`/`opg`, 4 Wochen | `05_paper_trade.py` Erweiterung | gemessene Fill-Abweichung zum Auktionspreis |
+
+**Ergänzung 2026-09-29 zu Schritt 2:** Modell trainieren (`34_ --panel
+projekt --bis 2026-11-30`), Modell-Datei committen, Trockenlauf
+`12_daemon.py --strategy ranking --score-quelle <gewählt> --once`,
+Vola-Ziel ins Risiko-Dach (`target_invested` = min(1, 0,25 / realisierte
+20-Tage-Vola des Depots) — noch zu bauen, HYP-22), Schattenbots je
+Score-Quelle voranmelden (eine Achse: `score_quelle`).
 
 ### Schritt 3 — Dezember: Papierdepot mit „ranking“, Umkehr-Bot stilllegen
 
@@ -1152,6 +1198,22 @@ Umschlag, und die Daytrading-Spur nur, wenn HYP-04 besteht. Ein System, das
 SPY um 2 Punkte schlägt und 2008/2020/2022 mit −20 % statt −35/−55 %
 übersteht, ist über zehn Jahre der bessere Bot als eines, das im
 Backtest 30 % zeigt und im ersten Bärenjahr abgeschaltet wird.
+
+**Nachkalibrierung 2026-09-29 (nach §6.9–6.13):**
+
+| Fassung | Beleg (qlib 2009–2020, netto 20 bps) | Erwartung 2027 netto | MaxDD |
+|---|---|---|---|
+| Handmix momentum/ranking + Tor | 10,2 % / 6,1–6,7 % gegen SPY 14,3 % | **SPY − 3 bis SPY + 1** | −20 bis −28 % (Tor + Stop) |
+| dito + Vola-Ziel 0,25 | qlib kombi2 5,2 % bei −18 % | SPY − 3 bis 0 | **−15 bis −22 %** |
+| ML-Ranker allein, kein Tor | 15,7 % bei −41 % | SPY + 0 bis + 3, **2008 ungetestet** | −35 bis −45 % |
+| **Hybrid + Vola-Ziel 0,25** (HYP-25) | **14,0 % bei −30 %** (in-sample entworfen) | **SPY + 0 bis + 4** | −25 bis −30 % |
+| Engine-Pfad, egal welche Quelle | Kohorten-Lotterie ±3 Punkte je Replay | Deckel 3–5 je Tag; Zahl über Startversätze mitteln | ±10 Punkte je Ziehung |
+
+Die Zeile 10 der alten Kurzfassung („SPY + 3 bis 8“) ist damit
+**zurückgenommen**: Sie stammte aus S&P-Zahlen mit Überlebens-Bias und aus
+Literaturwerten vor Kosten. Was steht, ist SPY-Rendite bei halbem Drawdown
+als Basis, und der Hybrid als die eine begründete Chance auf mehr — mit
+einer Bestehensregel, die VOR dem Projektcache-Lauf festgelegt ist.
 
 ### 9.2 Abbruchkriterien (jetzt aufschreiben, nicht wenn es soweit ist)
 

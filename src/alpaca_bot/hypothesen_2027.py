@@ -402,6 +402,33 @@ KATALOG: list[dict] = [
                   "Baerenmarkt-Rallyes (2008, 2022) den Gewinn auffressen.",
         skript="scripts/22_labor_portfolio.py --regime trend_hyst",
     ),
+    dict(
+        hyp_id="HYP-2027-25",
+        prio=1,
+        behauptung="Ein regime-abhaengiger Score schlaegt jeden Einzel-Score: Ueber der SMA200 "
+                   "waehlt der Momentum-Handmix (Konsistenz + 12-1), darunter der LightGBM-Ranker "
+                   "(ruhiges Volumen, niedrige Vola, Abstand zum 52-Wochen-Tief = gefallene "
+                   "Qualitaet) - IMMER investiert, Drawdown ueber ein Vola-Ziel von 0,25 statt "
+                   "ueber die Sperre. Der Hybrid liefert netto mehr als SPY bei hoechstens "
+                   "SPY-Drawdown.",
+        quelle="Eigene Messung 35_ qlib 2009-2020, Top 50, 21 Tage, 20 bps, gespeicherte "
+               "OOS-Vorhersagen: hybrid 18,4 % (SPY 14,5 %, Univ.EW 13,9 %, momentum_trend "
+               "10,2 %, ml_kein 15,7 %), MaxDD -40 %; hybrid_vola25 14,0 % bei MaxDD -30,0 % "
+               "(Bestehensregel des Laufs erfuellt). Mechanik: ML gewinnt nur in Phasen unter "
+               "der SMA200 (2009 +24 %, 2020 +35 %), Momentum nur darueber. IN-SAMPLE ENTWORFEN "
+               "(die Idee kam aus denselben Daten), 2008 nie getestet.",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="Drittes Panel = Projektcache 2018-2026 (mit Volumen; enthaelt 2020 und "
+                            "2022 als echte Aus-Phasen): 23_ --panel projekt (Vorhersagen), dann 35_ "
+                            "--panel projekt. Bestehen: hybrid_vola25 CAGR >= SPY - 1 Punkt UND >= "
+                            "momentum_trend + 2 Punkte UND MaxDD <= 0,9 x SPY-MaxDD. Danach 31_ "
+                            "--score-quelle hybrid durch die Engine, Abweichung <= 3 Punkte (Kohorten-"
+                            "Rauschen). VOR dem Projektcache-Lauf registriert (2026-09-29).",
+        erwartung="Auf dem Projektcache 2-4 Punkte ueber momentum_trend, ungefaehr SPY-Rendite bei "
+                  "geringerem Drawdown. Scheitert, wenn 2022 (langer Baerenmarkt statt V) den "
+                  "Erholungs-Ranker zerlegt - dann bleibt Momentum + Tor.",
+        skript="scripts/35_labor_ml_varianten.py --panel projekt",
+    ),
 ]
 
 
