@@ -52,6 +52,11 @@ verändern (Masterplan §6.9–6.13, Lehren §1):
    **Welche Quelle der Bot bekommt, entscheidet Stufe 1 auf dem
    Projektcache** — nicht dieses Dokument.
 
+5. **Gewichte** = Laborvariante `momentum` (12-1 + Konsistenz). Damit durch
+   den Engine-Pfad: S&P 13,3 % bei −24 % MaxDD (SPY 14,7 % / −34 %), qlib
+   8,0 % bei −24 % (SPY 14,3 % / −34 %). Das ist der Bot, der heute startbar
+   ist — ohne Modell. Offene Läufe: Masterplan §9.3.
+
 Modell trainieren (nur für `ml`/`hybrid`, einmal im Januar, Stichtag Ende
 November):
 

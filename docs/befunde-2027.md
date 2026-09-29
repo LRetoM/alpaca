@@ -1,11 +1,11 @@
 # Befundregister 2027 — jeder Lauf, jedes Urteil
 
-> Automatisch erzeugt aus `results/labor/befunde.jsonl` am 2026-09-29 13:14 UTC. **239 Befunde, 97 unterschiedliche Varianten → Zufallsschwelle 3.52 Sigma.** Ein t-Wert darunter ist kein Fund.
+> Automatisch erzeugt aus `results/labor/befunde.jsonl` am 2026-09-29 14:49 UTC. **265 Befunde, 105 unterschiedliche Varianten → Zufallsschwelle 3.55 Sigma.** Ein t-Wert darunter ist kein Fund.
 
 Nichts hier wird gelöscht. Verworfene Zeilen sind die wertvollsten: Sie sagen,
 was nicht noch einmal probiert werden muss.
 
-## BESTANDEN (6)
+## BESTANDEN (10)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -15,8 +15,12 @@ was nicht noch einmal probiert werden muss.
 | 22 | sp500_close | ranking_preis | 2016-2026 | kein | 42 | 20 | 16.8% | 14.9% | 16.7% | 0.99 | -22.9% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum |
 | 29 | qlib | fest_h5 | 2009-2020 | kein | 5 | 20 | 13.5% | 9.3% |  | 0.64 | -38.3% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; LightGBM je Horizont, Top 30, ohne Regime. CAGR 13.5% ueber 2006-2020 inkl. 3 Nulljahren = 17.2% ueber 2009-2020.  |
 | 35 | qlib | hybrid_vola25 | 2009-2020 | kein | 21 | 20 | 14.0% | 14.5% | 13.9% | 0.71 | -30.0% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +3.8%; MaxDD -30.0% |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 8.7% | 9.3% |  | 0.61 | -34.1% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 820, 'zeitausstieg': 546, 'rangverlust': 511} |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 13.0% | 9.3% |  | 0.80 | -35.3% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'zeitausstieg': 750, 'rangverlust': 713} |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_ok | 42 | 10 | 7.7% | 9.4% | 8.7% | 0.47 | -39.7% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum |
+| 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 20 | 13.3% | 14.7% |  | 0.85 | -23.8% | CAGR >= SPY, Drawdown <= 0,8 x SPY, Auswahl >= Universum; Ausstiege {'stop_intraday': 1742, 'zeitausstieg': 813, 'rangverlust': 241, 'gewinnziel_erreicht': 2} |
 
-## KANDIDAT (61)
+## KANDIDAT (72)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -81,6 +85,17 @@ was nicht noch einmal probiert werden muss.
 | 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 6.2% | 9.3% |  | 0.56 | -22.1% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 719, 'rangverlust': 685, 'zeitausstieg': 366} |
 | 35 | qlib | ml_kein | 2009-2020 | kein | 21 | 20 | 15.7% | 14.5% | 13.9% | 0.70 | -40.6% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +5.6%; MaxDD -40.6% |
 | 35 | qlib | hybrid | 2009-2020 | kein | 21 | 20 | 18.4% | 14.5% | 13.9% | 0.75 | -40.1% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +8.2%; MaxDD -40.1% |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 5.6% | 9.3% |  | 0.49 | -31.8% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 649, 'rangverlust': 474, 'zeitausstieg': 398} |
+| 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 20 | 9.3% | 14.7% |  | 0.71 | -21.4% | knapp: CAGR<SPY; Ausstiege {'zeitausstieg': 965, 'rangverlust': 467, 'stop_intraday': 1} |
+| 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 20 | 7.5% | 14.7% |  | 0.61 | -21.2% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 1733, 'zeitausstieg': 825, 'rangverlust': 249, 'gewinnziel_erreicht': 2} |
+| 31 | sp500_close | ranking_engine | 2016-2026 | trend_ok | 21-63 | 20 | 6.7% | 14.7% |  | 0.56 | -23.4% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 1902, 'zeitausstieg': 899, 'rangverlust': 284, 'gewinnziel_erreicht': 1} |
+| 23 | qlib | ml_lgbm_h42 | 2009-2020 | kein | 42 | 20 | 16.6% | 14.5% | 13.9% | 0.72 | -40.9% | knapp: DD>0,8xSPY; ML minus bester Handmix +3.6%; OOS-IC +0.0343, bester Einzelfaktor abstand_52w_tief +0.0372 |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 5.1% | 9.3% |  | 0.47 | -27.1% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 685, 'rangverlust': 460, 'zeitausstieg': 419} |
+| 33 | qlib | autopsie | 2007-2020 | nan | nan |  |  |  |  |  |  | Ausstieg 'stop_intraday' traegt 44% der Trades bei Oe -8.1% (Treffer 0%, Oe 17 Tage); 'zeitausstieg' dagegen Oe +13.5%. Pruefen: verkauft diese Regel NACH dem Verlust statt vor ihm (verspaeteter Stop)?. / Rendite steigt mit der Haltedauer (<=10: -8.4% -> 43-63: +10.9%): die fruehen Ausstiege sind die Verlierer - die Kostenkurve aus 24_ zeigt sich auch im Engine-Pfad. / Score-Quartil wirkt (-4.04% oben minus unten): engere Rangschwelle testen. / Verlustjahre nach Einstiegsjahr: 2008 (-0.1%, n=13), 2015 (-1.0%, n=165), 2018 (-0.3%, n=209) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 80%, Median 85%, Tage unter 50 %: 11% - Cash-Bremse ist kein Haupthebel. / Konzentration: die besten 5 % der Trades liefern 37% des Bruttogewinns, die 10 besten Symbole 51% des Netto-PnL; ohne die 10 besten Trades waere der Netto-PnL 179,432 $ statt 236,730 $ - breit verteilt. / Einstiegsmonat: bester 5 (+4.7%), schlechtester 10 (+0.3%) - nur Notiz: 14 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_ok | 42 | 20 | 7.2% | 9.4% | 8.7% | 0.44 | -40.2% | knapp: CAGR<SPY |
+| 31 | qlib | ranking_engine | 2006-2020 | trend_ok | 21-63 | 20 | 6.7% | 9.3% |  | 0.55 | -23.8% | knapp: CAGR<SPY; Ausstiege {'stop_intraday': 623, 'rangverlust': 441, 'zeitausstieg': 418} |
+| 33 | qlib_momentum | autopsie | 2007-2020 | nan | nan |  |  |  |  |  |  | Ausstieg 'stop_intraday' traegt 42% der Trades bei Oe -8.5% (Treffer 0%, Oe 18 Tage); 'zeitausstieg' dagegen Oe +14.1%. Pruefen: verkauft diese Regel NACH dem Verlust statt vor ihm (verspaeteter Stop)?. / Rendite steigt mit der Haltedauer (<=10: -8.5% -> 43-63: +10.6%): die fruehen Ausstiege sind die Verlierer - die Kostenkurve aus 24_ zeigt sich auch im Engine-Pfad. / Score-Quartil wirkt (+1.36% oben minus unten): engere Rangschwelle testen. / Verlustjahre nach Einstiegsjahr: 2015 (-0.9%, n=129), 2018 (-1.4%, n=164) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 74%, Median 84%, Tage unter 50 %: 27% - Cash-Bremse ist ein Hebel. / Konzentration: die besten 5 % der Trades liefern 40% des Bruttogewinns, die 10 besten Symbole 73% des Netto-PnL; ohne die 10 besten Trades waere der Netto-PnL 87,879 $ statt 161,651 $ - breit verteilt. / Einstiegsmonat: bester 6 (+5.2%), schlechtester 3 (-0.7%) - nur Notiz: 14 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
+| 33 | sp500_close_momentum | autopsie | 2017-2026 | nan | nan |  |  |  |  |  |  | Ausstieg 'stop_intraday' traegt 62% der Trades bei Oe -6.6% (Treffer 0%, Oe 15 Tage); 'gewinnziel_erreicht' dagegen Oe +151.3%. Pruefen: verkauft diese Regel NACH dem Verlust statt vor ihm (verspaeteter Stop)?. / Rendite steigt mit der Haltedauer (<=10: -6.1% -> 43-63: +15.3%): die fruehen Ausstiege sind die Verlierer - die Kostenkurve aus 24_ zeigt sich auch im Engine-Pfad. / Score-Quartil wirkt (+1.73% oben minus unten): engere Rangschwelle testen. / Verlustjahre nach Einstiegsjahr: 2018 (-0.2%, n=292), 2022 (-1.7%, n=105) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 81%, Median 88%, Tage unter 50 %: 18% - Cash-Bremse ist kein Haupthebel. / Konzentration: die besten 5 % der Trades liefern 63% des Bruttogewinns, die 10 besten Symbole 60% des Netto-PnL; ohne die 10 besten Trades waere der Netto-PnL 144,371 $ statt 254,334 $ - rechtsschief: jede Regel, die Sieger zwingt (Zeitausstieg, Sperre, Gewinnziel), kostet den rechten Rand. / Einstiegsmonat: bester 4 (+8.4%), schlechtester 2 (-2.4%) - nur Notiz: 10 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
 
 ## ZU_DUENN (1)
 
@@ -88,7 +103,7 @@ was nicht noch einmal probiert werden muss.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 33 | sp500_close | autopsie | 2017-2026 | nan | nan |  |  |  |  |  |  | Score-Quartil innerhalb der Kaufmenge ohne Wirkung (oben minus unten +0.93%): keine Konzentration auf die Top 10, die Rangschwelle reicht. / Verlustjahre nach Einstiegsjahr: 2022 (-2.2%, n=200), 2025 (-0.2%, n=250) - gegen SPY-Jahr und Regime-Tor pruefen. / Investitionsgrad (zu Einstandskursen) Mittel 77%, Median 86%, Tage unter 50 %: 11% - Cash-Bremse ist kein Haupthebel. / Einstiegsmonat: bester 10 (+4.7%), schlechtester 2 (-3.3%) - nur Notiz: 10 Jahre sind fuer Saisonregeln zu duenn (Versuchszaehler!). |
 
-## VERWORFEN (170)
+## VERWORFEN (181)
 
 | Skript | Panel | Variante | Zeitraum | Regime | H | Kosten | CAGR | SPY | Univ.EW | Sharpe | MaxDD | Lehre |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -262,6 +277,17 @@ was nicht noch einmal probiert werden muss.
 | 35 | qlib | momentum_trend | 2009-2020 | trend_ok | 21 | 20 | 10.2% | 14.5% | 13.9% | 0.56 | -32.5% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +0.0%; MaxDD -32.5% |
 | 35 | qlib | momentum_kein | 2009-2020 | kein | 21 | 20 | 11.8% | 14.5% | 13.9% | 0.56 | -38.4% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +1.6%; MaxDD -38.4% |
 | 35 | qlib | momentum_vola25 | 2009-2020 | kein | 21 | 20 | 11.0% | 14.5% | 13.9% | 0.60 | -34.0% | ML-Variante aus gespeicherten Vorhersagen; gegen momentum_trend +0.8%; MaxDD -34.0% |
+| 23 | qlib | ml_lgbm_h10 | 2009-2020 | kein | 10 | 20 | 11.6% | 14.5% | 13.9% | 0.54 | -44.2% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum; ML minus bester Handmix +3.4%; OOS-IC +0.0303, bester Einzelfaktor mom_12_1_vola +0.0262 |
+| 22 | qlib | ranking_v2 | 2006-2020 | kein | 42 | 10 | 6.9% | 9.4% | 8.7% | 0.38 | -59.9% | CAGR<SPY, DD>0,8xSPY |
+| 22 | qlib | ranking_v2 | 2006-2020 | kein | 42 | 20 | 6.3% | 9.4% | 8.7% | 0.36 | -60.0% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | kein | 42 | 40 | 5.0% | 9.4% | 8.7% | 0.32 | -60.3% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_ok | 42 | 40 | 6.3% | 9.4% | 8.7% | 0.40 | -41.0% | CAGR<SPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | vix_ruhig | 42 | 10 | 3.3% | 9.4% | 8.7% | 0.26 | -44.8% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | vix_ruhig | 42 | 20 | 2.8% | 9.4% | 8.7% | 0.24 | -45.0% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | vix_ruhig | 42 | 40 | 1.8% | 9.4% | 8.7% | 0.19 | -45.4% | CAGR<SPY, DD>0,8xSPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 10 | 5.5% | 9.4% | 8.7% | 0.38 | -36.3% | CAGR<SPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 20 | 5.1% | 9.4% | 8.7% | 0.36 | -36.7% | CAGR<SPY, Auswahl<Universum |
+| 22 | qlib | ranking_v2 | 2006-2020 | trend_und_vix | 42 | 40 | 4.2% | 9.4% | 8.7% | 0.31 | -37.6% | CAGR<SPY, Auswahl<Universum |
 
 ## WIDERLEGT (1)
 

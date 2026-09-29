@@ -799,6 +799,12 @@ ranking (Konsistenz + ruhiges Volumen + vola-skaliertes 12-1):
 Und durch den Engine-Pfad (qlib, Stop 3, Rangverlust 0,20, Deckel 3, Tor):
 `momentum` 8,0 % gegen `ranking` 6,1 % über 2009–2020 (+1,9), MaxDD −24 %
 gegen −27 % — gleiche Richtung, Kohorten-Rauschen inklusive.
+**S&P durch den Engine-Pfad mit den neuen Gewichten** (Stop 3, Rangverlust
+0,20, Deckel 3, Tor, 2016–2026): **13,3 % CAGR, Sharpe 0,85, MaxDD −23,8 %**
+(SPY 14,7 % / −33,7 %) gegen 7,5 % mit den alten Gewichten — +5,8 Punkte,
+2024 +42 %, 2020 +29 %, 2022 −8,7 %. Das ist die Konfiguration, die
+`12_daemon.py --strategy ranking` heute ohne Modell fährt: SPY-nahe Rendite
+bei einem Drittel weniger Drawdown, auf einem Panel mit Überlebens-Bias.
 
 Das ruhige Volumen hat den besten IC im Zoo (§6.5) und macht jedes
 Portfolio schlechter, in das es kommt — es kippt die Auswahl zu
@@ -1332,6 +1338,32 @@ einer Bestehensregel, die VOR dem Projektcache-Lauf festgelegt ist.
 | Live: 3 Monate hinter SPY um > 10 %-Pkt bei Regime an | Halbieren, Schatten entscheidet |
 
 ---
+
+## 9.3 Offene Läufe (Session 2026-09-29 endete mit ~24 $ Restguthaben)
+
+Zwei Ketten sind mit der Unterbrechung der Sitzung gestorben und wurden
+bewusst **nicht** neu gestartet. Sie sind registriert (HYP-22/24/26), die
+Befehle stehen hier, die Ergebnisse gehören in §6.12 / §6.10:
+
+```bash
+# HYP-24 Hysterese-Tor und HYP-22 Vola-Ziel 0,25 auf qlib (je ~3 Minuten, 6 GB)
+python3 scripts/22_labor_portfolio.py --panel qlib --variante momentum --start 2006-01-01 --top-n 50 --min-dollar-volume 25000000 --kosten 20 --regimes trend_ok trend_hyst
+python3 scripts/22_labor_portfolio.py --panel qlib --variante momentum --start 2006-01-01 --top-n 50 --min-dollar-volume 25000000 --kosten 20 --regimes trend_ok --vola-ziel 0.25
+# HYP-26 Phasen-Stop im Hybrid, alle drei mit momentum-Gewichten (je ~11 Minuten)
+P=results/labor/ml_pred_qlib_h21.parquet
+python3 scripts/31_simulate_ranking.py --panel qlib --start 2006-01-01 --variante momentum --stop-atr 3 --stop-modell 99 --exit-rank 0.2 --max-new 3 --ml-pred $P --hybrid
+python3 scripts/31_simulate_ranking.py --panel qlib --start 2006-01-01 --variante momentum --stop-atr 99 --exit-rank 0.2 --max-new 3 --ml-pred $P --hybrid
+python3 scripts/31_simulate_ranking.py --panel qlib --start 2006-01-01 --variante momentum --stop-atr 3 --exit-rank 0.2 --max-new 3 --ml-pred $P --hybrid
+python3 scripts/33_trade_autopsie.py && python3 scripts/32_befunde.py --bericht --muster
+```
+
+Vorhersagen (`results/labor/ml_pred_qlib_h21.parquet`) liegen lokal in
+`results/` (gitignored) — auf einem neuen Rechner erst `23_ --panel qlib
+--horizont 21 --min-dollar-volume 25000000 --top-n 50` (15 Minuten).
+
+Die Reihenfolge danach ist §8: Projektcache bauen, Stufe 1 aus
+`docs/bot-start-2027.md` mit den vorab registrierten Bestehensregeln, dann
+die Score-Quelle wählen. Nichts davon braucht neue Ideen — nur Rechenzeit.
 
 ## 10. Was bewusst nicht gemacht wird
 
