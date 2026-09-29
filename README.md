@@ -25,7 +25,7 @@ Die Umgebung steht (`.venv` mit allen Paketen). Nur die Keys fehlen:
 
 ```bash
 cp .env.example .env      # dann Keys eintragen
-.venv/bin/python scripts/00_selftest.py      # 47 Prüfungen, ohne Keys
+.venv/bin/python scripts/00_selftest.py      # 56 Prüfungen, ohne Keys
 .venv/bin/python scripts/01_check_setup.py   # mit Keys
 ```
 
@@ -37,7 +37,7 @@ cp .env.example .env      # dann Keys eintragen
 
 | Skript | Zweck |
 |---|---|
-| `00_selftest.py` | 47 Prüfungen des gesamten Codes. Keine Keys nötig. |
+| `00_selftest.py` | 56 Prüfungen des gesamten Codes (inkl. Ranking-Strategie, Risiko-Dach). Keine Keys nötig. |
 | `01_check_setup.py` | Keys, Konto, Marktdaten, Börsenstatus |
 | `02_market_overview.py` | Täglicher Überblick: Trend, RSI, Vola, Korrelationen |
 | `03_backtest.py` | Strategien testen, immer gegen Buy & Hold |

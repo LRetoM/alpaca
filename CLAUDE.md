@@ -93,7 +93,7 @@ dann vorwärts in der Schattenflotte, dann Papierdepot, dann klein live.
 ## 4. Wie eine Session arbeitet
 
 ```bash
-.venv/bin/python scripts/00_selftest.py        # 47 Prüfungen, keine Keys
+.venv/bin/python scripts/00_selftest.py        # 56 Prüfungen, keine Keys
 .venv/bin/python scripts/09_selfcheck.py       # Projektverfassung
 # Panels einmal bauen (Mac: aus dem Projektcache)
 .venv/bin/python scripts/20_labor_daten.py --quelle projekt --pfad <cache.parquet> --name projekt

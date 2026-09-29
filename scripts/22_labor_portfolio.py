@@ -77,6 +77,15 @@ VARIANTEN = {
                                  "mom_12_1_vola": 0.5}, haltedauer=5),
     # Reine Umkehr wie der heutige Bot, zum direkten Vergleich mit 'kurz'
     "reversal_rein": dict(gewichte={"reversal_5d": 1.0, "rsi2_invers": 1.0}, haltedauer=5),
+    # Exakt der Score der Engine-Strategie "ranking" (signals.RankingWeights),
+    # fuer den Replay-Vergleich mit scripts/31 - mit und ohne Volumen
+    "ranking": dict(gewichte={"mom_konsistenz": 1.0, "vol_schub_6m_neg": 1.0,
+                              "mom_12_1_vola": 0.5}, haltedauer=42),
+    "ranking_preis": dict(gewichte={"mom_konsistenz": 1.0, "mom_12_1_vola": 0.5}, haltedauer=42),
+    # Kandidat v2: rohes 12-1-Momentum dazu (CAGR-staerker), ruhiges Volumen halb
+    "ranking_v2": dict(gewichte={"mom_12_1": 1.0, "mom_konsistenz": 1.0, "vol_schub_6m_neg": 0.5},
+                       haltedauer=42),
+    "ranking_v2_preis": dict(gewichte={"mom_12_1": 1.0, "mom_konsistenz": 1.0}, haltedauer=42),
 }
 
 

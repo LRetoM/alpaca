@@ -285,6 +285,58 @@ def main() -> int:
           f"{rep.checks_run} Pruefungen, {len(rep.violations)} Verstoesse")
 
     # --- Config ---
+    print("\n[13] Strategie 'ranking' (Querschnitts-Score, Rangverlust, Mindesthaltedauer)")
+    from alpaca_bot.engine import Engine, EngineConfig, MarketSnapshot, PortfolioState, Position
+
+    rng = np.random.default_rng(2)
+    idx = pd.bdate_range("2018-01-01", periods=600, tz="UTC")
+    bars = {}
+    for i in range(120):
+        c = 40 * np.cumprod(1 + rng.normal(0.0003 * (i % 5), 0.02, 600))
+        bars[f"S{i:03d}"] = pd.DataFrame(
+            {"open": c, "high": c * 1.01, "low": c * 0.99, "close": c,
+             "volume": rng.integers(2_000_000, 5_000_000, 600)}, index=idx)
+    spy = pd.Series(100 * np.cumprod(1 + rng.normal(0.0005, 0.01, 600)), index=idx)
+    snap = MarketSnapshot(as_of=idx[-1], bars=bars, market=spy)
+    eng = Engine(EngineConfig.for_ranking(max_positions=10, min_dollar_volume=1e6))
+    dec = eng.decide(snap, PortfolioState(cash=100_000, equity=100_000))
+    check("Ranking kauft aus dem obersten Dezil, hoechstens max_positions",
+          0 < len(dec) <= 10 and all(d.reasons["rang_pct"] >= 0.9 for d in dec),
+          f"{len(dec)} Kaeufe")
+    check("Score entsteht im Querschnitt (Z-Score-Mix, Perzentil 0..1)",
+          all(0 <= d.reasons["rang_pct"] <= 1 for d in dec) and len(eng._qs) >= 30)
+    schlecht = min(eng._qs, key=lambda s: eng._qs[s]["pct"])
+    alt = PortfolioState(cash=50_000, equity=100_000, positions={
+        schlecht: Position(schlecht, 100, 40.0, idx[-40], 30.0, 999.0, bars_held=30, high_water=40.0)})
+    verk = [d for d in eng.decide(snap, alt) if d.action == "sell"]
+    check("Rangverlust nach Mindesthaltedauer verkauft",
+          len(verk) == 1 and verk[0].reasons["ausstiegsgrund"] == "rangverlust")
+    jung = PortfolioState(cash=50_000, equity=100_000, positions={
+        schlecht: Position(schlecht, 100, 40.0, idx[-5], 30.0, 999.0, bars_held=5, high_water=40.0)})
+    check("Kein Rangverlust-Ausstieg vor der Mindesthaltedauer",
+          not [d for d in eng.decide(snap, jung) if d.action == "sell"])
+    check("Regeln der Strategie vollstaendig protokollierbar",
+          {"min_hold_days", "min_rank_pct", "exit_rank_pct"} <= set(eng.cfg.as_dict()))
+
+    print("\n[14] Risiko-Dach (Drawdown-Sperre, Tagesverlust, Einzahlungen)")
+    from alpaca_bot import risiko
+
+    with tempfile.TemporaryDirectory() as tmp:
+        import datetime as _dt
+        d = risiko.RisikoDach(Path(tmp) / "state.sqlite")
+        t0 = _dt.datetime(2026, 10, 1, 15, 0, tzinfo=_dt.UTC)
+        d.pruefe_konto(100_000, ts=t0)
+        f1 = d.pruefe_konto(94_000, ts=t0 + _dt.timedelta(hours=1))
+        check("Tagesverlust > 5 % bremst neue Kaeufe, keine Vollsperre",
+              not f1.ok and not f1.sperre_aktiv)
+        f2 = d.pruefe_konto(79_000, ts=t0 + _dt.timedelta(days=2))
+        check("Drawdown > 20 % setzt die persistente Vollsperre", not f2.ok and f2.sperre_aktiv)
+        f3 = d.pruefe_konto(96_000, ts=t0 + _dt.timedelta(days=3))
+        check("Erholung loest die Sperre nicht von selbst", f3.sperre_aktiv)
+        d.sperre_loesen(risiko.BESTAETIGUNG)
+        f4 = d.pruefe_konto(96_500, ts=t0 + _dt.timedelta(days=4))
+        check("Sperre nur mit woertlicher Bestaetigung loesbar, Hoechststand neu", f4.ok)
+
     print("\n[12] Konfiguration")
     from alpaca_bot.config import ConfigError, get_settings
 

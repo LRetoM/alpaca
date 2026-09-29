@@ -297,6 +297,27 @@ KATALOG: list[dict] = [
                   "in unruhigen zu kurz.",
         skript="scripts/29_labor_dynamisch.py --panel projekt --min-dollar-volume 25000000 --top-n 30",
     ),
+    dict(
+        hyp_id="HYP-2027-20",
+        prio=1,
+        behauptung="Ein fester ATR-Stop (3 ATR) schadet einem Momentum-Rangportfolio mit 21-63 "
+                   "Tagen Haltedauer: Er verkauft Gewinner in normalen Rueckschlaegen. Rang- und "
+                   "Zeitausstieg allein (Stop nur als Katastrophenschutz >= 5 ATR) liefern hoehere "
+                   "Netto-CAGR bei hoechstens gleichem Drawdown - denn der Drawdown wird vom "
+                   "Regime-Tor und vom Risiko-Dach begrenzt, nicht vom Einzelstop.",
+        quelle="Eigener Replay-Befund scripts/31 (42-60 % aller Ausstiege sind Stops, Engine 6 "
+               "Punkte unter der vektorisierten Messung); Kompendium §3.2 (Zeitausstieg schlaegt "
+               "Prozent-Stop); Kaminski & Lo 2014 ('When Do Stop-Loss Rules Stop Losses?': nur bei "
+               "Momentum-Regimes im INDEX nuetzlich, bei Einzelwerten mit Reversal-Anteil schaedlich)",
+        quelle_typ="eigene_messung", veroeffentlicht=None,
+        operationalisierung="scripts/31 --stop-atr 3 gegen --stop-atr 99 (und 5), gleiche Symbole, gleiche "
+                            "Kosten, gleiche Jahre, auf qlib 2010-2020 und S&P 2016-2026, spaeter Projektcache. "
+                            "Bestehen: ohne Stop CAGR hoeher UND MaxDD nicht mehr als 5 Punkte schlechter. "
+                            "VOR dem Ergebnis registriert (2026-09-29).",
+        erwartung="Ohne Stop +3 bis +6 Punkte CAGR; MaxDD gleich oder leicht hoeher (Regime-Tor faengt "
+                  "den Rest). Stop bei 5 ATR dazwischen.",
+        skript="scripts/31_simulate_ranking.py --stop-atr 99",
+    ),
 ]
 
 

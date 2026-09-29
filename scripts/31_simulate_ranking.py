@@ -67,6 +67,12 @@ def main() -> int:
     ap.add_argument("--slippage-bps", type=float, default=5.0)
     ap.add_argument("--min-dollar-volume", type=float, default=25_000_000)
     ap.add_argument("--ohne-regime", action="store_true")
+    ap.add_argument("--stop-atr", type=float, default=3.0,
+                    help="Stop-Abstand in ATR; 99 = praktisch kein Stop (nur Rang und Zeit)")
+    ap.add_argument("--min-hold", type=int, default=21)
+    ap.add_argument("--max-hold", type=int, default=63)
+    ap.add_argument("--exit-rank", type=float, default=0.50)
+    ap.add_argument("--min-rank", type=float, default=0.90)
     args = ap.parse_args()
 
     t0 = time.time()
@@ -96,7 +102,11 @@ def main() -> int:
         max_positions=args.positions, ranking_weights=weights,
         min_dollar_volume=(args.min_dollar_volume if panel.volume is not None else 0.0),
         max_position_pct=0.05 if args.positions >= 40 else 0.10,
+        stop_atr=args.stop_atr, min_hold_days=args.min_hold, max_hold_days=args.max_hold,
+        exit_rank_pct=args.exit_rank, min_rank_pct=args.min_rank,
     )
+    print(f"  Engine: Stop {args.stop_atr} ATR, Haltedauer {args.min_hold}-{args.max_hold}, "
+          f"Kauf ab Perzentil {args.min_rank}, Ausstieg unter {args.exit_rank}")
     scfg = simulate.SimConfig(initial_cash=args.kapital, spread_bps=args.spread_bps,
                               slippage_bps=args.slippage_bps, log_to_journal=False)
     res = simulate.run(bars, ecfg, scfg, market=spy, verbose=True)
@@ -122,7 +132,7 @@ def main() -> int:
     if not res.trades.empty:
         print("  Ausstiegsgruende:", res.trades["exit_reason"].value_counts().to_dict())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    res.trades.to_csv(OUT_DIR / f"simulate_ranking_{args.panel}.csv", index=False)
+    res.trades.to_csv(OUT_DIR / f"simulate_ranking_{args.panel}_stop{args.stop_atr:g}.csv", index=False)
     print(f"\n  ({time.time() - t0:.0f} s)")
     return 0
 

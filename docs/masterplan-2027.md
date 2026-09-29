@@ -475,6 +475,19 @@ CAGR / −55 % MaxDD; Univ.EW 8,7 %):
 | kombi2 | 21 | kein | 5,1 % | 0,35 | −53 % | 24× |
 | **kombi2** | 21 | **SMA200** | 5,9 % | **0,48** | **−24 %** | 18× |
 | kombi2, Top 20 | 21 | SMA200 | 5,5 % | 0,44 | −25 % | 18× |
+| **kombi2, H=42** | 42 | **SMA200** | **6,1 %** | **0,47** | **−29 %** | **9×** |
+| kombi2 + Vola-Ziel 15 % | 21 | SMA200 | 5,2 % | 0,49 | **−18 %** | 18× |
+| ruhig (nur Volumenfaktor) | 42 | SMA200 | 3,4 % | 0,30 | −39 % | 9× |
+| ear (Sprung-Proxy) | 42 | kein | 7,2 % | 0,43 | −57 % | 12× |
+| ear | 42 | SMA200 | 4,2 % | 0,39 | −31 % | 9× |
+
+Drei Ergänzungen daraus: **42 Tage Haltedauer** halbiert den Umschlag
+gegenüber 21 Tagen bei gleicher oder besserer CAGR (6,1 % gegen 5,9 %);
+das **Vola-Ziel** drückt den Drawdown auf −18 % (SPY −55 %) bei gleicher
+CAGR — die zwei Hebel, die die Kompendium-Rangliste als „garantiert“
+führt (Kosten senken, Größe nach Volatilität), wirken auch hier zuerst;
+und der Volumenfaktor allein reicht nicht (3,4 %), erst die Kombination
+mit Momentum-Konsistenz trägt.
 
 Die Haltedauer-Kurve der kurzen Spur ist eindeutig: **Netto-CAGR steigt
 monoton mit der Haltedauer** (2 Tage −13,6 %, 5 Tage 2,4 %, 10 Tage 4,6 %,
@@ -569,6 +582,46 @@ Drei Lehren:
 **Auf deinem Mac ist das Schritt 0.5** (§8): `29_` auf dem Projektcache mit
 liquidem Universum, Bestehensgrenze wie in HYP-19 (dynamisch ≥ beste feste
 Fassung auf denselben Vorhersagen, OOS-IC je Horizont > 0,01).
+
+### 6.9 Der Replay-Test: die Strategie durch die ECHTE Engine
+
+Die Strategie „ranking“ ist in `signals.build_ranking_frame` und
+`EngineConfig.for_ranking` gebaut (§7) und wurde mit `scripts/31_` durch
+`simulate.run` geschickt — Tag für Tag, mit Positionsgrößen, Stops,
+Mindesthaltedauer, Kurslücken und allen Kosten aus `costs.py`
+(5 bps Spread + 5 bps Slippage je Seite + SEC/FINRA). 600 liquideste
+Symbole, 50 Plätze, Regime-Tor an.
+
+| Panel | Zeitraum | Engine CAGR | Sharpe | MaxDD | SPY | Trades | Ø Halt | Ausstiege |
+|---|---|---|---|---|---|---|---|---|
+| qlib (mit Volumen) | 2010–2020 | **5,2 %** | 0,46 | −30 % | 14,2 % / −34 % | 1.551 | 31 Tage | **42 % Stop**, 37 % Rangverlust, 21 % Zeit |
+| S&P (ohne Volumen) | 2016–2026 | **6,7 %** | 0,57 | **−18 %** | 14,7 % / −34 % | 3.742 | 28 Tage | **60 % Stop**, 21 % Zeit, 19 % Rangverlust |
+
+Zum Vergleich derselbe Score vektorisiert (`22_ --variante ranking_preis`,
+S&P 2015–2026, Top 50, 20 bps): **12,9 %** mit Regime, 18,0 % ohne. Die
+Engine liegt also **6 Punkte unter der vektorisierten Messung** — und der
+Replay-Test hat damit genau das getan, wofür er da ist: eine Lücke
+gefunden. Sie liegt nicht im Signal (Trefferquote 35–45 % bei Ø Gewinn
++10–13 % gegen Ø Verlust −5 bis −6,5 %, Erwartungswert **+1,1–1,3 % je
+Trade netto** — das ist ein gesundes, rechtsschiefes Profil), sondern in
+der **Ausstiegsregel**: Der 3-ATR-Stop löst 42–60 % aller Ausstiege aus.
+Bei einem Momentum-Wert mit 2,5 % ATR sind 3 ATR ein Rückschlag von 7,5 % —
+den macht fast jeder Gewinner irgendwann in 63 Tagen, und der Stop
+verkauft ihn genau dann. Das Kompendium (§3.2) sagt es seit dem Sommer:
+Zeit- und Regelausstiege schlagen bei Momentum den festen Stop.
+
+Die Simulationen ohne Stop (Rang und Zeit entscheiden, Stop nur als
+Katastrophenschutz bei 99 ATR) laufen; Ergebnis folgt in dieser Tabelle.
+Für die Engine-Voreinstellung heißt das schon jetzt: **Stop weit (≥ 5 ATR)
+oder aus, Risiko liegt im Rang-Ausstieg, im Regime-Tor und im Risiko-Dach.**
+
+Zweiter Befund aus demselben Vergleich: Der Score-Kandidat **v2** (rohes
+12-1-Momentum + Konsistenz + halbes ruhiges Volumen) bringt auf dem S&P-
+Panel 16,2 % mit Regime (23,2 % ohne) gegen 12,9 % für die Fassung mit
+vola-skaliertem Momentum — bei etwas höherem Drawdown (−35 % gegen −31 %).
+Der Qlib-Gegenlauf entscheidet, welche Gewichte die Engine bekommt; die
+Auswahl zählt im Versuchszähler (Schwelle 3,1 Sigma), und die Bestätigung
+auf deinem Cache ist Pflicht.
 
 ### 6.6 Selbsttests
 
